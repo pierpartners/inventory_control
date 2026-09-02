@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block titulo %}Itens{% endblock %}
+{% block cabecalho %}Itens{% endblock %}
+{% block subcabecalho %}o resultado do modelo item a item — clique em qualquer linha para abrir o dossiê{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ filtros -->
+<div class="painel mb14">
+  <div class="painel-int aperto">
+    <div class="filtros">
+      <div class="busca cresce">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="q" placeholder="Buscar por nome, SKU ou família…">
+      </div>
+
+      <select id="f-familia">
+        <option value="">Todas as famílias</option>
+        {% for f in familias %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+      </select>
+
+      <div class="seg" id="f-abc">
+        <button class="on" data-v="">ABC</button>
+        <button data-v="A">A</button><button data-v="B">B</button><button data-v="C">C</button>
+      </div>
+
+      <div class="seg" id="f-regime">
+        <button class="on" data-v="">Todos regimes</button>
+        <button data-v="EOQ">EOQ + normal</button>
+        <button data-v="marginal">Unidade marginal</button>
+      </div>
+
+      <div class="seg" id="f-risco">
+        <button class="on" data-v="">Todos</button>
+        <button data-v="rop">Abaixo do ponto de pedido</button>
+        <button data-v="comprar">Na compra de hoje</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ agregados da seleção -->
+<div class="gr gr-5 mb14">
+  <div class="painel metrica">
+    <div class="rotulo">Itens na seleção</div>
+    <div class="valor md" id="a-itens">–</div>
+    <div class="nota">de {{ linhas|length }} no catálogo</div>
+  </div>
+  <div class="painel metrica am">
+    <div class="rotulo">Capital imobilizado</div>
+    <div class="valor md"><span class="pre">R$</span><span id="a-capital">–</span></div>
+    <div class="nota">na política atual do modelo</div>
+  </div>
+  <div class="painel metrica mt">
+    <div class="rotulo">Lucro bruto anual</div>
+    <div class="valor md"><span class="pre">R$</span><span id="a-lucro">–</span></div>
+    <div class="nota">retorno de <b id="a-retorno">–</b> por real parado</div>
+  </div>
+  <div class="painel metrica cr">
+    <div class="rotulo">Lucro perdido por ruptura</div>
+    <div class="valor md"><span class="pre">R$</span><span id="a-perdido">–</span></div>
+    <div class="nota">nos {{ exec.dias }} dias de histórico</div>
+  </div>
+  <div class="painel metrica">
+    <div class="rotulo">Abaixo do ponto de pedido</div>
+    <div class="valor md" id="a-rop">–</div>
+    <div class="nota">nível de serviço médio <b id="a-ns">–</b></div>
+  </div>
+</div>
+
+<!-- ============================================ tabela -->
+<div class="painel">
+  <div class="painel-int rente">
+    <div class="rolo">
+      <table class="tb" id="tb-itens">
+        <thead><tr>
+          <th>Item</th>
+          <th>Classe</th>
+          <th>Regime</th>
+          <th class="n">Demanda/dia</th>
+          <th class="n">CV</th>
+          <th class="n">Posição vs ponto de pedido</th>
+          <th class="n">Lote</th>
+          <th class="n">Segurança</th>
+          <th class="n">Nível de serviço</th>
+          <th class="n">Cobertura</th>
+          <th class="n">Giro</th>
+          <th class="n">Capital</th>
+          <th class="n">Lucro/ano</th>
+          <th class="n">Perdido</th>
+          <th class="n">Risco</th>
+        </tr></thead>
+        <tbody>
+        {% for r in linhas %}
+          <tr class="clicavel" data-sku="{{ r.sku }}"
+              data-familia="{{ r.familia }}" data-abc="{{ r.curva_abc }}"
+              data-regime="{{ 'marginal' if 'marginal' in r.regime else 'EOQ' }}"
+              data-rop="{{ 1 if (r.posicao_estoque or 0) <= r.ponto_de_pedido else 0 }}"
+              data-comprar="{{ 1 if r.decisao == 'COMPRAR AGORA' else 0 }}"
+              data-capital="{{ r.capital_imobilizado }}" data-lucro="{{ r.lucro_bruto_ano }}"
+              data-perdido="{{ r.lucro_perdido_ruptura }}" data-ns="{{ r.nivel_servico }}">
+            <td class="nome forte">{{ r.item }}
+              <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
+            <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
+            <td class="fraco pequeno">{{ 'Unid. marginal' if 'marginal' in r.regime else 'EOQ + normal' }}</td>
+            <td class="n">{{ r.demanda_media_dia|n(2) }}</td>
+            <td class="n fraco">{{ r.cv_diario|n(2) }}</td>
+            <td class="n" data-v="{{ ((r.posicao_estoque or 0) / (r.ponto_de_pedido or 1))|round(4) }}"
+                data-pos="{{ r.posicao_estoque or 0 }}" data-r="{{ r.ponto_de_pedido }}"
+                data-max="{{ r.estoque_maximo }}"></td>
+            <td class="n">{{ r.lote_compra|n }}</td>
+            <td class="n fraco">{{ r.estoque_seguranca|n }}</td>
+            <td class="n" data-v="{{ r.nivel_servico }}">{{ r.nivel_servico|pct(1) }}</td>
+            <td class="n fraco">{{ r.cobertura_dias|n(0) }}<span class="suf">d</span></td>
+            <td class="n fraco">{{ r.giro_ano|n(1) }}×</td>
+            <td class="n" data-v="{{ r.capital_imobilizado }}"><span class="pre">R$</span>{{ r.capital_imobilizado|n }}</td>
+            <td class="n" data-v="{{ r.lucro_bruto_ano }}"><span class="pre">R$</span>{{ r.lucro_bruto_ano|curto }}</td>
+            <td class="n" data-v="{{ r.lucro_perdido_ruptura }}">{% if r.lucro_perdido_ruptura > 0 %}<span class="c-cr"><span class="pre">R$</span>{{ r.lucro_perdido_ruptura|curto }}</span>{% else %}<span class="t4">–</span>{% endif %}</td>
+            <td class="n" data-v="{{ r.risco_de_faltar or 0 }}" data-risco="{{ r.risco_de_faltar or 0 }}"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script>
+(function () {
+  document.querySelectorAll("td[data-pos]").forEach(function (td) {
+    td.innerHTML = N.barraPosicao(+td.dataset.pos, +td.dataset.r, +td.dataset.max);
+  });
+  document.querySelectorAll("td[data-risco]").forEach(function (td) {
+    td.innerHTML = N.seloRisco(+td.dataset.risco);
+  });
+
+  var f = { familia: "", abc: "", regime: "", risco: "" };
+
+  function agregar(vis) {
+    var cap = 0, luc = 0, per = 0, rop = 0, ns = 0;
+    vis.forEach(function (tr) {
+      cap += +tr.dataset.capital || 0;
+      luc += +tr.dataset.lucro || 0;
+      per += +tr.dataset.perdido || 0;
+      rop += +tr.dataset.rop || 0;
+      ns += +tr.dataset.ns || 0;
+    });
+    var n = vis.length || 1;
+    document.getElementById("a-itens").textContent = vis.length;
+    document.getElementById("a-capital").textContent = N.curto(cap);
+    document.getElementById("a-lucro").textContent = N.curto(luc);
+    document.getElementById("a-perdido").textContent = N.curto(per);
+    document.getElementById("a-retorno").textContent = cap > 0 ? N.num(luc / cap, 1) + "×" : "–";
+    document.getElementById("a-rop").textContent = rop;
+    document.getElementById("a-ns").textContent = N.pct(ns / n, 1);
+  }
+
+  var motor = N.tabela("#tb-itens", {
+    busca: "#q",
+    filtro: function (tr) {
+      if (f.familia && tr.dataset.familia !== f.familia) return false;
+      if (f.abc && tr.dataset.abc !== f.abc) return false;
+      if (f.regime && tr.dataset.regime !== f.regime) return false;
+      if (f.risco === "rop" && tr.dataset.rop !== "1") return false;
+      if (f.risco === "comprar" && tr.dataset.comprar !== "1") return false;
+      return true;
+    },
+    aoFiltrar: agregar
+  });
+
+  document.getElementById("f-familia").addEventListener("change", function () {
+    f.familia = this.value; motor.aplicar();
+  });
+  [["f-abc", "abc"], ["f-regime", "regime"], ["f-risco", "risco"]].forEach(function (par) {
+    var el = document.getElementById(par[0]);
+    el.addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b) return;
+      el.querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
+      b.classList.add("on");
+      f[par[1]] = b.dataset.v;
+      motor.aplicar();
+    });
+  });
+
+  document.querySelector("#tb-itens tbody").addEventListener("click", function (e) {
+    var tr = e.target.closest("tr[data-sku]");
+    if (tr) abrirItem(tr.dataset.sku);
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+{
+  "periodo_revisao_dias": 7,
+  "taxa_manutencao_ano": 0.25,
+  "custo_por_pedido": 185.0,
+  "fator_perda_ruptura": 0.85,
+  "nivel_servico_min": 0.8,
+  "nivel_servico_max": 0.995,
+  "dias_por_ano": 365,
+  "corte_curva_a": 0.8,
+  "corte_curva_b": 0.95,
+  "corte_xyz_x": 1.6,
+  "corte_xyz_y": 2.8,
+  "teto_capital": 2000000.0,
+  "teto_compra_ciclo": 300000.0,
+  "limiar_giro_baixo": 20.0,
+  "perda_encalhe": 0.04,
+  "aplicar_teto_capital": true,
+  "corrigir_censura": true,
+  "imputar_dias_censurados": true,
+  "respeitar_lote_minimo": false
+}

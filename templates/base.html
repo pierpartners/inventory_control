@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Núcleo{% endblock %} · Elevato</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ est('nucleo.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23F2A93B'/><g fill='%23140F06'><rect x='8' y='19' width='16' height='4' rx='1.4'/><rect x='10' y='13' width='12' height='4' rx='1.4'/><rect x='12' y='7' width='8' height='4' rx='1.4'/></g></svg>">
+  {% block cabeca %}{% endblock %}
+</head>
+<body>
+<div class="casca">
+
+  <nav class="trilho">
+    <div class="marca">
+      <div class="marca-glifo">
+        <svg width="17" height="17" viewBox="0 0 32 32" fill="#140F06">
+          <rect x="6" y="20" width="20" height="4.4" rx="1.5"/>
+          <rect x="8.5" y="13.4" width="15" height="4.4" rx="1.5"/>
+          <rect x="11" y="6.8" width="10" height="4.4" rx="1.5"/>
+        </svg>
+      </div>
+      <div class="marca-txt">
+        <div class="marca-nome">Núcleo</div>
+        <div class="marca-sub">Elevato</div>
+      </div>
+    </div>
+
+    <div class="menu">
+      <div class="menu-grupo">
+        <div class="menu-titulo">Decidir</div>
+        <a href="/painel" class="{{ 'on' if pagina == 'painel' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l3 7 4-16 3 9h4"/></svg>
+          Painel
+        </a>
+        <a href="/plano" class="{{ 'on' if pagina == 'plano' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h13M3 12h9M3 18h6"/><path d="M17 14l3 3 4-5"/></svg>
+          Plano de compra
+        </a>
+      </div>
+
+      <div class="menu-grupo">
+        <div class="menu-titulo">Consultar</div>
+        <a href="/itens" class="{{ 'on' if pagina == 'itens' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></svg>
+          Itens
+          {% if exec %}<span class="menu-conta">{{ exec.skus }}</span>{% endif %}
+        </a>
+        <a href="/conferencia" class="{{ 'on' if pagina == 'conferencia' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h9a2 2 0 012 2v12a2 2 0 01-2 2H9"/><path d="M5 8h8M5 12h8M5 16h5"/><path d="M16 11l1.6 1.6L21 9"/></svg>
+          Conferência
+        </a>
+        <a href="/dados" class="{{ 'on' if pagina == 'dados' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg>
+          Dados
+        </a>
+      </div>
+
+      <div class="menu-grupo">
+        <div class="menu-titulo">Entender e ajustar</div>
+        <a href="/metodologia" class="{{ 'on' if pagina == 'metodologia' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5.2-5.2 2 2-5.2z"/></svg>
+          Metodologia
+        </a>
+        <a href="/parametros" class="{{ 'on' if pagina == 'parametros' }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+          Parâmetros
+        </a>
+      </div>
+    </div>
+
+    <div class="trilho-pe">
+      {% if exec %}
+        <span class="pulso"></span>Execução <span class="num">{{ exec.em }}</span><br>
+        <span class="t4">{{ exec.dias }} dias · motor {{ motor_dados }}</span>
+      {% else %}
+        <span class="t4">Sem execução · rode o pipeline</span>
+      {% endif %}
+    </div>
+  </nav>
+
+  <main class="palco">
+    <header class="crista">
+      <div class="crista-tit">
+        <h1>{% block cabecalho %}{% endblock %}</h1>
+        <div class="sub">{% block subcabecalho %}{% endblock %}</div>
+      </div>
+      <div class="crista-dir">
+        {% block acoes %}{% endblock %}
+        {% if exec %}
+        <span class="selo-crista" title="Posição de estoque usada no plano">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5D6C7C" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          Posição <span class="num">{{ exec.posicao }}</span>
+        </span>
+        <span class="selo-crista" title="Prêmio de escassez do capital resolvido nesta execução">
+          λ <span class="num">{{ '%.3f'|format(exec.lam) }}</span>
+        </span>
+        {% endif %}
+      </div>
+    </header>
+
+    <div class="corpo {% block classe_corpo %}{% endblock %}">
+      {% block conteudo %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="{{ est('nucleo.js') }}"></script>
+{% block rodape %}{% endblock %}
+</body>
+</html>

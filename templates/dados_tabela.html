@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block titulo %}{{ nome }}{% endblock %}
+{% block cabecalho %}{{ nome }}{% endblock %}
+{% block subcabecalho %}{{ familia }} · {{ total|n }} linhas · {{ colunas|length }} colunas{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+{% block acoes %}
+  <a href="/dados" class="btn">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    Todas as tabelas
+  </a>
+{% endblock %}
+
+{% block conteudo %}
+
+<div class="painel">
+  <div class="painel-cab">
+    <h2>Página {{ pg }} de {{ paginas }}</h2>
+    <span class="dica">{{ desc }}</span>
+    <div class="dir seg">
+      {% if pg > 1 %}<a href="/dados/{{ nome }}?pg=1">« início</a>
+        <a href="/dados/{{ nome }}?pg={{ pg - 1 }}">anterior</a>{% endif %}
+      <a class="on">{{ pg }}</a>
+      {% if pg < paginas %}<a href="/dados/{{ nome }}?pg={{ pg + 1 }}">próxima</a>
+        <a href="/dados/{{ nome }}?pg={{ paginas }}">fim »</a>{% endif %}
+    </div>
+  </div>
+  <div class="painel-int rente">
+    <div class="rolo" style="max-height:calc(100vh - 260px)">
+      <table class="tb">
+        <thead><tr>
+          {% for c in colunas %}<th class="{{ 'n' if c in numericas }}">{{ c }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+        {% for linha in linhas %}
+          <tr>
+          {% for v in linha %}
+            {% if v is none %}<td class="t4">–</td>
+            {% elif colunas[loop.index0] in numericas %}
+              <td class="n">{{ v|n(2) if (v is number and v % 1) else v|n(0) }}</td>
+            {% else %}<td>{{ v }}</td>{% endif %}
+          {% endfor %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

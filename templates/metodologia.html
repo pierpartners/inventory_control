@@ -1,0 +1,721 @@
+{% extends "base.html" %}
+{% block titulo %}Metodologia{% endblock %}
+{% block cabecalho %}Como o motor decide a compra{% endblock %}
+{% block subcabecalho %}cinco perguntas, com os números de um produto de verdade — escolha qual{% endblock %}
+
+{% block cabeca %}
+<style>
+  .seletor { position: sticky; top: 60px; z-index: 20; margin-bottom: 22px; }
+  .seletor .painel { background: rgba(17,23,30,.96); border-color: var(--linha); }
+  .trilha { display: flex; gap: 0; margin: 0 0 26px; border-bottom: 1px solid var(--linha-2); overflow-x: auto; }
+  .trilha a { padding: 10px 15px; font-size: 12.5px; color: var(--tinta-3);
+    border-bottom: 2px solid transparent; white-space: nowrap; font-weight: 500; }
+  .trilha a:hover { color: var(--tinta); }
+  .trilha a.on { color: var(--ambar); border-bottom-color: var(--ambar); }
+  .trilha a i { font-family: var(--mono); font-style: normal; color: var(--tinta-4);
+    margin-right: 8px; font-size: 11px; }
+  .estacao { margin-bottom: 46px; scroll-margin-top: 150px; }
+  .pergunta { font-size: 21px; font-weight: 600; letter-spacing: -.025em; line-height: 1.3; }
+  .resposta { font-size: 13px; color: var(--tinta-3); margin-top: 4px; }
+  .curto { font-size: 13.5px; color: var(--tinta-2); line-height: 1.72; }
+  .curto p { margin: 0 0 .8em; }
+  .curto p:last-child { margin-bottom: 0; }
+  .curto b { color: var(--tinta); font-weight: 600; }
+  .curto em { color: var(--ambar); font-style: normal; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ seletor -->
+<div class="seletor">
+  <div class="painel">
+    <div class="painel-int aperto">
+      <div class="filtros">
+        <span class="rotulo" style="flex:0 0 auto">Acompanhando</span>
+        <select id="sel-sku" class="cresce" style="max-width:500px">
+          {% for r in lista %}
+            <option value="{{ r.sku }}" {{ 'selected' if r.sku == sku }}>{{ r.item }}</option>
+          {% endfor %}
+        </select>
+        <span class="pequeno t4">experimente:</span>
+        <button class="btn btn-p" data-sku="{{ sugestoes.giro.sku }}">um produto que gira muito</button>
+        <button class="btn btn-p" data-sku="{{ sugestoes.marginal.sku }}">um caro que gira pouco</button>
+        <button class="btn btn-p" data-sku="{{ sugestoes.censura.sku }}">um que faltou muito</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<nav class="trilha">
+  <a href="#e1" class="on"><i>1</i>O que o cliente queria</a>
+  <a href="#e2"><i>2</i>Quanto sai até chegar</a>
+  <a href="#e3"><i>3</i>Vale a próxima peça?</a>
+  <a href="#e4"><i>4</i>Comparando produtos</a>
+  <a href="#e5"><i>5</i>A fila do caixa</a>
+  <a href="#glossario"><i>?</i>Glossário</a>
+</nav>
+
+<!-- ============================================ 1 -->
+<section class="estacao" id="e1">
+  <div class="pergunta">1. Vender 3 não quer dizer que só 3 pessoas queriam</div>
+  <div class="resposta">nos dias em que o produto faltou, a venda foi zero por falta de mercadoria — não por falta de cliente</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>O sistema registra <b>o que saiu</b>, não <b>o que o mercado queria</b>. Se a
+        prateleira estava vazia, o registro do dia é zero — e uma média que inclua esse zero
+        vai dizer que o produto vende pouco, justamente quando ele está vendendo tanto que
+        acabou.</p>
+        <p>Por isso cada dia é separado em três situações:</p>
+      </div>
+
+      <div class="conceitos">
+        <div class="conceito ok">
+          <div class="t">Teve estoque o dia inteiro</div>
+          <div class="d">O que vendeu <b>é</b> a demanda daquele dia. Único dado confiável.
+            Inclusive quando vendeu zero.</div>
+        </div>
+        <div class="conceito meio">
+          <div class="t">Acabou no meio do dia</div>
+          <div class="d">Vendeu, digamos, 8 peças e zerou. A demanda era <b>pelo menos 8</b> —
+            mas pode ter sido 11, 12. O número registrado é um piso.</div>
+        </div>
+        <div class="conceito ruim">
+          <div class="t">Já começou zerado</div>
+          <div class="d">Ninguém conseguiu comprar. O dia <b>não diz nada</b> sobre demanda —
+            e é jogado fora da conta, em vez de entrar como "vendeu zero".</div>
+        </div>
+      </div>
+
+      <div class="nota-lat aviso mt18" id="x1-nota">–</div>
+    </div>
+
+    <div class="pilha">
+      <div class="painel">
+        <div class="painel-cab">
+          <h2>Os <span id="x1-dias">–</span> dias deste produto</h2>
+          <span class="dica">cada risquinho é um dia</span>
+        </div>
+        <div class="painel-int">
+          <div class="fita" id="fita"></div>
+          <div class="legenda mt10">
+            <span><i style="background:#2C5A4A"></i>Teve estoque</span>
+            <span><i style="background:var(--ambar)"></i>Acabou no meio</span>
+            <span><i style="background:var(--coral)"></i>Faltou o dia todo</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="painel">
+        <div class="painel-cab">
+          <h2>Quanto esse produto vende por dia, de verdade</h2>
+        </div>
+        <div class="painel-int">
+          <div id="g-censura" class="gfx p"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 2 -->
+<section class="estacao" id="e2">
+  <div class="pergunta">2. Quanto pode sair até a mercadoria nova chegar?</div>
+  <div class="resposta">esse é o único período que a compra de hoje precisa cobrir sozinha</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>Duas esperas se somam. Primeiro, <b>até alguém olhar</b> a lista de compras — se
+        isso acontece toda semana, pode demorar 7 dias. Depois, <b>até o fornecedor
+        entregar</b>.</p>
+        <p>Somando as duas, temos o <em>horizonte</em>: a janela em que a prateleira precisa
+        se defender com o que já tem.</p>
+      </div>
+
+      <div id="linha-tempo"></div>
+
+      <div class="curto mt18 mb14">
+        <p>Sabendo quanto o produto vende por dia, dá para estimar quanto ele deve vender
+        dentro dessa janela:</p>
+      </div>
+      <div class="eq" id="eq-mu"></div>
+
+      <div class="curto mt14">
+        <p>Mas uma média não basta. Alguns ciclos vendem bem mais, outros bem menos. O gráfico
+        ao lado mostra <b>todas as possibilidades e a chance de cada uma</b>.</p>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>O que pode acontecer nessa janela</h2>
+        <span class="dica">altura da barra = chance daquela quantidade</span>
+      </div>
+      <div class="painel-int">
+        <div id="g-dist" class="gfx m"></div>
+        <div class="gr gr-3 mt18" id="percentis"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 3 -->
+<section class="estacao" id="e3">
+  <div class="pergunta">3. A pergunta certa não é "quanto comprar deste produto"</div>
+  <div class="resposta">e sim: vale a pena comprar <strong>mais uma peça</strong>? E depois dela, mais uma?</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>Uma peça só dá lucro se ela <b>vender</b>. E a chance de vender cai a cada peça
+        adicional: a primeira peça do estoque quase certamente sai; a vigésima só sai num
+        período excepcional.</p>
+        <p>Então o motor avalia <b>peça por peça</b>. Para cada uma, dois cenários:</p>
+      </div>
+
+      <div class="conceitos mb14">
+        <div class="conceito ok">
+          <div class="t">Ela vende</div>
+          <div class="d">Você ganha a margem dela. Quanto maior a chance de vender,
+            mais esse ganho pesa.</div>
+        </div>
+        <div class="conceito ruim">
+          <div class="t">Ela encalha</div>
+          <div class="d">Fica parada até o próximo ciclo: você pagou para guardá-la e corre
+            o risco de ela sair de linha, desbotar, mudar de tonalidade.</div>
+        </div>
+      </div>
+
+      <div class="curto mb8"><p>O valor da peça é a média entre os dois cenários,
+        pesada pela chance de cada um:</p></div>
+      <div class="eq" id="eq-valor"></div>
+      <div class="pequeno t4" id="eq-valor-leg" style="margin-top:-4px"></div>
+
+      <div class="nota-lat aviso mt18" id="x3-nota">–</div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>A escada de peças deste produto</h2>
+        <span class="dica">da posição atual para cima</span>
+      </div>
+      <div class="painel-int">
+        <div id="g-escada" class="gfx m"></div>
+        <div class="legenda mt10">
+          <span><i style="background:#37D6A0"></i>vale comprar</span>
+          <span><i style="background:#FF6A5E"></i>não se paga</span>
+          <span><i style="background:#A78BFA"></i>chance de vender</span>
+        </div>
+        <div class="nota-lat mt14" id="x3-escada">–</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 4 -->
+<section class="estacao" id="e4">
+  <div class="pergunta">4. Como comparar uma peça barata com uma de milhares de reais</div>
+  <div class="resposta">tudo vira a mesma medida: quanto cada real investido rende por dia</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>Uma peça cara de margem gorda parece sempre o melhor negócio. Mas ela custa muito
+        mais para comprar e demora muito mais para chegar e girar — <b>prende o dinheiro por
+        muito mais tempo</b>. Enquanto uma peça dessas dá uma volta, o mesmo dinheiro poderia
+        ter dado várias em um produto barato que sai rápido.</p>
+        <p>Para colocar as duas na mesma balança, o valor da peça é dividido por
+        <b>quanto ela custa</b> e por <b>quantos dias ela prende o dinheiro</b>:</p>
+      </div>
+
+      <div class="eq" id="eq-nota"></div>
+
+      <div class="curto mt14">
+        <p>É essa nota — e só ela — que ordena a fila de compra.</p>
+      </div>
+      <div class="nota-lat aviso" id="x4-nota">–</div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Cinco produtos bem diferentes, na mesma régua</h2>
+        <span class="dica">a nota da próxima peça de cada um</span>
+      </div>
+      <div class="painel-int rente">
+        <div class="rolo">
+          <table class="tb" id="tb-comparar">
+            <thead><tr>
+              <th>Produto</th>
+              <th class="n">Custa</th>
+              <th class="n">Margem</th>
+              <th class="n">Dias presos</th>
+              <th class="n">Chance</th>
+              <th class="n">Vale</th>
+              <th class="n">Nota</th>
+            </tr></thead>
+            <tbody><tr><td colspan="7"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 5 -->
+<section class="estacao" id="e5">
+  <div class="pergunta">5. O caixa compra sempre a melhor peça disponível</div>
+  <div class="resposta">e refaz a pergunta a cada peça, até o dinheiro acabar</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>Com todas as peças do catálogo em uma fila única, ordenadas por nota, o motor
+        simplesmente desce a lista comprando.</p>
+        <p>A primeira peça e a segunda podem ser do mesmo produto. A partir de certo ponto,
+        mais uma peça daquele produto já rende menos do que a <b>primeira</b> peça de outro —
+        e a fila troca sozinha. <em>Nenhuma regra de diversificação foi escrita</em>: o rodízio
+        é consequência da chance de vender cair a cada peça.</p>
+        <p>Se um bloco não cabe no dinheiro que sobrou, ele é pulado e o motor tenta o
+        próximo — assim o troco ainda compra peças baratas boas.</p>
+      </div>
+
+      <div class="eq" id="eq-fila"></div>
+
+      <div class="mt18"><a href="/plano" class="btn btn-am">Ver a fila deste ciclo →</a></div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Como o caixa se espalhou neste ciclo</h2>
+        <span class="dica">largura = dinheiro que foi para cada produto</span>
+      </div>
+      <div class="painel-int">
+        <div id="faixa-gasto" style="display:flex;height:44px;border-radius:6px;overflow:hidden;gap:1px"></div>
+        <div class="flex entre pequeno t4 mt6">
+          <span>1ª peça</span><span>última peça comprada</span>
+        </div>
+        <div class="gr gr-2 mt18" id="kv-fila"></div>
+        <div class="nota-lat aviso mt14" id="x5-nota">–</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ glossário -->
+<section class="estacao" id="glossario">
+  <div class="pergunta">Glossário</div>
+  <div class="resposta">cada símbolo que aparece nas contas, com o valor deste produto</div>
+
+  <div class="gr gr-2 mt18">
+    <div class="painel">
+      <div class="painel-cab"><h2>Símbolos</h2></div>
+      <div class="painel-int rente">
+        <table class="glossario" id="tb-glossario"></table>
+      </div>
+    </div>
+
+    <div class="pilha">
+      <div class="painel">
+        <div class="painel-cab"><h2>Duas palavras que confundem</h2></div>
+        <div class="painel-int conceitos">
+          <div class="conceito meio">
+            <div class="t">Demanda ≠ venda</div>
+            <div class="d"><b>Venda</b> é o que saiu do estoque. <b>Demanda</b> é o que o
+              mercado queria comprar. Quando falta produto, a venda é menor que a demanda —
+              e é a demanda que interessa para decidir a compra.</div>
+          </div>
+          <div class="conceito ok">
+            <div class="t">Margem ≠ preço</div>
+            <div class="d"><b>Preço</b> é o que o cliente paga. <b>Margem</b> é o que sobra
+              depois do custo, do frete e dos impostos. É a margem que paga o risco de
+              carregar a peça.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="painel">
+        <div class="painel-cab">
+          <h2>E o "estoque ideal"?</h2>
+          <span class="dica">ele continua existindo, mas não manda na compra</span>
+        </div>
+        <div class="painel-int curto">
+          <p>O modelo também calcula, para cada item, um <b>ponto de pedido</b> (o nível em que
+          vale a pena olhar) e um <b>estoque ideal</b>. Eles servem de alarme e de referência —
+          você os vê na tela de Itens.</p>
+          <p>Mas quem decide o pedido de hoje é a fila de peças. Encher um item até o estoque
+          ideal antes de olhar os outros é justamente o que fazia o dinheiro acabar em poucos
+          produtos.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block rodape %}
+<script>
+(function () {
+  var C = N.COR;
+  var P = {{ {'revisao': p.periodo_revisao_dias, 'encalhe': p.perda_encalhe,
+              'perda_ruptura': p.fator_perda_ruptura, 'taxa': p.taxa_manutencao_ano}|tojson }};
+
+  function id(x) { return document.getElementById(x); }
+  function txt(x, v) { var e = id(x); if (e) e.innerHTML = v; }
+
+  /* caixa de um termo da equacao: nome em portugues, numero, simbolo */
+  function cx(rotulo, valor, simbolo, classe) {
+    return '<div class="cx ' + (classe || "") + '"><div class="r">' + rotulo + "</div>" +
+      '<div class="v">' + valor + "</div>" +
+      (simbolo ? '<div class="s">' + simbolo + "</div>" : "") + "</div>";
+  }
+  function op(s) { return '<div class="op">' + s + "</div>"; }
+
+  /* ============================================ pintura */
+  function pintar(d) {
+    var m = d.item, pl = d.plano || {}, rd = d.resumo_dias, ec = d.economia;
+
+    /* -------- 1. o dado que entra */
+    txt("x1-dias", N.num(rd.total));
+    id("fita").innerHTML = d.dias.map(function (x) {
+      var c = x.estado === "Disponivel" ? "dsp" : (x.estado === "Sem estoque" ? "sem" : "par");
+      return '<i class="' + c + '" title="' + N.data(x.data) + " · " + x.estado +
+        " · vendeu " + N.num(x.vendido) + '"></i>';
+    }).join("");
+
+    var sub = m.subestimacao_ingenua_pct;
+    txt("x1-nota", rd.sem_estoque + rd.ruptura_parcial === 0
+      ? "Este produto <b>nunca faltou</b> nos " + rd.total + " dias. A média simples já " +
+        "estaria certa — a correção não muda nada aqui, e é assim que deve ser."
+      : "Este produto ficou <b>" + rd.sem_estoque + " dias sem nada para vender</b> e " +
+        "<b>" + rd.ruptura_parcial + " dias acabou no meio</b>. Jogando esses dias na média " +
+        "como se fossem venda zero, o produto pareceria vender " +
+        N.num(m.demanda_media_dia_ingenua, 2) + " por dia. Corrigindo, vende " +
+        "<b>" + N.num(m.demanda_media_dia, 2) + "</b> — " +
+        (sub > 0.005 ? "<b>" + N.pct(sub, 0) + " a mais</b> do que parecia."
+                     : "praticamente o mesmo."));
+
+    var est = [
+      { n: "Como parecia\n(contando falta como venda zero)", v: m.demanda_media_dia_ingenua, c: C.coral },
+      { n: "Como é\n(sem os dias cegos, com os truncados corrigidos)", v: m.demanda_media_dia, c: C.menta }
+    ];
+    N.grafico("g-censura", {
+      grid: N.grade({ top: 12, right: 96, bottom: 4, left: 4 }),
+      tooltip: { show: false },
+      xAxis: N.eixoY({ axisLabel: { show: false }, splitLine: { show: false } }),
+      yAxis: N.eixoX({ type: "category", data: est.map(function (e) { return e.n; }),
+        axisLabel: { color: C.tinta2, fontSize: 10.5, lineHeight: 13 },
+        axisLine: { show: false } }),
+      series: [{
+        type: "bar", barWidth: "44%",
+        data: est.map(function (e) {
+          return { value: e.v, itemStyle: { color: N.sombra(e.c, .8), borderRadius: [0, 4, 4, 0] } };
+        }),
+        label: { show: true, position: "right", distance: 9, color: C.tinta,
+          fontFamily: '"JetBrains Mono", monospace', fontSize: 12,
+          formatter: function (x) { return N.num(x.value, 2) + " un/dia"; } }
+      }]
+    });
+
+    /* -------- 2. o horizonte */
+    var L = m.lead_time_dias, R = P.revisao, T = L + R;
+    id("linha-tempo").innerHTML =
+      '<div style="display:flex;height:46px;border-radius:7px;overflow:hidden;border:1px solid var(--linha)">' +
+        '<div style="width:' + (R / T * 100) + '%;background:rgba(85,180,242,.16);' +
+          'border-right:1px solid var(--linha);display:grid;place-items:center;min-width:0">' +
+          '<div class="centro"><div class="mono" style="font-size:15px;color:var(--ceu)">' + R + " dias</div>" +
+          '<div class="pequeno t3">até alguém olhar</div></div></div>' +
+        '<div style="width:' + (L / T * 100) + '%;background:rgba(242,169,59,.16);' +
+          'display:grid;place-items:center;min-width:0">' +
+          '<div class="centro"><div class="mono" style="font-size:15px;color:var(--ambar)">' + L + " dias</div>" +
+          '<div class="pequeno t3">até o fornecedor entregar</div></div></div>' +
+      "</div>" +
+      '<div class="centro mono mt10" style="font-size:13px;color:var(--tinta-2)">' +
+      "horizonte = <b style=\"color:var(--ambar)\">" + T + " dias</b></div>";
+
+    id("eq-mu").innerHTML =
+      cx("vende por dia", N.num(m.demanda_media_dia, 2), "d") + op("×") +
+      cx("dias de horizonte", N.num(T), "H") + op("=") +
+      cx("deve sair na janela", N.num(m.mu_periodo, 1) + " un", "μ (mi)", "res");
+
+    var dd = d.distribuicao;
+    if (dd.x.length) {
+      var faixa = function (i) {
+        return dd.passo > 1
+          ? "Entre " + N.num(dd.x[i]) + " e " + N.num(dd.x[i] + dd.passo - 1) + " peças"
+          : "Exatamente " + N.num(dd.x[i]) + " peças";
+      };
+      N.grafico("g-dist", {
+        grid: N.grade({ top: 20, right: 14, bottom: 30, left: 4 }),
+        tooltip: N.dica(function (ps) {
+          var i = ps[0].dataIndex;
+          return N.dicaTit(faixa(i)) +
+            N.dicaLin(C.violeta, "chance disso acontecer", N.pct(dd.pmf[i], 2)) +
+            N.dicaLin(C.tinta3, "chance de passar disso", N.pct(dd.cauda[i], 1));
+        }),
+        xAxis: N.eixoX({ data: dd.x,
+          name: "peças que podem sair na janela", nameLocation: "middle", nameGap: 27,
+          nameTextStyle: { color: C.tinta4, fontSize: 10 },
+          axisLabel: { color: C.tinta4, fontSize: 9.5,
+            interval: Math.max(0, Math.floor(dd.x.length / 10)) } }),
+        yAxis: N.eixoY({ show: false }),
+        series: [{
+          type: "bar", barWidth: "92%",
+          data: dd.pmf.map(function (v) { return { value: v,
+            itemStyle: { color: N.sombra(C.violeta, .85) } }; }),
+          markLine: { silent: true, symbol: "none",
+            lineStyle: { color: C.ambar, width: 1.6 },
+            label: { color: C.ambar, fontSize: 10.5, position: "insideEndTop",
+              rotate: 0, distance: 5, formatter: "média · " + N.num(m.mu_periodo, 0) },
+            data: [{ xAxis: N.categoriaMaisProxima(dd.x, m.mu_periodo) }] }
+        }]
+      });
+      id("percentis").innerHTML = [
+        ["p50", "metade dos ciclos fica abaixo de"],
+        ["p90", "em 9 de cada 10 ciclos não passa de"],
+        ["p99", "só 1 em 100 ciclos passa de"]
+      ].map(function (q) {
+        return '<div style="border-left:2px solid var(--linha);padding-left:11px">' +
+          '<div class="pequeno t3" style="line-height:1.4;min-height:31px">' + q[1] + "</div>" +
+          '<div class="mono" style="font-size:17px;color:var(--tinta);margin-top:3px">' +
+          N.num(dd.percentis[q[0]], 0) + '<span class="suf">peças</span></div></div>';
+      }).join("");
+    }
+
+    /* -------- 3. a escada */
+    var esc = d.escada || [];
+    var primeira = esc[0];
+    if (primeira) {
+      id("eq-valor").innerHTML =
+        cx("chance de vender", N.pct(primeira.p_vender, 0), "P") + op("×") +
+        cx("margem se vender", "R$ " + N.moeda(ec.margem_se_vender, 2), "M", "ganho") +
+        op("−") +
+        cx("chance de encalhar", N.pct(1 - primeira.p_vender, 0), "1−P") + op("×") +
+        cx("perda se encalhar", "R$ " + N.moeda(ec.perda_se_encalhar, 2), "L", "perda") +
+        op("=") +
+        cx("vale a pena?", "R$ " + N.moeda(primeira.valor, 2), "V",
+           primeira.valor > 0 ? "res" : "res mau");
+      txt("eq-valor-leg",
+        "os números acima são da <b>próxima peça</b> deste produto (a nº " +
+        N.num(primeira.unidade) + ", já que a posição atual é " + N.num(ec.posicao) + ")");
+    }
+
+    var corte = esc.filter(function (x) { return x.vale; }).length;
+    txt("x3-nota",
+      "A <b>margem</b> aqui é R$ " + N.moeda(ec.margem_se_vender, 2) + ": o lucro de R$ " +
+      N.moeda(ec.lucro_por_peca, 2) + " por peça, descontado o pedaço que o cliente esperaria " +
+      "em vez de comprar em outro lugar. A <b>perda</b> de R$ " +
+      N.moeda(ec.perda_se_encalhar, 2) + " é o custo de guardar a peça pelo horizonte (R$ " +
+      N.moeda(ec.custo_carregar, 2) + ") mais o risco de ela sair de linha (R$ " +
+      N.moeda(ec.custo_obsolescencia, 2) + ", que é " + N.pct(P.encalhe, 0) + " do custo).");
+
+    if (esc.length) {
+      N.grafico("g-escada", {
+        grid: N.grade({ top: 20, right: 46, bottom: 30, left: 4 }),
+        tooltip: N.dica(function (ps) {
+          var r = esc[ps[0].dataIndex];
+          return N.dicaTit("A peça nº " + N.num(r.unidade) + " deste produto" +
+              (r.peca > 1 ? " (a " + N.num(r.peca) + "ª a mais)" : " (a próxima a comprar)")) +
+            N.dicaLin(C.violeta, "chance de vender", N.pct(r.p_vender, 1)) +
+            N.dicaLin(C.menta, "ganho se vender", "R$ " + N.moeda(r.ganho, 2)) +
+            N.dicaLin(C.coral, "custo se encalhar", "R$ " + N.moeda(r.custo_encalhe, 2)) +
+            N.dicaLin(r.vale ? C.menta : C.coral, "vale",
+              "R$ " + N.moeda(r.valor, 2) + (r.vale ? " · compra" : " · não compra"));
+        }),
+        xAxis: N.eixoX({ data: esc.map(function (r) { return r.unidade; }),
+          name: "a peça de número tanto, contando o estoque que já existe",
+          nameLocation: "middle", nameGap: 27,
+          nameTextStyle: { color: C.tinta4, fontSize: 10 },
+          axisLabel: { color: C.tinta4, fontSize: 9.5,
+            interval: Math.max(0, Math.floor(esc.length / 12)) } }),
+        yAxis: [
+          N.eixoY({ axisLabel: { color: C.tinta4, fontSize: 9.5,
+            fontFamily: '"JetBrains Mono", monospace',
+            formatter: function (v) { return "R$ " + N.curto(v); } } }),
+          N.eixoY({ position: "right", max: 1, min: 0, splitLine: { show: false },
+            axisLabel: { color: "#6B5B9E", fontSize: 9.5,
+              formatter: function (v) { return Math.round(v * 100) + "%"; } } })
+        ],
+        series: [
+          { name: "vale", type: "bar", barWidth: "72%",
+            data: esc.map(function (r) {
+              return { value: r.valor, itemStyle: { color: N.sombra(
+                r.vale ? C.menta : C.coral, .82) } };
+            }),
+            markLine: { silent: true, symbol: "none",
+              lineStyle: { color: C.tinta4, width: 1, type: [3, 3] },
+              label: { show: false }, data: [{ yAxis: 0 }] } },
+          { name: "chance", type: "line", yAxisIndex: 1,
+            data: esc.map(function (r) { return r.p_vender; }),
+            symbol: "none", smooth: 0.2, lineStyle: { color: C.violeta, width: 1.8 } }
+        ]
+      });
+      var ultimaBoa = corte > 0 ? esc[corte - 1].unidade : 0;
+      txt("x3-escada", corte === 0
+        ? "Nem a próxima peça se paga: a posição atual já cobre o horizonte deste produto."
+        : "A conta continua positiva até a peça <b>nº " + N.num(ultimaBoa) + "</b>. " +
+          "Da próxima em diante a chance de vender já não cobre o risco de encalhe, e o " +
+          "motor para — sozinho, sem nenhum limite escrito à mão." +
+          (esc.length && esc[0].passo > 1
+            ? " <span class='t4'>(o gráfico mostra uma peça a cada " + esc[0].passo + ")</span>"
+            : ""));
+    }
+
+    /* -------- 4. a nota */
+    if (primeira) {
+      id("eq-nota").innerHTML =
+        cx("vale", "R$ " + N.moeda(primeira.valor, 2), "V") + op("÷") +
+        cx("custa a peça", "R$ " + N.moeda(ec.custo_unitario, 2), "c") + op("÷") +
+        cx("dias presos", N.num(m.periodo_protecao_dias), "H") + op("=") +
+        cx("nota", N.num(primeira.nota * 1000, 2), "por R$ 1.000/dia", "res");
+    }
+
+    /* -------- 5. fila (parte do item) */
+    id("kv-fila").innerHTML =
+      '<div><div class="kv"><span class="k">Este produto entrou?</span><span class="v ' +
+        (ec.comprar > 0 ? "mt" : "cr") + '">' +
+        (ec.comprar > 0 ? "sim, " + N.num(ec.comprar) + " peças" : "não") + "</span></div>" +
+      '<div class="kv"><span class="k">Posição hoje</span><span class="v">' +
+        N.num(ec.posicao) + " un</span></div></div>" +
+      '<div><div class="kv"><span class="k">Chance de faltar antes de repor</span>' +
+        '<span class="v cr">' + N.pct(pl.risco_de_faltar || 0, 0) + "</span></div>" +
+      '<div class="kv"><span class="k">Depois desta compra</span><span class="v mt">' +
+        N.pct(pl.risco_apos_compra || 0, 0) + "</span></div></div>";
+
+    /* -------- glossário */
+    var g = [
+      ["d", "", "quanto o produto vende por dia, já corrigido pelos dias em que faltou",
+       N.num(m.demanda_media_dia, 2) + " un/dia"],
+      ["H", "agá", "horizonte: dias até a mercadoria nova chegar (revisão + fornecedor)",
+       N.num(m.periodo_protecao_dias) + " dias"],
+      ["μ", "mi", "quantas peças devem sair dentro do horizonte, em média",
+       N.num(m.mu_periodo, 1) + " un"],
+      ["σ", "sigma", "o quanto isso costuma variar de um ciclo para outro",
+       N.num(m.sd_periodo, 1) + " un"],
+      ["P", "pê", "chance de a peça em questão vender dentro do horizonte",
+       primeira ? N.pct(primeira.p_vender, 0) : "–"],
+      ["M", "eme", "margem que a peça dá se vender",
+       "R$ " + N.moeda(ec.margem_se_vender, 2)],
+      ["L", "ele", "perda se a peça encalhar: guardá-la mais o risco de sair de linha",
+       "R$ " + N.moeda(ec.perda_se_encalhar, 2)],
+      ["c", "cê", "quanto a peça custa para comprar",
+       "R$ " + N.moeda(ec.custo_unitario, 2)],
+      ["V", "vê", "o que a peça vale: ganho provável menos perda provável",
+       primeira ? "R$ " + N.moeda(primeira.valor, 2) : "–"],
+      ["λ", "lambda", "quanto o dinheiro está &quot;caro&quot; por dentro, quando o estoque total " +
+       "precisa caber num teto", "{{ '%.3f'|format(exec.lam) }}"]
+    ];
+    id("tb-glossario").innerHTML = g.map(function (r) {
+      return "<tr><td class=\"sim\">" + r[0] + "</td>" +
+        '<td class="le">' + (r[1] ? "lê-se “" + r[1] + "”" : "") + "</td>" +
+        '<td class="qu">' + r[2] + "</td>" +
+        '<td class="vl">' + r[3] + "</td></tr>";
+    }).join("");
+  }
+
+  /* ============================================ blocos globais */
+  N.buscar("/api/comparar").then(function (d) {
+    var pr = d.produtos;
+    if (!pr.length) return;
+    document.querySelector("#tb-comparar tbody").innerHTML = pr.map(function (x, i) {
+      return '<tr class="' + (i === 0 ? "destaque" : "") + '">' +
+        '<td class="nome forte">' + N.esc(x.item) +
+          '<div class="pequeno t4">' + N.esc(x.familia) + "</div></td>" +
+        '<td class="n"><span class="pre">R$</span>' + N.moeda(x.custo_unitario, 2) + "</td>" +
+        '<td class="n"><span class="pre">R$</span>' + N.moeda(x.margem, 2) + "</td>" +
+        '<td class="n fraco">' + N.num(x.horizonte) + '<span class="suf">dias</span></td>' +
+        '<td class="n">' + N.pct(x.p_vender, 0) + "</td>" +
+        '<td class="n ' + (x.valor > 0 ? "c-mt" : "c-cr") + '"><span class="pre">R$</span>' +
+          N.moeda(x.valor, 2) + "</td>" +
+        '<td class="n forte">' + N.num(x.nota * 1000, 2) + "</td></tr>";
+    }).join("");
+
+    /* a conclusão sai dos próprios dados, não de um exemplo escrito à mão */
+    var campeao = pr[0];
+    var maiorMargem = pr.slice().sort(function (a, b) { return b.margem - a.margem; })[0];
+    var msg;
+    if (campeao.sku === maiorMargem.sku) {
+      msg = "Aqui o produto de maior margem também é o de melhor nota — acontece quando ele " +
+        "é barato e gira rápido. Não é a regra.";
+    } else {
+      msg = "Repare: <b>" + N.esc(maiorMargem.item) + "</b> é o de maior margem " +
+        "(R$ " + N.moeda(maiorMargem.margem, 2) + " por peça), e mesmo assim perde para " +
+        "<b>" + N.esc(campeao.item) + "</b>, de margem R$ " + N.moeda(campeao.margem, 2) + ". " +
+        "O motivo: custa R$ " + N.moeda(maiorMargem.custo_unitario, 2) + " contra R$ " +
+        N.moeda(campeao.custo_unitario, 2) + ", e prende o dinheiro por " +
+        N.num(maiorMargem.horizonte) + " dias contra " + N.num(campeao.horizonte) + ".";
+      if (maiorMargem.valor < 0) {
+        msg += " A conta dele nem fecha positiva: a chance de vender (" +
+          N.pct(maiorMargem.p_vender, 0) + ") não cobre o risco de deixar tanto dinheiro parado.";
+      }
+    }
+    txt("x4-nota", msg);
+  });
+
+  N.buscar("/api/plano/entradas").then(function (d) {
+    var e = d.entradas;
+    if (!e.length) return;
+    var total = e.reduce(function (s, x) { return s + x.investimento; }, 0);
+    id("faixa-gasto").innerHTML = e.map(function (x, i) {
+      return '<div style="width:' + (x.investimento / total * 100).toFixed(3) +
+        "%;background:" + N.corProduto(x.sku) + ';min-width:2px" title="' +
+        N.esc(x.item) + " | entra na peça nº " + N.num(x.entra_na_peca) +
+        " | " + N.num(x.pecas) + " peças" + '"></div>';
+    }).join("");
+
+    var pecas = e.reduce(function (s, x) { return s + x.pecas; }, 0);
+    id("eq-fila").innerHTML =
+      cx("peças avaliadas", N.num({{ exec.unidades }}), "todas do catálogo") + op("→") +
+      cx("melhores compradas", N.num(pecas), "até o caixa acabar") + op("→") +
+      cx("produtos atendidos", N.num(e.length), "sem regra de rodízio", "res");
+
+    txt("x5-nota", "Neste ciclo o dinheiro se espalhou por <b>" + e.length +
+      " produtos</b>. O primeiro leva as peças até a nº <b>" + N.num(e[1] ? e[1].entra_na_peca - 1 : e[0].pecas) +
+      "</b>; a partir daí outro produto passa a ganhar cada disputa.");
+  });
+
+  /* ============================================ navegação */
+  function carregar(sku) {
+    ["g-censura", "g-dist", "g-escada"].forEach(N.espera);
+    N.buscar("/api/item/" + encodeURIComponent(sku)).then(pintar);
+    var u = new URL(location.href);
+    u.searchParams.set("sku", sku);
+    history.replaceState(null, "", u);
+  }
+
+  var sel = id("sel-sku");
+  sel.addEventListener("change", function () { carregar(this.value); });
+  document.querySelectorAll("button[data-sku]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      sel.value = b.dataset.sku;
+      carregar(b.dataset.sku);
+    });
+  });
+
+  var links = Array.prototype.slice.call(document.querySelectorAll(".trilha a"));
+  if ("IntersectionObserver" in window) {
+    var obs = new IntersectionObserver(function (ents) {
+      ents.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        links.forEach(function (a) {
+          a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id);
+        });
+      });
+    }, { rootMargin: "-150px 0px -60% 0px" });
+    document.querySelectorAll("section.estacao").forEach(function (s) { obs.observe(s); });
+  }
+  links.forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      var el = document.querySelector(a.getAttribute("href"));
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
+  carregar("{{ sku }}");
+})();
+</script>
+{% endblock %}

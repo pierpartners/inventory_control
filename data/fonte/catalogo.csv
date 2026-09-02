@@ -1,0 +1,143 @@
+sku,item,familia,unidade,origem,custo_unitario,preco_tabela,peso_unit_kg,lead_time_dias,lote_minimo_compra
+PA-1001,Cantoneira Aluminio 20x20mm Natural 3m,Perfis de Acabamento,BR,Nacional,22.4,45.92,0.62,12,100
+PA-1002,Cantoneira Aluminio 30x30mm Natural 3m,Perfis de Acabamento,BR,Nacional,31.8,63.6,0.94,12,100
+PA-1010,Perfil L Arremate Porcelanato 8mm Anodizado 3m,Perfis de Acabamento,BR,Nacional,27.5,61.88,0.55,15,120
+PA-1011,Perfil L Arremate Porcelanato 10mm Anodizado 3m,Perfis de Acabamento,BR,Nacional,30.1,67.73,0.61,15,120
+PA-1020,Perfil T Junta Piso 12mm Escovado 3m,Perfis de Acabamento,BR,Nacional,38.9,81.69,0.78,18,100
+PA-1030,"Perfil U Acabamento Drywall 12,5mm 3m",Perfis de Acabamento,BR,Nacional,19.6,45.08,0.48,10,150
+PA-1040,Perfil Tabica Sombra Teto 25mm Branco 3m,Perfis de Acabamento,BR,Nacional,34.7,76.34,0.66,20,80
+PA-1050,Perfil Arremate Curvo Champagne 3m,Perfis de Acabamento,BR,Importado,46.2,108.57,0.71,35,60
+RD-2001,"Rodape Poliestireno 10cm Branco 2,40m",Rodapes e Roda-teto,BR,Nacional,24.3,52.24,1.1,9,120
+RD-2002,"Rodape Poliestireno 15cm Branco 2,40m",Rodapes e Roda-teto,BR,Nacional,33.6,70.56,1.55,9,120
+RD-2010,Rodape Aluminio Embutir 7cm Natural 3m,Rodapes e Roda-teto,BR,Nacional,62.5,128.12,1.24,22,60
+RD-2011,Rodape Aluminio Embutir 10cm Preto Fosco 3m,Rodapes e Roda-teto,BR,Nacional,78.9,165.69,1.62,25,60
+RD-2020,"Roda-teto Poliestireno 5cm Branco 2,00m",Rodapes e Roda-teto,BR,Nacional,14.8,34.04,0.52,9,150
+RD-2030,Cantoneira de Emenda p/ Rodape (par),Rodapes e Roda-teto,CJ,Nacional,4.2,11.34,0.08,9,400
+ND-3001,Nariz de Degrau Aluminio 45mm Natural 3m,Nariz de Degrau,BR,Nacional,41.7,89.66,0.92,16,80
+ND-3002,Nariz de Degrau Aluminio c/ Borracha 55mm 3m,Nariz de Degrau,BR,Nacional,67.4,138.17,1.28,20,60
+ND-3010,Fita Antiderrapante Autoadesiva 50mm x 30m,Nariz de Degrau,RL,Importado,58.3,139.92,1.05,14,50
+JD-4001,Junta de Dilatacao PVC 10mm Cinza 3m,Juntas de Dilatacao,BR,Nacional,11.9,29.16,0.28,10,200
+JD-4002,Junta de Dilatacao Aluminio 20mm 3m,Juntas de Dilatacao,BR,Nacional,49.6,104.16,0.88,18,80
+JD-4010,Junta Estrutural Piso Industrial 30mm 3m,Juntas de Dilatacao,BR,Nacional,138.0,255.3,2.4,30,40
+RG-5001,Ralo Linear Inox 50cm Tampa Oculta,Ralos e Grelhas,PC,Nacional,118.0,241.9,1.85,21,40
+RG-5002,Ralo Linear Inox 70cm Tampa Oculta,Ralos e Grelhas,PC,Nacional,152.0,311.6,2.45,21,40
+RG-5003,Ralo Linear Inox 90cm Tampa Oculta,Ralos e Grelhas,PC,Nacional,189.0,378.0,3.1,21,40
+RG-5010,Grelha Linear Aluminio 100cm Anodizado,Ralos e Grelhas,PC,Importado,214.0,417.3,3.6,35,30
+RG-5020,Ralo Quadrado Inox 15x15cm Click,Ralos e Grelhas,PC,Nacional,46.8,107.64,0.72,18,80
+SP-6001,"Soleira Aluminio 15cm Natural 1,00m",Soleiras e Peitoris,PC,Nacional,58.4,122.64,1.35,20,50
+SP-6002,"Peitoril Aluminio 20cm Branco 1,20m",Soleiras e Peitoris,PC,Nacional,86.2,172.4,2.05,24,40
+SP-6010,Perfil Pingadeira Aluminio 25mm 3m,Soleiras e Peitoris,BR,Nacional,36.1,79.42,0.84,18,80
+PX-7001,Perfil Puxador Gola Aluminio Preto 3m,Perfis Puxador,BR,Importado,72.3,162.67,1.42,28,50
+PX-7002,Perfil Puxador Cava Aluminio Champagne 3m,Perfis Puxador,BR,Importado,81.5,187.45,1.55,32,50
+AC-8001,Nivelador de Piso Cunha - Caixa 100un,Acessorios,CX,Nacional,38.6,98.43,1.2,8,200
+AC-8002,"Nivelador de Piso Base 1,5mm - Caixa 500un",Acessorios,CX,Nacional,62.4,156.0,2.1,8,200
+AC-8010,Espacador Plastico 2mm - Pacote 1000un,Acessorios,PC,Nacional,18.9,51.03,0.9,7,300
+AC-8020,Rejunte Epoxi Acabamento 1kg,Acessorios,PC,Nacional,44.5,97.9,1.05,12,150
+AC-8030,Silicone Neutro Acabamento 280g,Acessorios,PC,Nacional,21.7,53.16,0.32,10,200
+AC-8040,Kit Fixacao Perfil Oculto (parafuso+bucha) 50un,Acessorios,CJ,Nacional,16.4,45.1,0.65,9,250
+PM-9001,"Banheira de Imersao Acrilica 1,70m",Premium,PC,Importado,3180.0,5469.6,62.0,45,1
+PM-9002,"Cuba Esculpida Marmore Sintetico 1,20m",Premium,PC,Nacional,1240.0,2294.0,38.0,30,1
+PM-9003,"Box Frontal Vidro Temperado 8mm 1,20m",Premium,CJ,Nacional,890.0,1691.0,45.0,25,1
+PM-9004,"Painel Ripado Premium Nogueira 2,70m",Premium,PC,Nacional,420.0,840.0,12.0,28,4
+PM-9005,Torneira de Piso Gold Escovado,Premium,PC,Importado,1560.0,2808.0,3.2,40,1
+PM-9006,"Banheira Ofuro Madeira Macica 1,50m",Premium,PC,Importado,5400.0,9072.0,95.0,60,1
+PM-9007,"Banheira Hidromassagem Dupla 1,90m",Premium,PC,Importado,9800.0,15876.0,140.0,75,1
+PA-1001-01,Cantoneira Aluminio 20x20mm Natural 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,25.09,53.49,0.62,16,45
+PA-1001-02,Cantoneira Aluminio 20x20mm Natural 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,27.33,60.51,0.62,20,45
+PA-1001-03,Cantoneira Aluminio 20x20mm Natural 3m - Champagne,Perfis de Acabamento,BR,Importado,29.12,66.86,0.62,24,45
+PA-1001-04,Cantoneira Aluminio 20x20mm Natural 3m - Bronze,Perfis de Acabamento,BR,Importado,30.02,71.39,0.62,28,45
+PA-1002-01,Cantoneira Aluminio 30x30mm Natural 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,35.62,74.09,0.94,16,45
+PA-1002-02,Cantoneira Aluminio 30x30mm Natural 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,38.8,83.81,0.94,20,45
+PA-1002-03,Cantoneira Aluminio 30x30mm Natural 3m - Champagne,Perfis de Acabamento,BR,Importado,41.34,92.6,0.94,24,45
+PA-1002-04,Cantoneira Aluminio 30x30mm Natural 3m - Bronze,Perfis de Acabamento,BR,Importado,42.61,98.86,0.94,28,45
+PA-1010-01,Perfil L Arremate Porcelanato 8mm Anodizado 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,30.8,72.07,0.55,19,54
+PA-1010-02,Perfil L Arremate Porcelanato 8mm Anodizado 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,33.55,81.53,0.55,23,54
+PA-1010-03,Perfil L Arremate Porcelanato 8mm Anodizado 3m - Champagne,Perfis de Acabamento,BR,Importado,35.75,90.09,0.55,27,54
+PA-1010-04,Perfil L Arremate Porcelanato 8mm Anodizado 3m - Bronze,Perfis de Acabamento,BR,Importado,36.85,96.18,0.55,31,54
+PA-1011-01,Perfil L Arremate Porcelanato 10mm Anodizado 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,33.71,78.88,0.61,19,54
+PA-1011-02,Perfil L Arremate Porcelanato 10mm Anodizado 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,36.72,89.23,0.61,23,54
+PA-1011-03,Perfil L Arremate Porcelanato 10mm Anodizado 3m - Champagne,Perfis de Acabamento,BR,Importado,39.13,98.61,0.61,27,54
+PA-1011-04,Perfil L Arremate Porcelanato 10mm Anodizado 3m - Bronze,Perfis de Acabamento,BR,Importado,40.33,105.26,0.61,31,54
+PA-1020-01,Perfil T Junta Piso 12mm Escovado 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,43.57,95.16,0.78,22,45
+PA-1020-02,Perfil T Junta Piso 12mm Escovado 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,47.46,107.64,0.78,26,45
+PA-1020-03,Perfil T Junta Piso 12mm Escovado 3m - Champagne,Perfis de Acabamento,BR,Importado,50.57,118.94,0.78,30,45
+PA-1020-04,Perfil T Junta Piso 12mm Escovado 3m - Bronze,Perfis de Acabamento,BR,Importado,52.13,126.99,0.78,34,45
+PA-1030-01,"Perfil U Acabamento Drywall 12,5mm 3m - Anodizado Fosco",Perfis de Acabamento,BR,Nacional,21.95,52.5,0.48,14,67
+PA-1030-02,"Perfil U Acabamento Drywall 12,5mm 3m - Preto Fosco",Perfis de Acabamento,BR,Nacional,23.91,59.39,0.48,18,67
+PA-1030-03,"Perfil U Acabamento Drywall 12,5mm 3m - Champagne",Perfis de Acabamento,BR,Importado,25.48,65.64,0.48,22,67
+PA-1030-04,"Perfil U Acabamento Drywall 12,5mm 3m - Bronze",Perfis de Acabamento,BR,Importado,26.26,70.06,0.48,26,67
+PA-1040-01,Perfil Tabica Sombra Teto 25mm Branco 3m - Anodizado Fosco,Perfis de Acabamento,BR,Nacional,38.86,88.91,0.66,24,36
+PA-1040-02,Perfil Tabica Sombra Teto 25mm Branco 3m - Preto Fosco,Perfis de Acabamento,BR,Nacional,42.33,100.58,0.66,28,36
+PA-1040-03,Perfil Tabica Sombra Teto 25mm Branco 3m - Champagne,Perfis de Acabamento,BR,Importado,45.11,111.15,0.66,32,36
+PA-1040-04,Perfil Tabica Sombra Teto 25mm Branco 3m - Bronze,Perfis de Acabamento,BR,Importado,46.5,118.67,0.66,36,36
+PA-1050-01,Perfil Arremate Curvo Champagne 3m - Anodizado Fosco,Perfis de Acabamento,BR,Importado,51.74,126.45,0.71,39,27
+PA-1050-02,Perfil Arremate Curvo Champagne 3m - Preto Fosco,Perfis de Acabamento,BR,Importado,56.36,143.04,0.71,43,27
+PA-1050-03,Perfil Arremate Curvo Champagne 3m - Champagne,Perfis de Acabamento,BR,Importado,60.06,158.08,0.71,47,27
+PA-1050-04,Perfil Arremate Curvo Champagne 3m - Bronze,Perfis de Acabamento,BR,Importado,61.91,168.77,0.71,51,27
+RD-2001-01,"Rodape Poliestireno 10cm Branco 2,40m - Amadeirado",Rodapes e Roda-teto,BR,Nacional,28.67,64.11,1.1,14,54
+RD-2001-02,"Rodape Poliestireno 10cm Branco 2,40m - Preto Fosco",Rodapes e Roda-teto,BR,Nacional,30.62,71.1,1.1,18,54
+RD-2001-03,"Rodape Poliestireno 10cm Branco 2,40m - Champagne",Rodapes e Roda-teto,BR,Importado,32.8,78.98,1.1,23,54
+RD-2002-01,"Rodape Poliestireno 15cm Branco 2,40m - Amadeirado",Rodapes e Roda-teto,BR,Nacional,39.65,86.6,1.55,14,54
+RD-2002-02,"Rodape Poliestireno 15cm Branco 2,40m - Preto Fosco",Rodapes e Roda-teto,BR,Nacional,42.34,96.03,1.55,18,54
+RD-2002-03,"Rodape Poliestireno 15cm Branco 2,40m - Champagne",Rodapes e Roda-teto,BR,Importado,45.36,106.69,1.55,23,54
+RD-2010-01,Rodape Aluminio Embutir 7cm Natural 3m - Amadeirado,Rodapes e Roda-teto,BR,Nacional,73.75,157.24,1.24,27,27
+RD-2010-02,Rodape Aluminio Embutir 7cm Natural 3m - Preto Fosco,Rodapes e Roda-teto,BR,Nacional,78.75,174.35,1.24,31,27
+RD-2010-03,Rodape Aluminio Embutir 7cm Natural 3m - Champagne,Rodapes e Roda-teto,BR,Importado,84.38,193.74,1.24,36,27
+RD-2011-01,Rodape Aluminio Embutir 10cm Preto Fosco 3m - Amadeirado,Rodapes e Roda-teto,BR,Nacional,93.1,203.33,1.62,30,27
+RD-2011-02,Rodape Aluminio Embutir 10cm Preto Fosco 3m - Preto Fosco,Rodapes e Roda-teto,BR,Nacional,99.41,225.46,1.62,34,27
+RD-2011-03,Rodape Aluminio Embutir 10cm Preto Fosco 3m - Champagne,Rodapes e Roda-teto,BR,Importado,106.52,250.54,1.62,39,27
+RD-2020-01,"Roda-teto Poliestireno 5cm Branco 2,00m - Amadeirado",Rodapes e Roda-teto,BR,Nacional,17.46,41.76,0.52,14,67
+RD-2020-02,"Roda-teto Poliestireno 5cm Branco 2,00m - Preto Fosco",Rodapes e Roda-teto,BR,Nacional,18.65,46.33,0.52,18,67
+RD-2020-03,"Roda-teto Poliestireno 5cm Branco 2,00m - Champagne",Rodapes e Roda-teto,BR,Importado,19.98,51.47,0.52,23,67
+RD-2030-01,Cantoneira de Emenda p/ Rodape (par) - Amadeirado,Rodapes e Roda-teto,CJ,Nacional,4.96,13.93,0.08,14,180
+RD-2030-02,Cantoneira de Emenda p/ Rodape (par) - Preto Fosco,Rodapes e Roda-teto,CJ,Nacional,5.29,15.43,0.08,18,180
+RD-2030-03,Cantoneira de Emenda p/ Rodape (par) - Champagne,Rodapes e Roda-teto,CJ,Importado,5.67,17.15,0.08,23,180
+ND-3001-01,Nariz de Degrau Aluminio 45mm Natural 3m - Preto Fosco,Nariz de Degrau,BR,Nacional,50.04,111.89,0.92,23,36
+ND-3001-02,Nariz de Degrau Aluminio 45mm Natural 3m - Bronze,Nariz de Degrau,BR,Importado,55.04,127.8,0.92,29,36
+ND-3002-01,Nariz de Degrau Aluminio c/ Borracha 55mm 3m - Preto Fosco,Nariz de Degrau,BR,Nacional,80.88,172.44,1.28,27,27
+ND-3002-02,Nariz de Degrau Aluminio c/ Borracha 55mm 3m - Bronze,Nariz de Degrau,BR,Importado,88.97,196.98,1.28,33,27
+ND-3010-01,Fita Antiderrapante Autoadesiva 50mm x 30m - Preto Fosco,Nariz de Degrau,RL,Importado,69.96,174.62,1.05,21,22
+ND-3010-02,Fita Antiderrapante Autoadesiva 50mm x 30m - Bronze,Nariz de Degrau,RL,Importado,76.96,199.48,1.05,27,22
+JD-4001-01,Junta de Dilatacao PVC 10mm Cinza 3m - Bege,Juntas de Dilatacao,BR,Nacional,12.61,32.13,0.28,14,90
+JD-4001-02,Junta de Dilatacao PVC 10mm Cinza 3m - Preto,Juntas de Dilatacao,BR,Nacional,12.85,34.0,0.28,16,90
+JD-4002-01,Junta de Dilatacao Aluminio 20mm 3m - Bege,Juntas de Dilatacao,BR,Nacional,52.58,114.83,0.88,22,36
+JD-4002-02,Junta de Dilatacao Aluminio 20mm 3m - Preto,Juntas de Dilatacao,BR,Nacional,53.57,121.5,0.88,24,36
+JD-4010-01,Junta Estrutural Piso Industrial 30mm 3m - Bege,Juntas de Dilatacao,BR,Nacional,146.28,281.44,2.4,34,18
+JD-4010-02,Junta Estrutural Piso Industrial 30mm 3m - Preto,Juntas de Dilatacao,BR,Nacional,149.04,297.78,2.4,36,18
+RG-5001-01,Ralo Linear Inox 50cm Tampa Oculta - Escovado,Ralos e Grelhas,PC,Nacional,135.7,289.31,1.85,27,18
+RG-5001-02,Ralo Linear Inox 50cm Tampa Oculta - Black Matte,Ralos e Grelhas,PC,Importado,162.84,360.53,1.85,35,18
+RG-5001-03,Ralo Linear Inox 50cm Tampa Oculta - Gold,Ralos e Grelhas,PC,Importado,179.36,411.81,1.85,43,18
+RG-5002-01,Ralo Linear Inox 70cm Tampa Oculta - Escovado,Ralos e Grelhas,PC,Nacional,174.8,372.67,2.45,27,18
+RG-5002-02,Ralo Linear Inox 70cm Tampa Oculta - Black Matte,Ralos e Grelhas,PC,Importado,209.76,464.41,2.45,35,18
+RG-5002-03,Ralo Linear Inox 70cm Tampa Oculta - Gold,Ralos e Grelhas,PC,Importado,231.04,530.47,2.45,43,18
+RG-5003-01,Ralo Linear Inox 90cm Tampa Oculta - Escovado,Ralos e Grelhas,PC,Nacional,217.35,452.09,3.1,27,18
+RG-5003-02,Ralo Linear Inox 90cm Tampa Oculta - Black Matte,Ralos e Grelhas,PC,Importado,260.82,563.37,3.1,35,18
+RG-5003-03,Ralo Linear Inox 90cm Tampa Oculta - Gold,Ralos e Grelhas,PC,Importado,287.28,643.51,3.1,43,18
+RG-5010-01,Grelha Linear Aluminio 100cm Anodizado - Escovado,Ralos e Grelhas,PC,Importado,246.1,499.09,3.6,41,13
+RG-5010-02,Grelha Linear Aluminio 100cm Anodizado - Black Matte,Ralos e Grelhas,PC,Importado,295.32,621.94,3.6,49,13
+RG-5010-03,Grelha Linear Aluminio 100cm Anodizado - Gold,Ralos e Grelhas,PC,Importado,325.28,710.41,3.6,57,13
+RG-5020-01,Ralo Quadrado Inox 15x15cm Click - Escovado,Ralos e Grelhas,PC,Nacional,53.82,128.74,0.72,24,36
+RG-5020-02,Ralo Quadrado Inox 15x15cm Click - Black Matte,Ralos e Grelhas,PC,Importado,64.58,160.42,0.72,32,36
+RG-5020-03,Ralo Quadrado Inox 15x15cm Click - Gold,Ralos e Grelhas,PC,Importado,71.14,183.26,0.72,40,36
+SP-6001-01,"Soleira Aluminio 15cm Natural 1,00m - Preto Fosco",Soleiras e Peitoris,PC,Nacional,72.42,158.17,1.35,28,22
+SP-6001-02,"Soleira Aluminio 15cm Natural 1,00m - Champagne",Soleiras e Peitoris,PC,Importado,77.67,176.16,1.35,35,22
+SP-6002-01,"Peitoril Aluminio 20cm Branco 1,20m - Preto Fosco",Soleiras e Peitoris,PC,Nacional,106.89,222.33,2.05,32,18
+SP-6002-02,"Peitoril Aluminio 20cm Branco 1,20m - Champagne",Soleiras e Peitoris,PC,Importado,114.65,247.64,2.05,39,18
+SP-6010-01,Perfil Pingadeira Aluminio 25mm 3m - Preto Fosco,Soleiras e Peitoris,BR,Nacional,44.76,102.41,0.84,26,36
+SP-6010-02,Perfil Pingadeira Aluminio 25mm 3m - Champagne,Soleiras e Peitoris,BR,Importado,48.01,114.07,0.84,33,36
+PX-7001-01,Perfil Puxador Gola Aluminio Preto 3m - Escovado,Perfis Puxador,BR,Importado,79.53,186.1,1.42,34,22
+PX-7001-02,Perfil Puxador Gola Aluminio Preto 3m - Branco,Perfis Puxador,BR,Importado,82.42,200.28,1.42,38,22
+PX-7002-01,Perfil Puxador Cava Aluminio Champagne 3m - Escovado,Perfis Puxador,BR,Importado,89.65,214.44,1.55,38,22
+PX-7002-02,Perfil Puxador Cava Aluminio Champagne 3m - Branco,Perfis Puxador,BR,Importado,92.91,230.79,1.55,42,22
+AC-8001-01,Nivelador de Piso Cunha - Caixa 100un - Embalagem Economica,Acessorios,CX,Nacional,33.2,88.05,0.84,11,90
+AC-8001-02,Nivelador de Piso Cunha - Caixa 100un - Profissional,Acessorios,CX,Nacional,49.41,136.08,1.2,15,90
+AC-8002-01,"Nivelador de Piso Base 1,5mm - Caixa 500un - Embalagem Economica",Acessorios,CX,Nacional,53.66,139.52,1.47,11,90
+AC-8002-02,"Nivelador de Piso Base 1,5mm - Caixa 500un - Profissional",Acessorios,CX,Nacional,79.87,215.65,2.1,15,90
+AC-8010-01,Espacador Plastico 2mm - Pacote 1000un - Embalagem Economica,Acessorios,PC,Nacional,16.25,45.63,0.63,10,135
+AC-8010-02,Espacador Plastico 2mm - Pacote 1000un - Profissional,Acessorios,PC,Nacional,24.19,70.54,0.9,14,135
+AC-8020-01,Rejunte Epoxi Acabamento 1kg - Embalagem Economica,Acessorios,PC,Nacional,38.27,87.56,0.735,15,67
+AC-8020-02,Rejunte Epoxi Acabamento 1kg - Profissional,Acessorios,PC,Nacional,56.96,135.34,1.05,19,67
+AC-8030-01,Silicone Neutro Acabamento 280g - Embalagem Economica,Acessorios,PC,Nacional,18.66,47.55,0.224,13,90
+AC-8030-02,Silicone Neutro Acabamento 280g - Profissional,Acessorios,PC,Nacional,27.78,73.51,0.32,17,90
+AC-8040-01,Kit Fixacao Perfil Oculto (parafuso+bucha) 50un - Embalagem Economica,Acessorios,CJ,Nacional,14.1,40.33,0.455,12,112
+AC-8040-02,Kit Fixacao Perfil Oculto (parafuso+bucha) 50un - Profissional,Acessorios,CJ,Nacional,20.99,62.34,0.65,16,112

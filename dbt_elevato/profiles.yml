@@ -1,0 +1,19 @@
+# Dois motores, mesmo SQL. Troque o target no .env (DBT_TARGET).
+elevato:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../data/elevato.duckdb') }}"
+      schema: main
+      threads: 4
+
+    bigquery:
+      type: bigquery
+      method: service-account
+      keyfile: "{{ env_var('GCP_KEYFILE', '') }}"
+      project: "{{ env_var('GCP_PROJECT', '') }}"
+      dataset: "{{ env_var('BQ_DATASET', 'elevato') }}"
+      location: "{{ env_var('BQ_LOCATION', 'southamerica-east1') }}"
+      threads: 8
+      priority: interactive

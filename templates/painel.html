@@ -1,0 +1,546 @@
+{% extends "base.html" %}
+{% block titulo %}Painel{% endblock %}
+{% block cabecalho %}Sala de controle{% endblock %}
+{% block subcabecalho %}{{ k.skus }} itens sob política · posição de {{ exec.posicao }}{% endblock %}
+{% block acoes %}
+  <a href="/plano" class="btn btn-am">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    Abrir plano de compra
+  </a>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ a decisão de hoje -->
+<div class="heroi secao entra">
+  <div class="heroi-bloco">
+    <div class="rotulo rotulo-am">Liberado para comprar hoje</div>
+    <div class="heroi-num am"><span class="pre">R$</span>{{ k.comprar_valor|n }}</div>
+    <div class="heroi-txt">
+      <b>{{ k.pecas_compra|n }} peças</b> de <b>{{ k.comprar_itens }} produtos</b> em
+      {{ k.familias_compra }} famílias. Cada peça foi comprada individualmente, sempre a
+      que mais rende por real e por dia no catálogo inteiro.
+    </div>
+    <div class="faixa" style="margin-top:auto">
+      <i style="width: {{ ((k.comprar_valor / k.teto_ciclo * 100) if k.teto_ciclo else 0)|round(1) }}%"></i>
+    </div>
+    <div class="pequeno t4">
+      {{ ((k.comprar_valor / k.teto_ciclo) if k.teto_ciclo else 0)|pct(0) }} do caixa do ciclo
+      (R$ {{ k.teto_ciclo|curto }}) utilizado
+    </div>
+  </div>
+
+  <div class="div"></div>
+
+  <div class="heroi-bloco">
+    <div class="rotulo">Margem esperada do ciclo</div>
+    <div class="heroi-num mt"><span class="pre">R$</span>{{ k.margem_esperada|n }}</div>
+    <div class="heroi-txt">
+      já descontado o encalhe provável. Repondo ao estoque ideal, o mesmo dinheiro
+      renderia <b>R$ {{ k.rep_ve|curto }}</b> e cobriria só
+      <b>{{ k.rep_itens }} produtos</b>.
+    </div>
+  </div>
+
+  <div class="div"></div>
+
+  <div class="heroi-bloco">
+    <div class="rotulo">Exposição imediata</div>
+    <div class="heroi-num {{ 'cr' if k.sem_estoque_hoje else '' }}">{{ k.abaixo_rop }}</div>
+    <div class="heroi-txt">
+      itens já abaixo do ponto de pedido, dos quais
+      <b class="{{ 'c-cr' if k.sem_estoque_hoje }}">{{ k.sem_estoque_hoje }} estão zerados hoje</b>.
+      Risco médio de faltar antes da reposição: {{ k.risco_medio|pct(0) }}.
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ métricas de política -->
+<div class="gr gr-5 secao">
+  <div class="painel metrica">
+    <div class="rotulo">Capital em estoque</div>
+    <div class="valor md"><span class="pre">R$</span>{{ k.capital|curto }}</div>
+    <div class="faixa"><i class="{{ 'cr' if k.capital > k.teto_capital else '' }}"
+        style="width: {{ [ (k.capital / k.teto_capital * 100) if k.teto_capital else 0, 100 ]|min|round(1) }}%"></i></div>
+    <div class="nota">teto <b>R$ {{ k.teto_capital|curto }}</b> ·
+      {{ ((k.capital / k.teto_capital) if k.teto_capital else 0)|pct(0) }} ocupado</div>
+  </div>
+
+  <div class="painel metrica am">
+    <div class="rotulo">O que o teto custa</div>
+    <div class="valor md"><span class="pre">R$</span>{{ k.custo_do_teto|curto }}<span class="suf">/ano</span></div>
+    <div class="nota">lucro que a política ótima entregaria sem o limite de capital.
+      Preço-sombra λ = <b>{{ '%.3f'|format(k.lam) }}</b></div>
+  </div>
+
+  <div class="painel metrica">
+    <div class="rotulo">Nível de serviço médio</div>
+    <div class="valor md">{{ k.nivel_servico|pct(1) }}</div>
+    <div class="nota">projeção de <b>{{ k.faltas_ano|n }} peças</b> não atendidas no ano</div>
+  </div>
+
+  <div class="painel metrica">
+    <div class="rotulo">Cobertura · giro</div>
+    <div class="valor md">{{ k.cobertura|n(0) }}<span class="suf">dias</span></div>
+    <div class="nota">giro de <b>{{ k.giro|n(1) }}×</b> ao ano, ponderado por capital</div>
+  </div>
+
+  <div class="painel metrica cr">
+    <div class="rotulo">Lucro perdido por ruptura</div>
+    <div class="valor md"><span class="pre">R$</span>{{ k.lucro_perdido|curto }}</div>
+    <div class="nota">nos {{ exec.dias }} dias de histórico ·
+      demanda subestimada em <b>{{ k.subestimacao|pct(0) }}</b> sem a correção</div>
+  </div>
+</div>
+
+<!-- ============================================ risco agora -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Onde o estoque está furando agora</h2>
+    <span class="dica">itens abaixo do ponto de pedido, ordenados pela margem que se perde neste ciclo se nada for reposto</span>
+    <div class="dir"><a href="/plano" class="btn btn-p">Ver a fila completa</a></div>
+  </div>
+  <div class="painel">
+    <div class="painel-int rente">
+      <div class="rolo rolo-medio">
+        <table class="tb" id="tb-alertas">
+          <thead><tr>
+            <th class="nao-ord"></th>
+            <th>Item</th>
+            <th>Classe</th>
+            <th class="n">Posição vs ponto de pedido</th>
+            <th class="n">Cobertura</th>
+            <th class="n">Risco de faltar</th>
+            <th class="n">Margem em risco</th>
+            <th class="n">Repor</th>
+            <th>Decisão</th>
+          </tr></thead>
+          <tbody><tr><td colspan="9"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ concentração -->
+<div class="secao gr gr-32">
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>Concentração do lucro</h2>
+      <span class="dica">curva ABC sobre o lucro potencial do período</span>
+    </div>
+    <div class="painel-int">
+      <div id="g-abc" class="gfx m"></div>
+      <div class="legenda mt10" id="lg-abc"></div>
+    </div>
+  </div>
+
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>ABC × XYZ</h2>
+      <span class="dica">valor × previsibilidade</span>
+    </div>
+    <div class="painel-int">
+      <div id="matriz"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ tempo -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>A operação ao longo do tempo</h2>
+    <span class="dica">quando o estoque cai, a ruptura sobe e a venda para de crescer — não porque a demanda sumiu</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div id="g-tempo" class="gfx g"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ capital por família -->
+<div class="secao gr gr-23">
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>Onde o dinheiro está e onde ele está vazando</h2>
+      <span class="dica">por família</span>
+    </div>
+    <div class="painel-int">
+      <div id="g-familias" class="gfx g"></div>
+    </div>
+  </div>
+
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>Três políticas, mesmo catálogo</h2>
+      <span class="dica">custo anual decomposto</span>
+    </div>
+    <div class="painel-int">
+      <div id="g-politicas" class="gfx m"></div>
+      <div class="mt14" id="resumo-politicas"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ ruptura escondida -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>O que a ruptura escondeu</h2>
+    <span class="dica">peça vendida não é demanda: nos dias sem estoque a venda foi zero por falta de produto, não por falta de cliente</span>
+    <div class="dir"><a href="/metodologia" class="btn btn-p">Como a correção funciona</a></div>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div id="g-perdas" class="gfx g"></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script>
+(function () {
+  var C = N.COR;
+
+  /* ---------------------------------------------------- alertas */
+  N.buscar("/api/painel/alertas?limite=22").then(function (d) {
+    var tb = document.querySelector("#tb-alertas tbody");
+    if (!d.itens.length) {
+      tb.innerHTML = '<tr><td colspan="9"><div class="vazio">Nenhum item abaixo do ponto de pedido. Todo o catálogo está coberto.</div></td></tr>';
+      return;
+    }
+    tb.innerHTML = d.itens.map(function (r, i) {
+      return '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '">' +
+        '<td class="idx">' + (i + 1) + "</td>" +
+        '<td class="nome forte">' + N.esc(r.item) +
+          '<div class="pequeno t4">' + N.esc(r.sku) + " · " + N.esc(r.familia) + "</div></td>" +
+        "<td>" + N.seloClasse(r.classificacao) + "</td>" +
+        '<td class="n" data-v="' + (r.posicao_estoque / Math.max(r.ponto_de_pedido, 1)) + '">' +
+          N.barraPosicao(r.posicao_estoque, r.ponto_de_pedido, r.estoque_maximo) + "</td>" +
+        '<td class="n">' + N.num(r.cobertura_dias, 0) + '<span class="suf">d</span></td>' +
+        '<td class="n" data-v="' + r.risco_de_faltar + '">' + N.seloRisco(r.risco_de_faltar) + "</td>" +
+        '<td class="n" data-v="' + r.margem_em_risco + '" title="falta esperada de ' +
+          N.num(r.falta_ciclo, 1) + ' peças até a reposição chegar">' +
+          '<span class="pre">R$</span>' + N.curto(r.margem_em_risco) + "</td>" +
+        '<td class="n">' + (r.quantidade_a_comprar ? N.num(r.quantidade_a_comprar) : '<span class="t4">–</span>') + "</td>" +
+        "<td>" + N.seloDecisao(r.decisao) + "</td></tr>";
+    }).join("");
+    N.tabela("#tb-alertas", { col: 6, dir: "desc" });
+    tb.addEventListener("click", function (e) {
+      var tr = e.target.closest("tr[data-sku]");
+      if (tr) abrirItem(tr.dataset.sku);
+    });
+  });
+
+  /* ---------------------------------------------------- curva ABC */
+  N.buscar("/api/painel/abc").then(function (d) {
+    var it = d.itens;
+    var pts = it.map(function (r) { return [r.ordem * 100, r.lucro_acumulado_pct * 100]; });
+    pts.unshift([0, 0]);
+    var nA = it.filter(function (r) { return r.curva_abc === "A"; }).length;
+    var nB = it.filter(function (r) { return r.curva_abc === "B"; }).length;
+    var pA = (nA / it.length) * 100, pB = ((nA + nB) / it.length) * 100;
+
+    N.grafico("g-abc", {
+      grid: N.grade({ top: 24, right: 20, bottom: 4 }),
+      tooltip: N.dica(function (ps) {
+        var p = ps[0];
+        var i = Math.max(0, Math.round((p.value[0] / 100) * it.length) - 1);
+        var r = it[i] || {};
+        return N.dicaTit(r.item || "") +
+          N.dicaLin(C.tinta3, "posição na curva", N.num(i + 1) + " de " + it.length) +
+          N.dicaLin(C.ambar, "lucro acumulado", N.pct(p.value[1] / 100, 1)) +
+          N.dicaLin(C.ceu, "lucro do item", "R$ " + N.curto(r.lucro_potencial_periodo));
+      }),
+      xAxis: N.eixoX({ type: "value", max: 100, min: 0,
+        axisLabel: { color: C.tinta3, fontSize: 10.5, formatter: "{value}%",
+          fontFamily: '"JetBrains Mono", monospace' },
+        name: "itens (ordenados por lucro)", nameLocation: "middle", nameGap: 30,
+        nameTextStyle: { color: C.tinta4, fontSize: 10 } }),
+      yAxis: N.eixoY({ max: 100, axisLabel: { color: C.tinta3, fontSize: 10.5,
+        formatter: "{value}%", fontFamily: '"JetBrains Mono", monospace' } }),
+      series: [{
+        type: "line", data: pts, smooth: 0.12, symbol: "none",
+        lineStyle: { color: C.ambar, width: 2.2 },
+        areaStyle: { color: N.area(C.ambar, 0.3) },
+        markLine: {
+          silent: true, symbol: "none",
+          label: { color: C.tinta3, fontSize: 10, rotate: 0, position: "end",
+            distance: [0, 8], formatter: function (p) { return p.name; } },
+          lineStyle: { color: C.tinta4, type: [3, 4], width: 1 },
+          data: [
+            { xAxis: pA, name: "A · " + nA + " itens" },
+            { xAxis: pB, name: "B · " + nB + " itens" }
+          ]
+        }
+      }]
+    });
+    document.getElementById("lg-abc").innerHTML =
+      '<span><i style="background:' + C.ambar + '"></i>' +
+      "<b class='mono'>&nbsp;" + nA + "</b>&nbsp;itens (" + N.pct(nA / it.length, 0) +
+      ") concentram 80% do lucro potencial</span>";
+  });
+
+  /* ---------------------------------------------------- matriz ABC x XYZ */
+  N.buscar("/api/painel/matriz").then(function (d) {
+    var A = ["A", "B", "C"], X = ["X", "Y", "Z"];
+    var mapa = {}, maxCap = 0;
+    d.celulas.forEach(function (c) {
+      mapa[c.curva_abc + c.classe_xyz] = c;
+      if (c.capital > maxCap) maxCap = c.capital;
+    });
+    var h = '<table style="width:100%;border-collapse:separate;border-spacing:4px">';
+    h += '<tr><td></td>' + X.map(function (x) {
+      var d2 = { X: "regular", Y: "moderada", Z: "errática" };
+      return '<td class="centro"><div class="rotulo">' + x + "</div>" +
+        '<div class="pequeno t4">' + d2[x] + "</div></td>";
+    }).join("") + "</tr>";
+    A.forEach(function (a) {
+      var d3 = { A: "80% do lucro", B: "próximos 15%", C: "cauda" };
+      h += '<tr><td style="width:64px"><div class="rotulo">' + a + "</div>" +
+        '<div class="pequeno t4">' + d3[a] + "</div></td>";
+      X.forEach(function (x) {
+        var c = mapa[a + x];
+        if (!c || !c.skus) {
+          h += '<td style="background:var(--painel-2);border:1px solid var(--linha-2);border-radius:6px;height:66px" class="centro"><span class="t4">–</span></td>';
+          return;
+        }
+        var f = maxCap ? c.capital / maxCap : 0;
+        var cor = a === "A" ? "242,169,59" : (a === "B" ? "85,180,242" : "148,165,182");
+        h += '<td class="centro" style="height:66px;border-radius:6px;padding:8px 6px;' +
+          "background:rgba(" + cor + "," + (0.08 + f * 0.34).toFixed(3) + ");" +
+          "border:1px solid rgba(" + cor + "," + (0.2 + f * 0.35).toFixed(3) + ')">' +
+          '<div class="mono" style="font-size:17px;color:var(--tinta);line-height:1.1">' + c.skus + "</div>" +
+          '<div class="pequeno t3" style="margin-top:2px">R$ ' + N.curto(c.capital) + "</div></td>";
+      });
+      h += "</tr>";
+    });
+    h += "</table>";
+    h += '<div class="nota-lat mt14">Quanto mais alto o item na curva <b>ABC</b> e mais à direita no ' +
+      '<b>XYZ</b>, mais o modelo precisa de estoque de segurança: vale muito e é difícil de prever. ' +
+      "A intensidade da célula é o capital parado nela.</div>";
+    document.getElementById("matriz").innerHTML = h;
+  });
+
+  /* ---------------------------------------------------- série temporal */
+  N.buscar("/api/painel/serie").then(function (d) {
+    var dias = d.dias;
+    var eixo = dias.map(function (r) { return r.data.slice(0, 10); });
+    N.grafico("g-tempo", {
+      grid: N.grade({ top: 34, right: 52, bottom: 46, left: 8 }),
+      legend: {
+        top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18,
+        textStyle: { color: C.tinta3, fontSize: 11 },
+        icon: "roundRect",
+        data: ["Peças em estoque (escala própria)", "Peças vendidas",
+               "% do catálogo sem estoque"]
+      },
+      tooltip: N.dica(function (ps) {
+        var s = N.dicaTit(N.dataLonga(ps[0].axisValue));
+        ps.forEach(function (p) {
+          var v = p.seriesName.indexOf("%") >= 0 ? N.pct(p.value / 100, 1) : N.num(p.value);
+          s += N.dicaLin(p.color, p.seriesName, v);
+        });
+        var r = dias[ps[0].dataIndex];
+        if (r) s += N.dicaLin(C.tinta4, "lucro do dia", "R$ " + N.curto(r.lucro));
+        return s;
+      }),
+      xAxis: N.eixoX({
+        data: eixo,
+        axisLabel: { color: C.tinta3, fontSize: 10, margin: 11,
+          formatter: function (v) { return N.data(v); }, interval: Math.floor(eixo.length / 12) }
+      }),
+      yAxis: [
+        /* 0 · peças vendidas por dia — a escala que interessa ler */
+        N.eixoY({ name: "peças/dia", nameGap: 12,
+          axisLabel: { color: C.tinta3, fontSize: 10.5,
+            fontFamily: '"JetBrains Mono", monospace',
+            formatter: function (v) { return N.curto(v); } } }),
+        /* 1 · ruptura, em % do catálogo */
+        N.eixoY({ position: "right", splitLine: { show: false },
+          max: function (v) { return Math.ceil(Math.max(v.max, 4) / 4) * 4; },
+          axisLabel: { color: "#8A6A45", fontSize: 10.5,
+            fontFamily: '"JetBrains Mono", monospace',
+            formatter: function (v) { return N.num(v, 0) + "%"; } } }),
+        /* 2 · saldo total em estoque — só a forma; os números vão no tooltip */
+        N.eixoY({ show: false, splitLine: { show: false } })
+      ],
+      dataZoom: [
+        { type: "inside", start: 0, end: 100 },
+        { type: "slider", height: 16, bottom: 6, borderColor: "transparent",
+          backgroundColor: "#141B23", fillerColor: "rgba(242,169,59,.12)",
+          handleStyle: { color: C.ambarEsc, borderColor: C.ambarEsc },
+          moveHandleStyle: { color: C.linha },
+          dataBackground: { lineStyle: { color: C.tinta4, width: 1 }, areaStyle: { color: "transparent" } },
+          selectedDataBackground: { lineStyle: { color: C.ambarEsc }, areaStyle: { color: "rgba(242,169,59,.1)" } },
+          textStyle: { color: C.tinta4, fontSize: 9 } }
+      ],
+      series: [
+        { name: "Peças em estoque (escala própria)", type: "line", yAxisIndex: 2,
+          data: dias.map(function (r) { return r.pecas_em_estoque; }),
+          smooth: 0.2, symbol: "none", lineStyle: { color: C.ceu, width: 1.5, opacity: .8 },
+          areaStyle: { color: N.area(C.ceu, 0.16) }, z: 1 },
+        { name: "Peças vendidas", type: "bar", data: dias.map(function (r) { return r.pecas; }),
+          itemStyle: { color: N.sombra(C.ambar, 0.7), borderRadius: [2, 2, 0, 0] },
+          barWidth: "62%", z: 2 },
+        { name: "% do catálogo sem estoque", type: "line", yAxisIndex: 1,
+          data: dias.map(function (r) { return r.pct_skus_sem_estoque * 100; }),
+          smooth: 0.25, symbol: "none", lineStyle: { color: C.coral, width: 2 }, z: 3 }
+      ]
+    });
+  });
+
+  /* ---------------------------------------------------- famílias */
+  N.buscar("/api/painel/familias").then(function (d) {
+    var f = d.familias.slice().sort(function (a, b) { return a.capital - b.capital; });
+    N.grafico("g-familias", {
+      grid: N.grade({ left: 8, right: 24, top: 34, bottom: 8 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18, icon: "roundRect",
+        textStyle: { color: C.tinta3, fontSize: 11 } },
+      tooltip: N.dica(function (ps) {
+        var i = ps[0].dataIndex, r = f[i];
+        return N.dicaTit(r.familia) +
+          N.dicaLin(C.ambar, "capital parado", "R$ " + N.curto(r.capital)) +
+          N.dicaLin(C.coral, "lucro perdido por ruptura", "R$ " + N.curto(r.lucro_perdido)) +
+          N.dicaLin(C.ceu, "retorno anual por real", N.num(r.retorno, 1) + "×") +
+          N.dicaLin(C.tinta4, "itens", N.num(r.skus)) +
+          N.dicaLin(C.tinta4, "nível de serviço", N.pct(r.nivel_servico, 1));
+      }),
+      xAxis: N.eixoY({ axisLabel: { color: C.tinta3, fontSize: 10,
+        fontFamily: '"JetBrains Mono", monospace',
+        formatter: function (v) { return N.curto(Math.abs(v)); } } }),
+      yAxis: N.eixoX({ type: "category", data: f.map(function (r) { return r.familia; }),
+        axisLabel: { color: C.tinta2, fontSize: 11, fontFamily: '"Instrument Sans", sans-serif' },
+        axisLine: { show: false } }),
+      series: [
+        { name: "Lucro perdido por ruptura", type: "bar", stack: "t",
+          data: f.map(function (r) { return -r.lucro_perdido; }),
+          itemStyle: { color: N.sombra(C.coral, 0.75), borderRadius: [3, 0, 0, 3] }, barWidth: "62%" },
+        { name: "Capital imobilizado", type: "bar", stack: "t",
+          data: f.map(function (r) { return r.capital; }),
+          itemStyle: { color: N.sombra(C.ambar, 0.85), borderRadius: [0, 3, 3, 0] } }
+      ]
+    });
+  });
+
+  /* ---------------------------------------------------- políticas */
+  N.buscar("/api/painel/politicas").then(function (d) {
+    var p = d.politicas;
+    var rot = p.map(function (r) {
+      if (/atual/i.test(r.politica)) return "Política atual";
+      if (/SEM teto/i.test(r.politica)) return "Ótima sem teto";
+      return "Ótima com teto";
+    });
+    var comps = [
+      { nome: "Manter estoque", campo: "custo_manter_ano", cor: C.ambar },
+      { nome: "Colocar pedidos", campo: "custo_pedir_ano", cor: C.ceu },
+      { nome: "Ruptura", campo: "custo_ruptura_ano", cor: C.coral }
+    ];
+    N.grafico("g-politicas", {
+      grid: N.grade({ top: 32, right: 18, bottom: 4, left: 4 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 14, icon: "roundRect",
+        textStyle: { color: C.tinta3, fontSize: 10.5 } },
+      tooltip: N.dica(function (ps) {
+        var s = N.dicaTit(ps[0].axisValue), t = 0;
+        ps.forEach(function (x) { t += x.value; s += N.dicaLin(x.color, x.seriesName, "R$ " + N.curto(x.value)); });
+        s += N.dicaLin(C.tinta, "custo total", "R$ " + N.curto(t));
+        s += N.dicaLin(C.tinta4, "capital parado", "R$ " + N.curto(p[ps[0].dataIndex].capital_imobilizado));
+        return s;
+      }),
+      xAxis: N.eixoX({ type: "category", data: rot,
+        axisLabel: { color: C.tinta2, fontSize: 10.5, interval: 0 } }),
+      /* min: 0 é obrigatório — em barra empilhada de custo, cortar a base mente */
+      yAxis: N.eixoY({ min: 0, axisLabel: { color: C.tinta3, fontSize: 10,
+        fontFamily: '"JetBrains Mono", monospace',
+        formatter: function (v) { return N.curto(v); } } }),
+      series: comps.map(function (c, i) {
+        return { name: c.nome, type: "bar", stack: "c",
+          data: p.map(function (r) { return r[c.campo]; }),
+          itemStyle: { color: N.sombra(c.cor, 0.85),
+            borderRadius: i === comps.length - 1 ? [3, 3, 0, 0] : 0 },
+          barWidth: "48%" };
+      })
+    });
+
+    var atual = p.find(function (r) { return /atual/i.test(r.politica); });
+    var comTeto = p.find(function (r) { return /COM teto/i.test(r.politica); });
+    var semTeto = p.find(function (r) { return /SEM teto/i.test(r.politica); });
+
+    /* Comparar só o lucro engana: as três políticas usam volumes de capital
+       diferentes. A leitura honesta é capital × faltas × custo, lado a lado. */
+    var h = '<table class="tb" style="font-size:11.5px"><thead><tr>' +
+      '<th class="nao-ord"></th><th class="n">Capital</th><th class="n">Faltas/ano</th>' +
+      '<th class="n">Custo/ano</th></tr></thead><tbody>';
+    [[atual, "Política atual"], [semTeto, "Ótima sem teto"], [comTeto, "Ótima com teto"]]
+      .forEach(function (par) {
+        if (!par[0]) return;
+        h += "<tr><td>" + par[1] + '</td><td class="n">R$ ' + N.curto(par[0].capital_imobilizado) +
+          '</td><td class="n">' + N.curto(par[0].faltas_esperadas_ano) +
+          '</td><td class="n">R$ ' + N.curto(par[0].custo_total_ano) + "</td></tr>";
+      });
+    h += "</tbody></table>";
+
+    if (atual && semTeto) {
+      h += '<div class="nota-lat mt14">Com praticamente o mesmo capital da política atual, o ' +
+        "modelo irrestrito derruba as faltas de <b>" + N.curto(atual.faltas_esperadas_ano) +
+        "</b> para <b>" + N.curto(semTeto.faltas_esperadas_ano) + " peças/ano</b> — é a mesma " +
+        "verba, distribuída onde ela rende.</div>";
+    }
+    if (semTeto && comTeto) {
+      h += '<div class="nota-lat aviso">O teto de capital corta <b>R$ ' +
+        N.curto(semTeto.capital_imobilizado - comTeto.capital_imobilizado) +
+        "</b> de estoque e, em troca, aceita <b>" +
+        N.curto(comTeto.faltas_esperadas_ano - semTeto.faltas_esperadas_ano) +
+        " peças/ano</b> a mais de falta — <b>R$ " +
+        N.curto(semTeto.lucro_liquido_ano - comTeto.lucro_liquido_ano) +
+        " de lucro por ano</b>. É essa a conta a levar para a decisão de caixa.</div>";
+    }
+    document.getElementById("resumo-politicas").innerHTML = h;
+  });
+
+  /* ---------------------------------------------------- perdas */
+  N.buscar("/api/painel/perdas?limite=14").then(function (d) {
+    var it = d.itens.slice().sort(function (a, b) {
+      return a.lucro_perdido_ruptura - b.lucro_perdido_ruptura;
+    });
+    N.grafico("g-perdas", {
+      grid: N.grade({ left: 8, right: 70, top: 34, bottom: 8 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18, icon: "roundRect",
+        textStyle: { color: C.tinta3, fontSize: 11 } },
+      tooltip: N.dica(function (ps) {
+        var r = it[ps[0].dataIndex];
+        return N.dicaTit(r.item) +
+          N.dicaLin(C.coral, "lucro perdido", "R$ " + N.curto(r.lucro_perdido_ruptura)) +
+          N.dicaLin(C.tinta4, "peças não vendidas", N.num(r.venda_perdida_pecas)) +
+          N.dicaLin(C.tinta4, "dias sem estoque", N.num(r.dias_sem_estoque) + " de {{ exec.dias }}") +
+          N.dicaLin(C.ambar, "demanda medida sem correção", N.num(r.demanda_media_dia_ingenua, 2) + " un/dia") +
+          N.dicaLin(C.menta, "demanda real estimada", N.num(r.demanda_media_dia, 2) + " un/dia");
+      }),
+      xAxis: [
+        N.eixoY({ axisLabel: { color: C.tinta3, fontSize: 10,
+          fontFamily: '"JetBrains Mono", monospace',
+          formatter: function (v) { return N.curto(v); } } }),
+        N.eixoY({ show: false, max: 100 })
+      ],
+      yAxis: N.eixoX({ type: "category", data: it.map(function (r) { return r.item; }),
+        axisLabel: { color: C.tinta2, fontSize: 10.5, width: 190, overflow: "truncate",
+          fontFamily: '"Instrument Sans", sans-serif' }, axisLine: { show: false } }),
+      series: [
+        { name: "Lucro perdido no período", type: "bar",
+          data: it.map(function (r) { return r.lucro_perdido_ruptura; }),
+          itemStyle: { color: N.sombra(C.coral, 0.8), borderRadius: [0, 3, 3, 0] }, barWidth: "58%" },
+        { name: "Quanto a demanda era subestimada", type: "scatter", xAxisIndex: 1,
+          data: it.map(function (r) { return Math.min(r.subestimacao_ingenua_pct * 100, 100); }),
+          symbolSize: 9, itemStyle: { color: C.menta },
+          label: { show: true, position: "right", distance: 7, color: C.menta, fontSize: 10,
+            fontFamily: '"JetBrains Mono", monospace',
+            formatter: function (p) { return "+" + Math.round(p.value) + "%"; } } }
+      ]
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block titulo %}Dados{% endblock %}
+{% block cabecalho %}Camadas de dados{% endblock %}
+{% block subcabecalho %}{{ total }} tabelas no warehouse ({{ motor_dados }}) — da extração bruta do ERP até a saída do modelo{% endblock %}
+
+{% block conteudo %}
+
+<div class="painel mb18">
+  <div class="painel-int">
+    <div class="prosa">
+      <p>O caminho do dado é sempre o mesmo, em qualquer motor: o ERP entrega três arquivos brutos,
+      o <strong>dbt</strong> tipa e classifica cada dia em um dos três estados de estoque, agrega em
+      marts, e o <strong>modelo em Python</strong> faz o que SQL não faz bem — iteração, ajuste de
+      distribuição e otimização com restrição — devolvendo as tabelas <code>res_*</code>.</p>
+    </div>
+  </div>
+</div>
+
+{% for familia, tabelas in grupos %}
+<div class="secao">
+  <div class="secao-cab">
+    <h2>{{ familia }}</h2>
+    <span class="dica">{{ tabelas[0].desc }}</span>
+  </div>
+  <div class="gr gr-3">
+    {% for t in tabelas %}
+    <a href="/dados/{{ t.nome }}" class="painel" style="display:block">
+      <div class="painel-int aperto">
+        <div class="flex entre meio">
+          <div class="mono" style="font-size:12.5px;color:var(--tinta)">{{ t.nome }}</div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3E4A57" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+        </div>
+        <div class="pequeno t3 mt6">{{ t.linhas|n }} linhas</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}

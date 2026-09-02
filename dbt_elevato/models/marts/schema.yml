@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: mart_sku_financeiro
+    description: Um registro por item com o resultado financeiro do periodo.
+    columns:
+      - name: sku
+        tests: [unique, not_null]
+  - name: mart_sku_disponibilidade
+    description: Dias utilizaveis, dias sem estoque e rupturas parciais por item.
+    columns:
+      - name: sku
+        tests: [unique, not_null]
+      - name: dias_utilizaveis
+        tests: [not_null]
+  - name: mart_demanda_estatistica
+    description: Estimativa ingenua x estimativa sobre dias utilizaveis.
+    columns:
+      - name: sku
+        tests: [unique, not_null]
+  - name: mart_estoque_diario
+    description: Grade item x dia com posicao e estado do estoque.
+  - name: mart_vendas_diarias
+    description: Serie diaria consolidada da operacao.
+    columns:
+      - name: data
+        tests: [unique, not_null]

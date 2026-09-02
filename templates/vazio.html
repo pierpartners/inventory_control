@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block titulo %}Primeiro uso{% endblock %}
+{% block cabecalho %}Nada processado ainda{% endblock %}
+{% block subcabecalho %}o warehouse existe, mas as tabelas de resultado do modelo não foram gravadas{% endblock %}
+
+{% block conteudo %}
+<div class="painel" style="max-width:720px">
+  <div class="painel-cab"><h2>Rode o pipeline uma vez</h2></div>
+  <div class="painel-int">
+    <div class="prosa">
+      <p>O comando abaixo carrega os CSVs de origem, executa o dbt (staging → intermediário →
+      marts), roda o modelo em Python e grava as tabelas <code>res_*</code> que todas as telas
+      consomem.</p>
+    </div>
+    <div class="formula">python scripts/rodar_pipeline.py</div>
+    <div class="prosa mt14">
+      <p>Depois disso, recarregue esta página. Nas próximas vezes, para reprocessar só o modelo
+      (sem recarregar dados), use o botão <strong>Salvar e recalcular</strong> na tela de
+      Parâmetros.</p>
+    </div>
+    <div class="mt18"><a href="/parametros" class="btn">Ver os parâmetros atuais</a></div>
+  </div>
+</div>
+{% endblock %}

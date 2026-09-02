@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------- segredos
+# o .env aponta o caminho da service account do BigQuery; o modelo dele
+# (.env.example) fica versionado, o real nao
+.env
+credenciais/
+*.pem
+*-service-account.json
+
+# ------------------------------------------------------------ dado gerado
+# reconstruido por `python scripts/rodar_pipeline.py` a partir dos CSVs
+data/*.duckdb
+data/*.duckdb.wal
+data/*.db
+
+# ---------------------------------------------------------- artefatos dbt
+dbt_elevato/target/
+dbt_elevato/logs/
+dbt_elevato/dbt_packages/
+dbt_elevato/.user.yml
+
+# --------------------------------------------------------------- Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ------------------------------------------------------------ ferramentas
+.vscode/
+.idea/
+*.code-workspace
+
+# ---------------------------------------------------- lixo de sistema
+# desktop.ini aparece porque o projeto nasceu dentro de uma pasta OneDrive
+desktop.ini
+Thumbs.db
+.DS_Store
+*~
+*.tmp
+
+# ------------------------------------------------------------- exportacoes
+# CSVs baixados pela propria aplicacao (plano de compra, conferencia)
+plano-de-compra-*.csv
+conferencia-*.csv

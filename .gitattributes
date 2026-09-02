@@ -1,0 +1,14 @@
+# Fim de linha normalizado: LF no repositorio, nativo no checkout.
+# Sem isso, quem clonar no Windows gera diff em arquivo inteiro sem ter
+# mudado nada.
+* text=auto eol=lf
+
+# Binarios e dados: nunca converter
+*.duckdb binary
+*.xlsx   binary
+*.png    binary
+*.msgpack binary
+*.gpickle binary
+
+# CSVs de origem: sao dado, nao codigo - fora do diff por padrao
+data/fonte/*.csv -diff linguist-generated

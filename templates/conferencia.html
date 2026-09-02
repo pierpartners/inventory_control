@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block titulo %}Conferência{% endblock %}
+{% block cabecalho %}Conferência de cálculo{% endblock %}
+{% block subcabecalho %}a fila inteira, peça por peça, com todos os valores que entraram em cada conta{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+{% block acoes %}
+  <a class="btn" id="btn-csv" href="/conferencia.csv">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+    Baixar tudo em CSV
+  </a>
+  <a href="/plano" class="btn">Ver o plano</a>
+{% endblock %}
+
+{% block cabeca %}
+<style>
+  .tb-conf td, .tb-conf th { padding: 6px 9px; }
+  .tb-conf td.n { font-size: 11.5px; }
+  /* nome numa linha so: a tabela tem 16 colunas e a leitura e horizontal */
+  .tb-conf td.nome { white-space: nowrap; max-width: 250px; }
+  .tb-conf td.nome .nm {
+    display: block; max-width: 250px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tb-conf .ponto {
+    display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+    margin-right: 7px; vertical-align: 0;
+  }
+  .pag { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pag a, .pag span.at {
+    padding: 5px 10px; border-radius: 5px; font-size: 12px;
+    border: 1px solid var(--linha); color: var(--tinta-3); background: var(--painel-2);
+  }
+  .pag a:hover { color: var(--tinta); border-color: var(--tinta-4); }
+  .pag span.at { background: var(--ambar); border-color: var(--ambar); color: #14100A; font-weight: 600; }
+  .pag input { width: 72px; text-align: center; }
+  .tb-conf tbody tr td:first-child { border-left: 3px solid transparent; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ resumo -->
+<div class="gr gr-5 mb14">
+  <div class="painel metrica">
+    <div class="rotulo">Linhas na fila</div>
+    <div class="valor md">{{ tot.linhas|n }}</div>
+    <div class="nota">uma por peça candidata, de <b>{{ tot.skus|n }} produtos</b></div>
+  </div>
+  <div class="painel metrica mt">
+    <div class="rotulo">Peças compradas</div>
+    <div class="valor md">{{ tot.pecas_compradas|n }}</div>
+    <div class="nota">de {{ tot.pecas|n }} avaliadas</div>
+  </div>
+  <div class="painel metrica am">
+    <div class="rotulo">Investimento</div>
+    <div class="valor md"><span class="pre">R$</span>{{ tot.investido|n }}</div>
+    <div class="nota">soma da coluna <b>custo</b> das linhas compradas</div>
+  </div>
+  <div class="painel metrica mt">
+    <div class="rotulo">Margem esperada</div>
+    <div class="valor md"><span class="pre">R$</span>{{ tot.margem|n }}</div>
+    <div class="nota">soma da coluna <b>valor</b> das linhas compradas</div>
+  </div>
+  <div class="painel metrica">
+    <div class="rotulo">Mostrando</div>
+    <div class="valor md">{{ fila.total|n }}</div>
+    <div class="nota">linhas no filtro atual · página {{ fila.pg }} de {{ fila.paginas|n }}</div>
+  </div>
+</div>
+
+<!-- ============================================ filtros -->
+<div class="painel mb14">
+  <div class="painel-int aperto">
+    <form class="filtros" method="get" action="/conferencia" id="frm">
+      <div class="busca cresce">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" name="q" value="{{ filtros.q }}" placeholder="Buscar produto, SKU ou família…">
+      </div>
+
+      <select name="sku">
+        <option value="">Todos os produtos ({{ tot.skus|n }})</option>
+        {% for i in itens %}
+          <option value="{{ i.sku }}" {{ 'selected' if i.sku == filtros.sku }}>
+            {{ i.item }} — {{ i.linhas|n }} linhas</option>
+        {% endfor %}
+      </select>
+
+      <select name="decisao">
+        <option value="">Todas as peças</option>
+        <option value="comprada" {{ 'selected' if filtros.decisao == 'comprada' }}>Só as compradas</option>
+        <option value="fora" {{ 'selected' if filtros.decisao == 'fora' }}>Só as que ficaram de fora</option>
+      </select>
+
+      <input type="hidden" name="ordem" value="{{ filtros.ordem }}">
+      <input type="hidden" name="sentido" value="{{ filtros.sentido }}">
+      <button class="btn btn-am" type="submit">Filtrar</button>
+      {% if filtros.q or filtros.sku or filtros.decisao %}
+        <a class="btn" href="/conferencia">Limpar</a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<!-- ============================================ tabela -->
+<div class="painel">
+  <div class="painel-cab">
+    <h2>Cada linha é uma peça candidata</h2>
+    <span class="dica">clique para abrir a conta inteira · as colunas seguem a ordem do cálculo</span>
+    <div class="dir pequeno t4">ordenado por <b class="mono">{{ filtros.ordem }}</b> {{ filtros.sentido }}</div>
+  </div>
+  <div class="painel-int rente">
+    <div class="rolo">
+      <table class="tb tb-conf" id="tb-conf">
+        <thead><tr>
+          <th data-col="posicao_fila" class="n">#</th>
+          <th data-col="item">Produto</th>
+          <th data-col="unidade_de" class="n">Unid. nº</th>
+          <th data-col="mu_periodo" class="n">μ</th>
+          <th data-col="cdf_ate_k_menos_1" class="n">F(k−1)</th>
+          <th data-col="p_vender" class="n">P</th>
+          <th data-col="margem_unit" class="n">M</th>
+          <th data-col="perda_unit" class="n">L</th>
+          <th data-col="ganho_esperado" class="n">P×M</th>
+          <th data-col="custo_esperado" class="n">(1−P)×L</th>
+          <th data-col="valor_esperado" class="n">V</th>
+          <th data-col="custo_unitario" class="n">c</th>
+          <th data-col="horizonte" class="n">H</th>
+          <th data-col="nota" class="n">Nota</th>
+          <th data-col="caixa_acumulado" class="n">Caixa acum.</th>
+          <th data-col="comprar">Decisão</th>
+        </tr></thead>
+        <tbody>
+        {% for r in fila.linhas %}
+          <tr class="clicavel" data-pos="{{ r.posicao_fila }}" data-sku="{{ r.sku }}">
+            <td class="idx">{{ r.posicao_fila|n }}</td>
+            <td class="nome forte" title="{{ r.item }}">
+              <span class="nm"><span class="ponto"></span>{{ r.item }}</span>
+              <span class="pequeno t4">{{ r.sku }}{% if r.quantidade > 1 %} · bloco de {{ r.quantidade }} peças{% endif %}</span></td>
+            <td class="n">{{ r.unidade_de|n }}</td>
+            <td class="n fraco">{{ r.mu_periodo|n(1) }}</td>
+            <td class="n fraco">{{ r.cdf_ate_k_menos_1|n(4) }}</td>
+            <td class="n"><span class="{{ 'c-mt' if r.p_vender >= 0.7 else ('c-am' if r.p_vender >= 0.45 else 'c-cr') }}">{{ r.p_vender|pct(1) }}</span></td>
+            <td class="n fraco">{{ r.margem_unit|n(2) }}</td>
+            <td class="n fraco">{{ r.perda_unit|n(2) }}</td>
+            <td class="n c-mt">{{ r.ganho_esperado|n(2) }}</td>
+            <td class="n c-cr">{{ r.custo_esperado|n(2) }}</td>
+            <td class="n forte">{{ r.valor_esperado|n(2) }}</td>
+            <td class="n fraco">{{ r.custo_unitario|n(2) }}</td>
+            <td class="n fraco">{{ r.horizonte|n(0) }}</td>
+            <td class="n"><b class="c-am">{{ (r.nota * 1000)|n(3) }}</b></td>
+            <td class="n fraco">{{ r.caixa_acumulado|curto }}</td>
+            <td>{% if r.comprar %}<span class="selo selo-mt">Comprada</span>
+                {% else %}<span class="selo selo-nu" title="{{ r.motivo }}">Fora</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        {% if not fila.linhas %}
+          <tr><td colspan="16"><div class="vazio">Nenhuma linha com esse filtro.</div></td></tr>
+        {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="painel-int" style="border-top:1px solid var(--linha-2)">
+    <div class="flex entre meio envolve g14">
+      <div class="pequeno t3">
+        Nota está multiplicada por 1.000 na tabela para caber — o valor cru está no dossiê e no CSV.
+        <b>M</b> = margem se vender · <b>L</b> = perda se encalhar · <b>c</b> = custo unitário ·
+        <b>H</b> = horizonte em dias.
+      </div>
+      <div class="pag" id="pag"></div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('peca.js') }}"></script>
+<script>
+(function () {
+  var F = {{ filtros|tojson }};
+  var PG = { pg: {{ fila.pg }}, paginas: {{ fila.paginas }} };
+
+  /* ---------------------------------------------------- url helpers */
+  function url(mudanca) {
+    var u = new URL("/conferencia", location.origin);
+    var base = { q: F.q, sku: F.sku, decisao: F.decisao,
+                 ordem: F.ordem, sentido: F.sentido, pg: PG.pg };
+    Object.keys(mudanca).forEach(function (k) { base[k] = mudanca[k]; });
+    Object.keys(base).forEach(function (k) {
+      if (base[k] !== "" && base[k] != null) u.searchParams.set(k, base[k]);
+    });
+    return u.pathname + "?" + u.searchParams.toString();
+  }
+
+  /* ordenação: cabeçalho manda o servidor reordenar a fila inteira */
+  document.querySelectorAll("#tb-conf thead th[data-col]").forEach(function (th) {
+    var col = th.dataset.col;
+    th.classList.add("ord");
+    if (col === F.ordem) th.classList.add(F.sentido === "desc" ? "desc" : "asc");
+    if (!th.querySelector(".seta")) th.insertAdjacentHTML("beforeend", '<span class="seta"></span>');
+    th.addEventListener("click", function () {
+      var novo = (col === F.ordem && F.sentido === "asc") ? "desc" : "asc";
+      location.href = url({ ordem: col, sentido: novo, pg: 1 });
+    });
+  });
+
+  /* ---------------------------------------------------- paginação */
+  (function () {
+    var p = PG.pg, n = PG.paginas, h = "";
+    if (n <= 1) { document.getElementById("pag").innerHTML =
+      '<span class="pequeno t4">página única</span>'; return; }
+    if (p > 1) h += '<a href="' + url({ pg: 1 }) + '">« início</a>' +
+                    '<a href="' + url({ pg: p - 1 }) + '">anterior</a>';
+    h += '<span class="at">' + p + " / " + n + "</span>";
+    if (p < n) h += '<a href="' + url({ pg: p + 1 }) + '">próxima</a>' +
+                    '<a href="' + url({ pg: n }) + '">fim »</a>';
+    h += '<input type="number" min="1" max="' + n + '" placeholder="ir para" id="ir">';
+    document.getElementById("pag").innerHTML = h;
+    var ir = document.getElementById("ir");
+    ir.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var v = Math.min(Math.max(parseInt(ir.value, 10) || 1, 1), n);
+      location.href = url({ pg: v });
+    });
+  })();
+
+  /* o CSV sai com o mesmo filtro que está na tela */
+  var csv = document.getElementById("btn-csv");
+  var uc = new URL("/conferencia.csv", location.origin);
+  ["q", "sku", "decisao"].forEach(function (k) { if (F[k]) uc.searchParams.set(k, F[k]); });
+  csv.href = uc.pathname + (uc.searchParams.toString() ? "?" + uc.searchParams.toString() : "");
+
+  /* cor por produto: a mesma em todas as telas, para seguir um item com o olho */
+  document.querySelectorAll("#tb-conf tbody tr[data-sku]").forEach(function (tr) {
+    tr.cells[0].style.borderLeftColor = N.corProduto(tr.dataset.sku);
+    var p = tr.querySelector(".ponto");
+    if (p) p.style.background = N.corProduto(tr.dataset.sku);
+  });
+
+  document.querySelector("#tb-conf tbody").addEventListener("click", function (e) {
+    var tr = e.target.closest("tr[data-pos]");
+    if (tr) abrirPeca(tr.dataset.pos);
+  });
+})();
+</script>
+{% endblock %}

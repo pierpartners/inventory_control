@@ -1,0 +1,598 @@
+{% extends "base.html" %}
+{% block titulo %}Plano de compra{% endblock %}
+{% block cabecalho %}Plano de compra{% endblock %}
+{% block subcabecalho %}o caixa do ciclo alocado peça a peça — cada unidade disputa o dinheiro com todas as outras do catálogo{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+{% block acoes %}
+  <button class="btn" onclick="exportarCSV()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+    Exportar CSV
+  </button>
+  <a href="/conferencia" class="btn">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h9M5 12h9M5 16h6"/><path d="M16 11l1.6 1.6L21 9"/></svg>
+    Conferir peça a peça
+  </a>
+  <a href="/parametros" class="btn">Ajustar o caixa do ciclo</a>
+{% endblock %}
+
+{% block cabeca %}
+<style>
+  .corrida { display: flex; flex-wrap: wrap; align-content: flex-start; }
+  .corrida b {
+    display: grid; place-items: center; border-radius: 3px; cursor: pointer;
+    font-family: var(--mono); font-weight: 500; color: rgba(0,0,0,.62);
+    transition: transform .08s, box-shadow .08s;
+  }
+  .corrida b:hover {
+    transform: scale(1.5); box-shadow: 0 2px 10px rgba(0,0,0,.6);
+    outline: 1.5px solid var(--tinta); position: relative; z-index: 3;
+  }
+  /* o tamanho do bloco acompanha quantas peças estão na tela */
+  .corrida.p1 { gap: 3px; }
+  .corrida.p1 b { width: 26px; height: 26px; font-size: 9px; }
+  .corrida.p2 { gap: 2px; }
+  .corrida.p2 b { width: 15px; height: 15px; font-size: 0; border-radius: 2.5px; }
+  .corrida.p3 { gap: 1.5px; }
+  .corrida.p3 b { width: 10px; height: 10px; font-size: 0; border-radius: 2px; }
+  .corrida.p4 { gap: 1px; }
+  .corrida.p4 b { width: 6px; height: 6px; font-size: 0; border-radius: 1.5px; }
+  .corrida-rolo { max-height: 460px; overflow-y: auto; }
+  .leg-corrida { display: flex; flex-direction: column; gap: 8px;
+    max-height: 420px; overflow-y: auto; padding-right: 4px; }
+  .leg-corrida div { display: flex; align-items: center; gap: 9px; font-size: 11.5px; }
+  .leg-corrida i { width: 11px; height: 11px; border-radius: 3px; flex: 0 0 11px; }
+  .leg-corrida span.nm { color: var(--tinta-2); flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .leg-corrida span.qt { font-family: var(--mono); color: var(--tinta-4); flex: 0 0 auto; }
+  .versus { display: grid; grid-template-columns: 1fr 1px 1fr; gap: 0; align-items: stretch; }
+  .versus .col { padding: 16px 20px; border-radius: 8px; }
+  .versus .col.ganha { background: rgba(55,214,160,.05); }
+  .versus .vs { background: var(--linha); margin: 10px 22px; }
+  .versus .r { font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--tinta-4); font-weight: 700; }
+  .versus .t { font-size: 14px; font-weight: 600; margin: 4px 0 12px; }
+  @media (max-width: 900px) {
+    .versus { grid-template-columns: 1fr; }
+    .versus .vs { height: 1px; margin: 0 20px; }
+  }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ resultado do ciclo -->
+<div class="heroi secao entra">
+  <div class="heroi-bloco">
+    <div class="rotulo rotulo-am">Compra deste ciclo</div>
+    <div class="heroi-num am"><span class="pre">R$</span>{{ resumo.investimento|n }}</div>
+    <div class="heroi-txt">
+      <b>{{ resumo.pecas|n }} peças</b> de <b>{{ resumo.itens }} produtos diferentes</b>,
+      em {{ resumo.familias }} famílias. Sobram R$ {{ resumo.sobra|n }} do caixa
+      de R$ {{ resumo.teto|curto }}.
+    </div>
+    <div class="faixa" style="margin-top:auto">
+      <i style="width: {{ [ (resumo.investimento / resumo.teto * 100) if resumo.teto else 0, 100 ]|min|round(1) }}%"></i>
+    </div>
+  </div>
+
+  <div class="div"></div>
+
+  <div class="heroi-bloco">
+    <div class="rotulo">Margem esperada</div>
+    <div class="heroi-num mt"><span class="pre">R$</span>{{ resumo.valor_liquido|n }}</div>
+    <div class="heroi-txt">
+      já descontando o encalhe provável e o custo de abrir {{ resumo.itens }} linhas de pedido.
+      <b>{{ resumo.retorno|pct(1) }}</b> de retorno sobre o capital do ciclo.
+    </div>
+  </div>
+
+  <div class="div"></div>
+
+  <div class="heroi-bloco">
+    <div class="rotulo">Peças com menos de 50% de chance de vender</div>
+    <div class="heroi-num {{ 'mt' if resumo.baixa_chance < resumo.pecas * 0.15 else 'cr' }}">{{ resumo.baixa_chance|n }}</div>
+    <div class="heroi-txt">
+      de {{ resumo.pecas|n }} compradas —
+      <b>{{ (resumo.baixa_chance / resumo.pecas if resumo.pecas else 0)|pct(1) }}</b>.
+      É a medida direta de empilhamento: peça que provavelmente vai ficar parada.
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ a corrida -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>A corrida das peças</h2>
+    <span class="dica">cada quadrado é <strong>uma peça</strong>, na ordem em que o caixa a comprou —
+      clique em qualquer um para ver a conta dela</span>
+    <div class="dir seg" id="quantas">
+      <button class="on" data-n="100">100</button>
+      <button data-n="500">500</button>
+      <button data-n="2000">2.000</button>
+      <button data-n="todas">todas · {{ resumo.pecas|n }}</button>
+    </div>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div class="gr gr-32">
+        <div>
+          <div class="corrida-rolo"><div class="corrida p1" id="corrida"></div></div>
+          <div class="nota-lat aviso mt18" id="narrativa"></div>
+        </div>
+        <div>
+          <div class="flex entre meio mb8">
+            <span class="rotulo" id="leg-tit">Quem levou as peças</span>
+            <span class="pequeno t4" id="leg-conta"></span>
+          </div>
+          <div class="leg-corrida" id="leg-corrida"></div>
+          {% if resumo.lote_minimo %}
+          <div class="nota-lat mt18" style="font-size:11.5px">
+            O <b>lote mínimo do fornecedor</b> está ligado: a primeira compra de um item sai em
+            bloco, do tamanho do lote. Desligue em Parâmetros para ver a alocação peça a peça.
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ onde o caixa se espalhou -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Quando cada produto entra na compra</h2>
+    <span class="dica">a faixa mostra o ciclo inteiro: a largura de cada bloco é o dinheiro que foi para aquele produto</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div id="faixa-gasto" style="display:flex;height:46px;border-radius:6px;overflow:hidden;gap:1px"></div>
+      <div class="flex entre pequeno t4 mt6">
+        <span>1ª peça do ciclo</span><span>última peça comprada</span>
+      </div>
+
+      <div class="rolo rolo-medio mt18">
+        <table class="tb" id="tb-entradas">
+          <thead><tr>
+            <th class="nao-ord"></th>
+            <th>Produto</th>
+            <th class="n">Entra na peça nº</th>
+            <th class="n">Leva</th>
+            <th class="n">Custo unitário</th>
+            <th class="n">Investimento</th>
+            <th class="n">Chance da 1ª peça</th>
+            <th class="n">Chance da última</th>
+          </tr></thead>
+          <tbody><tr><td colspan="8"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ a fila -->
+<div class="secao gr gr-32">
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>A fila inteira</h2>
+      <span class="dica">o retorno de cada peça e onde o caixa acaba</span>
+    </div>
+    <div class="painel-int">
+      <div id="g-fila" class="gfx g"></div>
+    </div>
+  </div>
+
+  <div class="pilha">
+    <div class="painel metrica">
+      <div class="rotulo">Produtos atendidos</div>
+      <div class="valor">{{ resumo.itens }}<span class="suf">de {{ resumo.catalogo }}</span></div>
+      <div class="nota">repondo ao estoque ideal, o mesmo dinheiro atenderia
+        só <b>{{ resumo.rep_itens }}</b></div>
+    </div>
+    <div class="painel metrica am">
+      <div class="rotulo">Ficaram fora do caixa</div>
+      <div class="valor md">{{ resumo.fora_itens }}</div>
+      <div class="nota">itens com peças que se pagariam —
+        <b>R$ {{ resumo.fora_ve|curto }}</b> de margem esperada adiada</div>
+    </div>
+    <div class="painel metrica">
+      <div class="rotulo">Não compensam agora</div>
+      <div class="valor md">{{ resumo.sem_retorno }}</div>
+      <div class="nota">a posição atual já cobre o horizonte, ou a margem não
+        cobriria o encalhe</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ o que entrou -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>O que entrou no pedido</h2>
+    <span class="dica">clique em qualquer linha para abrir o dossiê do item</span>
+    <div class="dir filtros">
+      <div class="busca">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="q" placeholder="Buscar…" style="width:210px">
+      </div>
+      <span class="pequeno t3"><b class="mono" id="conta">{{ linhas|length }}</b> produtos</span>
+    </div>
+  </div>
+
+  <div class="painel">
+    <div class="painel-int rente">
+      <div class="rolo">
+        <table class="tb" id="tb-compra">
+          <thead><tr>
+            <th class="nao-ord">#</th>
+            <th>Item</th>
+            <th>Classe</th>
+            <th class="n">Posição hoje</th>
+            <th class="n">Comprar</th>
+            <th class="n">Unidades</th>
+            <th class="n">Chance da última</th>
+            <th class="n">Investimento</th>
+            <th class="n">Margem esperada</th>
+            <th class="n">Retorno/R$</th>
+            <th class="n">Risco antes → depois</th>
+            <th class="n">Cobertura depois</th>
+          </tr></thead>
+          <tbody>
+          {% for r in linhas %}
+            <tr class="clicavel" data-sku="{{ r.sku }}">
+              <td class="idx">{{ loop.index }}</td>
+              <td class="nome forte">{{ r.item }}
+                <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
+              <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
+              <td class="n fraco">{{ r.posicao_estoque|n }}</td>
+              <td class="n forte">{{ r.quantidade_a_comprar|n }}</td>
+              <td class="n fraco pequeno">{{ (r.posicao_estoque + 1)|n }} → {{ r.ultima_unidade|n }}</td>
+              <td class="n" data-v="{{ r.p_vender_ultima }}" data-chance="{{ r.p_vender_ultima }}"></td>
+              <td class="n" data-v="{{ r.valor_da_compra }}"><span class="pre">R$</span>{{ r.valor_da_compra|n }}</td>
+              <td class="n c-mt" data-v="{{ r.margem_esperada }}"><span class="pre">R$</span>{{ r.margem_esperada|n }}</td>
+              <td class="n" data-v="{{ r.retorno_por_real }}">{{ r.retorno_por_real|pct(0) }}</td>
+              <td class="n pequeno" data-v="{{ r.risco_de_faltar - r.risco_apos_compra }}">
+                <span class="c-cr">{{ r.risco_de_faltar|pct(0) }}</span>
+                <span class="t4">→</span>
+                <span class="c-mt">{{ r.risco_apos_compra|pct(0) }}</span></td>
+              <td class="n fraco">{{ r.cobertura_apos_dias|n(0) }}<span class="suf">d</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ próximos da fila -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Os próximos da fila</h2>
+    <span class="dica">têm peças que se pagariam, mas o caixa acabou antes — é a lista para pedir mais verba</span>
+    <div class="dir"><button class="btn btn-p" onclick="var e=document.getElementById('proximos');e.style.display=e.style.display==='none'?'':'none'">Mostrar / ocultar</button></div>
+  </div>
+  <div class="painel" id="proximos" style="display:none">
+    <div class="painel-int rente">
+      <div class="rolo rolo-medio">
+        <table class="tb">
+          <thead><tr>
+            <th>Item</th><th>Classe</th>
+            <th class="n">Peças que se pagariam</th>
+            <th class="n">Custariam</th>
+            <th class="n">Margem esperada</th>
+            <th class="n">Risco de faltar</th>
+            <th class="n">Cobertura hoje</th>
+          </tr></thead>
+          <tbody>
+          {% for r in fora %}
+            <tr class="clicavel" data-sku="{{ r.sku }}">
+              <td class="nome forte">{{ r.item }}<div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
+              <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
+              <td class="n">{{ r.unidades_com_retorno|n }}</td>
+              <td class="n fraco"><span class="pre">R$</span>{{ r.custo_total_disponivel|n }}</td>
+              <td class="n c-mt"><span class="pre">R$</span>{{ r.valor_total_disponivel|n }}</td>
+              <td class="n" data-risco="{{ r.risco_de_faltar }}"></td>
+              <td class="n fraco">{{ r.cobertura_dias|n(0) }}<span class="suf">d</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ comparação -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Duas formas de gastar o mesmo caixa</h2>
+    <span class="dica">mesmo dinheiro, mesma régua de avaliação</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div class="versus" id="versus"></div>
+      <div class="nota-lat aviso mt18">
+        As duas colunas gastam praticamente o mesmo dinheiro. A diferença está em <b>onde</b>
+        ele é colocado: encher poucos itens até o estoque ideal compra muitas peças cuja chance
+        de vender dentro do horizonte já é baixa — elas viram estoque parado. A alocação peça a
+        peça só compra a próxima unidade se ela, sozinha, ainda se pagar.
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script src="{{ est('peca.js') }}"></script>
+<script>
+(function () {
+  var C = N.COR;
+  var CATALOGO = {{ resumo.catalogo }};
+  var TOTAL_PECAS = {{ resumo.pecas }};
+
+  document.querySelectorAll("td[data-chance]").forEach(function (td) {
+    var v = +td.dataset.chance;
+    var cls = v >= 0.7 ? "selo-mt" : (v >= 0.45 ? "selo-am" : "selo-cr");
+    td.innerHTML = '<span class="selo ' + cls + '">' + N.pct(v, 0) + "</span>";
+  });
+  document.querySelectorAll("td[data-risco]").forEach(function (td) {
+    td.innerHTML = N.seloRisco(+td.dataset.risco);
+  });
+
+  N.tabela("#tb-compra", { busca: "#q", conta: "#conta" });
+  document.body.addEventListener("click", function (e) {
+    var tr = e.target.closest("tr[data-sku]");
+    if (tr) abrirItem(tr.dataset.sku);
+  });
+
+  /* ---------------------------------------------------- a corrida */
+  /* A cor de cada bloco vem de N.corProduto(sku): a mesma do produto em
+     qualquer tela, entao da para seguir um item com o olho entre a corrida,
+     a faixa de gasto e a conferencia. */
+  var CORRIDA = { pedido: null };
+
+  function tamanhoDaGrade(n) {
+    if (n <= 120) return "p1";
+    if (n <= 600) return "p2";
+    if (n <= 3000) return "p3";
+    return "p4";
+  }
+
+  function pintarCorrida(pecas) {
+    var el = document.getElementById("corrida");
+    if (!pecas.length) { el.innerHTML = '<div class="vazio">Nada comprado neste ciclo.</div>'; return; }
+
+    var cls = tamanhoDaGrade(pecas.length);
+    var comNumero = cls === "p1";
+    el.className = "corrida " + cls;
+
+    var partes = new Array(pecas.length);
+    for (var i = 0; i < pecas.length; i++) {
+      var x = pecas[i];
+      partes[i] = '<b style="background:' + N.corProduto(x.sku) + '"' +
+        ' data-pos="' + x.pos + '" data-ordem="' + x.ordem + '"' +
+        ' title="' + N.esc(x.ordem + "a peca do ciclo — " + x.item +
+          " | unidade no " + x.unidade + " deste produto" +
+          " | chance de vender " + N.pct(x.p, 0) +
+          " | custa R$ " + N.moeda(x.c, 2) +
+          " | vale R$ " + N.moeda(x.v, 2)) + '">' +
+        (comNumero ? x.ordem : "") + "</b>";
+    }
+    el.innerHTML = partes.join("");
+
+    /* legenda: produtos na ordem em que entram, com quantas peças levaram */
+    var ordem = [], conta = {}, nome = {};
+    pecas.forEach(function (x) {
+      if (!(x.sku in conta)) { ordem.push(x.sku); nome[x.sku] = x.item; conta[x.sku] = 0; }
+      conta[x.sku]++;
+    });
+    document.getElementById("leg-tit").textContent =
+      "Quem levou " + (pecas.length >= TOTAL_PECAS ? "as " + N.num(pecas.length) + " peças"
+                                                    : "as primeiras " + N.num(pecas.length));
+    document.getElementById("leg-conta").textContent = ordem.length + " produtos";
+    document.getElementById("leg-corrida").innerHTML = ordem.map(function (sku) {
+      return '<div><i style="background:' + N.corProduto(sku) + '"></i>' +
+        '<span class="nm" title="' + N.esc(nome[sku]) + '">' + N.esc(nome[sku]) + "</span>" +
+        '<span class="qt">' + N.num(conta[sku]) + "</span></div>";
+    }).join("");
+
+    /* narrativa: onde a fila troca de produto pela primeira vez */
+    var primeiro = pecas[0], troca = -1;
+    for (var j = 0; j < pecas.length; j++) {
+      if (pecas[j].sku !== primeiro.sku) { troca = j; break; }
+    }
+    var txt = "A 1ª peça do ciclo é uma unidade de <b>" + N.esc(primeiro.item) + "</b>, com " +
+      N.pct(primeiro.p, 0) + " de chance de vender. A 2ª também, e a 3ª também — enquanto mais " +
+      "uma unidade desse item render mais por real do que a primeira unidade de qualquer outro " +
+      "produto do catálogo, ele continua ganhando.";
+    if (troca > 0) {
+      txt += " Isso vale até a peça <b>nº " + troca + "</b>. Na <b>nº " + (troca + 1) +
+        "</b> o motor troca de produto sozinho, e entra <b>" + N.esc(pecas[troca].item) + "</b>.";
+    }
+    txt += " Não existe nenhuma regra de diversificação escrita: o rodízio aparece sozinho, " +
+      "porque a chance de vender cai a cada peça.";
+    document.getElementById("narrativa").innerHTML = txt;
+  }
+
+  function carregarCorrida(n) {
+    if (CORRIDA.pedido === n) return;
+    CORRIDA.pedido = n;
+    document.getElementById("corrida").innerHTML =
+      '<div class="carregando" style="width:100%"><div class="girar"></div></div>';
+    var url = n === "todas" ? "/api/plano/corrida?todas=true" : "/api/plano/corrida?n=" + n;
+    N.buscar(url).then(function (d) {
+      CORRIDA.total = d.total;
+      pintarCorrida(d.pecas);
+    });
+  }
+
+  document.getElementById("quantas").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    this.querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
+    b.classList.add("on");
+    carregarCorrida(b.dataset.n === "todas" ? "todas" : +b.dataset.n);
+  });
+
+  /* clique num bloquinho abre o dossiê daquela peça */
+  document.getElementById("corrida").addEventListener("click", function (e) {
+    var b = e.target.closest("b[data-pos]");
+    if (b) abrirPeca(b.dataset.pos, b.dataset.ordem);
+  });
+
+  carregarCorrida(100);
+
+  /* ---------------------------------------------------- entradas na compra */
+  N.buscar("/api/plano/entradas").then(function (d) {
+    var e = d.entradas;
+    if (!e.length) return;
+    var total = e.reduce(function (s, x) { return s + x.investimento; }, 0);
+
+    document.getElementById("faixa-gasto").innerHTML = e.map(function (x, i) {
+      var pct = (x.investimento / total) * 100;
+      return '<div style="width:' + pct.toFixed(3) + "%;background:" +
+        N.corProduto(x.sku) + ';min-width:2px" title="' +
+        N.esc(x.item) + " | entra na peça nº " + N.num(x.entra_na_peca) +
+        " | " + N.num(x.pecas) + " peças | R$ " + N.moeda(x.investimento) + '"></div>';
+    }).join("");
+
+    document.querySelector("#tb-entradas tbody").innerHTML = e.map(function (x, i) {
+      return '<tr class="clicavel" data-sku="' + N.esc(x.sku) + '">' +
+        "<td>" + N.pontoProduto(x.sku, 10) + "</td>" +
+        '<td class="nome forte">' + N.esc(x.item) +
+          '<div class="pequeno t4">' + N.esc(x.sku) + " · " + N.esc(x.familia) + "</div></td>" +
+        '<td class="n forte">' + N.num(x.entra_na_peca) + "</td>" +
+        '<td class="n">' + N.num(x.pecas) + '<span class="suf">peças</span></td>' +
+        '<td class="n fraco"><span class="pre">R$</span>' + N.moeda(x.custo_unitario, 2) + "</td>" +
+        '<td class="n"><span class="pre">R$</span>' + N.moeda(x.investimento) + "</td>" +
+        '<td class="n c-mt">' + N.pct(x.chance_primeira, 0) + "</td>" +
+        '<td class="n">' + N.pct(x.chance_ultima, 0) + "</td></tr>";
+    }).join("");
+    N.tabela("#tb-entradas", { col: 2, dir: "asc" });
+  });
+
+  /* ---------------------------------------------------- fila completa */
+  N.buscar("/api/plano/fila?limite=2200").then(function (d) {
+    var f = d.fila;
+    if (!f.length) return;
+    var corte = f.filter(function (r) { return r.comprar; }).length;
+    N.grafico("g-fila", {
+      grid: N.grade({ top: 34, right: 62, bottom: 34, left: 4 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18, icon: "roundRect",
+        textStyle: { color: C.tinta3, fontSize: 11 } },
+      tooltip: N.dica(function (ps) {
+        var r = f[ps[0].dataIndex];
+        return N.dicaTit(r.posicao_fila + "º da fila · " + r.item) +
+          N.dicaLin(C.ceu, "unidades", N.num(r.quantidade) + " (nº " + N.num(r.unidade_de) +
+            (r.quantidade > 1 ? " a " + N.num(r.unidade_ate) : "") + " do item)") +
+          N.dicaLin(C.violeta, "chance de vender", N.pct(r.p_vender, 0)) +
+          N.dicaLin(C.menta, "margem esperada", "R$ " + N.moeda(r.valor_esperado, 2)) +
+          N.dicaLin(C.tinta4, "custa", "R$ " + N.moeda(r.custo, 2)) +
+          N.dicaLin(C.ambar, "caixa acumulado", "R$ " + N.curto(r.caixa_acumulado)) +
+          N.dicaLin(r.comprar ? C.menta : C.coral, "decisão", r.comprar ? "entra" : "não coube");
+      }),
+      xAxis: N.eixoX({ boundaryGap: false,
+        data: f.map(function (r) { return r.posicao_fila; }),
+        name: "posição na fila — peças ordenadas por retorno por real por dia",
+        nameLocation: "middle", nameGap: 28,
+        nameTextStyle: { color: C.tinta4, fontSize: 10 },
+        axisLabel: { color: C.tinta4, fontSize: 9.5,
+          interval: Math.max(0, Math.floor(f.length / 12)) } }),
+      yAxis: [
+        N.eixoY({ axisLabel: { color: C.tinta3, fontSize: 10,
+          fontFamily: '"JetBrains Mono", monospace',
+          formatter: function (v) { return "R$ " + N.curto(v); } } }),
+        N.eixoY({ position: "right", splitLine: { show: false }, scale: true,
+          axisLabel: { color: "#7C68B8", fontSize: 10,
+            fontFamily: '"JetBrains Mono", monospace',
+            formatter: function (v) { return N.num(v * 1000, 1); } } })
+      ],
+      series: [
+        { name: "Caixa acumulado", type: "line",
+          data: f.map(function (r) { return r.caixa_acumulado; }),
+          symbol: "none", lineStyle: { color: C.ambar, width: 2 },
+          areaStyle: { color: N.area(C.ambar, 0.24) },
+          markLine: { silent: true, symbol: "none",
+            data: [
+              { yAxis: d.teto, lineStyle: { color: C.menta, width: 1.5, type: [5, 4] },
+                label: { color: C.menta, fontSize: 10.5, position: "insideEndTop",
+                  formatter: "caixa do ciclo · R$ " + N.curto(d.teto) } },
+              { xAxis: corte - 1, lineStyle: { color: C.coral, width: 1.4, type: [4, 4] },
+                label: { color: C.coral, fontSize: 10.5, position: "insideEndTop",
+                  rotate: 0, distance: 5, formatter: "o caixa acaba aqui" } }
+            ] },
+          markArea: { silent: true, itemStyle: { color: "rgba(55,214,160,.05)" },
+            data: [[{ xAxis: 0 }, { xAxis: Math.max(corte - 1, 0) }]] } },
+        { name: "Retorno da peça (× 1.000, por real por dia)", type: "line", yAxisIndex: 1,
+          data: f.map(function (r) { return r.nota; }),
+          symbol: "none", lineStyle: { color: C.violeta, width: 1.5 } }
+      ]
+    });
+  });
+
+  /* ---------------------------------------------------- comparação */
+  N.buscar("/api/plano/estrategias").then(function (d) {
+    var rep = d.estrategias.filter(function (r) { return /ideal/i.test(r.estrategia); })[0];
+    var mar = d.estrategias.filter(function (r) { return /marginal/i.test(r.estrategia); })[0];
+    if (!rep || !mar) return;
+
+    function bloco(r, ganha, titulo, sub) {
+      return '<div class="col' + (ganha ? " ganha" : "") + '">' +
+        '<div class="r">' + sub + "</div>" +
+        '<div class="t">' + titulo + "</div>" +
+        '<div class="kv"><span class="k">Produtos atendidos</span><span class="v ' +
+          (ganha ? "mt" : "cr") + '">' + N.num(r.itens_atendidos) + " de " + CATALOGO + "</span></div>" +
+        '<div class="kv"><span class="k">Peças compradas</span><span class="v">' +
+          N.num(r.pecas) + "</span></div>" +
+        '<div class="kv"><span class="k">Investimento</span><span class="v">R$ ' +
+          N.moeda(r.investimento) + "</span></div>" +
+        '<div class="kv"><span class="k">Peças com menos de 50% de chance</span>' +
+          '<span class="v ' + (r.pecas_baixa_chance > r.pecas * 0.3 ? "cr" : "mt") + '">' +
+          N.num(r.pecas_baixa_chance) + " · " +
+          N.pct(r.pecas_baixa_chance / Math.max(r.pecas, 1), 0) + "</span></div>" +
+        '<div class="kv"><span class="k">Custo das linhas de pedido</span><span class="v">R$ ' +
+          N.moeda(r.custo_pedidos) + "</span></div>" +
+        '<div class="kv" style="border-top:1px solid var(--linha);margin-top:5px;padding-top:11px">' +
+          '<span class="k" style="color:var(--tinta-2);font-weight:600">Margem esperada líquida</span>' +
+          '<span class="v ' + (ganha ? "mt" : "cr") + '" style="font-size:16px">R$ ' +
+          N.moeda(r.valor_liquido) + "</span></div>" +
+        "</div>";
+    }
+
+    document.getElementById("versus").innerHTML =
+      bloco(rep, false, "Repor até o estoque ideal", "a lógica anterior") +
+      '<div class="vs"></div>' +
+      bloco(mar, true, "Alocação peça a peça", "a lógica atual");
+  });
+
+  /* ---------------------------------------------------- exportar */
+  var DADOS = {{ linhas|tojson }};
+  window.exportarCSV = function () {
+    var tb = document.getElementById("tb-compra");
+    var visiveis = {};
+    Array.prototype.forEach.call(tb.tBodies[0].rows, function (tr) {
+      if (tr.style.display !== "none") visiveis[tr.dataset.sku] = true;
+    });
+    var linhas = [["ordem", "sku", "item", "familia", "classe", "posicao_hoje", "comprar",
+      "ate_unidade", "chance_ultima_peca", "custo_unitario", "investimento",
+      "margem_esperada", "retorno_por_real", "cobertura_depois_dias"].join(";")];
+    DADOS.forEach(function (r, i) {
+      if (!visiveis[r.sku]) return;
+      linhas.push([i + 1, r.sku, '"' + String(r.item).replace(/"/g, '""') + '"',
+        '"' + r.familia + '"', r.classificacao, r.posicao_estoque, r.quantidade_a_comprar,
+        r.ultima_unidade, (r.p_vender_ultima || 0).toFixed(4),
+        (r.custo_unitario || 0).toFixed(2), (r.valor_da_compra || 0).toFixed(2),
+        (r.margem_esperada || 0).toFixed(2), (r.retorno_por_real || 0).toFixed(4),
+        Math.round(r.cobertura_apos_dias || 0)].join(";"));
+    });
+    var blob = new Blob(["﻿" + linhas.join("\n")], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "plano-de-compra-{{ exec.posicao }}.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Extrato bruto do ERP. Na simulacao vem dos CSVs em data/fonte;
+      em producao aponte para as tabelas reais do BigQuery.
+    schema: "{{ env_var('RAW_SCHEMA', 'main') }}"
+    tables:
+      - name: raw_catalogo
+        description: Cadastro de itens.
+        columns:
+          - name: sku
+            tests: [unique, not_null]
+      - name: raw_vendas
+        description: Uma linha por item dentro de cada pedido de venda.
+        columns:
+          - name: id_linha
+            tests: [unique, not_null]
+          - name: sku
+            tests: [not_null]
+      - name: raw_estoque_diario
+        description: >
+          Posicao de estoque por SKU e por dia. E a tabela que permite separar
+          "ninguem quis" de "nao tinha para vender". Sem ela o modelo nao funciona.
