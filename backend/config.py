@@ -33,6 +33,11 @@ class Parametros:
     limiar_giro_baixo: float = 20.0
     perda_encalhe: float = 0.04
     fator_desvio_horizonte: float = 1.00
+    # --- critério de parada da compra (ver CRITERIOS abaixo) ---
+    criterio_parada: str = "caixa"
+    retorno_minimo_dia: float = 0.0      # 0 = desligado
+    chance_minima_peca: float = 0.0      # 0 = desligado
+    teto_margem_em_risco: float = 0.0    # 0 = desligado
     aplicar_teto_capital: bool = True
     corrigir_censura: bool = True
     imputar_dias_censurados: bool = True
@@ -132,3 +137,39 @@ CHAVES = [
 ]
 
 GRUPOS = ["Operação", "Economia", "Limites", "Restrições", "Classificação"]
+
+
+# ----------------------------------------------------------------------
+# Criterios de parada da compra.
+#
+# Todos operam sobre a MESMA fila de pecas, ja ordenada por retorno por real
+# por dia: um criterio de parada nao e um motor diferente, e so a escolha de
+# onde cortar a fila. Por isso da para mostrar os quatro na mesma fronteira e
+# trocar de um para o outro sem recalcular nada do motor.
+#
+# (chave, rotulo, campo do parametro, unidade, tipo, o que responde)
+# ----------------------------------------------------------------------
+CRITERIOS = [
+    ("caixa", "Pelo caixa do ciclo", "teto_compra_ciclo", "R$", "float",
+     "Compra descendo a fila até o dinheiro acabar. O risco com que você "
+     "termina é consequência — não é escolhido.",
+     "Tenho este dinheiro. Onde ele rende mais?"),
+
+    ("retorno", "Por retorno mínimo", "retorno_minimo_dia", "por R$/dia", "float",
+     "Compra enquanto a peça render mais que este piso por real por dia. O piso "
+     "natural é o custo de capital da empresa: abaixo dele, a peça destrói valor. "
+     "O caixa do ciclo continua valendo como limite físico.",
+     "Quero só o que rende acima do meu custo de capital."),
+
+    ("chance", "Por chance mínima da peça", "chance_minima_peca", "%", "pct",
+     "Não compra peça com menos que esta chance de vender dentro do horizonte. "
+     "É o freio de encalhe: controla quanta prateleira parada você aceita, "
+     "independente de quanto a peça renda.",
+     "Não quero comprar peça que provavelmente vai encalhar."),
+
+    ("risco", "Por risco assumido", "teto_margem_em_risco", "R$", "float",
+     "Você declara quanta margem aceita deixar em risco no ciclo, e a plataforma "
+     "devolve o caixa necessário para chegar lá. Inverte entrada e saída: o risco "
+     "passa a ser a decisão, e o dinheiro, a consequência.",
+     "Aceito perder no máximo isto. Quanto preciso comprar?"),
+]

@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .config import Parametros
+from dataclasses import replace
+
+from .config import CRITERIOS, Parametros
 from .modelo import ajustar_distribuicao, modelar, MAX_UNIDADES_MARGINAIS
 from .warehouse import Warehouse, ref
 
@@ -256,6 +258,55 @@ def fila_pagina(wh: Warehouse, sku: str = "", motivo: str = "", busca: str = "",
         "linhas": registros(df), "total": total, "pg": pg,
         "paginas": max(1, (total + tam - 1) // tam),
         "ordem": ordem, "desc": desc,
+    }
+
+
+_fila_previa: dict = {}
+
+
+def previa_criterio(wh: Warehouse, p: Parametros, criterio: str, valor: float) -> dict:
+    """Onde a fila seria cortada por um criterio, com um valor hipotetico.
+
+    Roda o motor de verdade em vez de interpolar a fronteira. Nao e capricho:
+    `caixa` e `retorno` sao cortes de prefixo (as duas grandezas sao monotonas
+    ao longo da fila) e poderiam ser lidos na curva - mas `chance` e um FILTRO,
+    porque a chance de vender nao e monotona entre itens diferentes. Ler a
+    fronteira daria um numero errado justamente no criterio mais delicado.
+    """
+    from .modelo import caminhar, regra_de_parada
+
+    if "fila" not in _fila_previa:
+        _fila_previa["fila"] = wh.query(
+            f"select posicao_fila, sku, bloco, quantidade, custo, valor_esperado, "
+            f"reducao_risco, reducao_falta, nota, p_vender "
+            f"from {ref('res_fila_marginal')} order by posicao_fila")
+        base = wh.query(f"select risco_inicial, falta_inicial from {ref('res_criterios')} limit 1")
+        _fila_previa["risco"] = float(base.risco_inicial.iloc[0])
+        _fila_previa["falta"] = float(base.falta_inicial.iloc[0])
+
+    fila = _fila_previa["fila"]
+    campo = {c[0]: c[2] for c in CRITERIOS}.get(criterio)
+    if campo is None:
+        return {}
+    hipotese = replace(p, **{campo: float(valor)}, criterio_parada=criterio)
+
+    r = caminhar(fila, regra_de_parada(hipotese, criterio),
+                 _fila_previa["risco"], _fila_previa["falta"])
+    ok = r["comprar"]
+    n = int(ok.sum())
+    return {
+        "criterio": criterio, "valor": float(valor),
+        "blocos": n,
+        "pecas": int(fila.quantidade.to_numpy()[ok].sum()) if n else 0,
+        "itens": int(pd.unique(fila.sku.to_numpy()[ok]).size) if n else 0,
+        "caixa": float(fila.custo.to_numpy()[ok].sum()) if n else 0.0,
+        "margem": float(fila.valor_esperado.to_numpy()[ok].sum()) if n else 0.0,
+        "margem_em_risco": float(r["margem_em_risco_restante"][-1]),
+        "falta": float(r["falta_restante"][-1]),
+        "risco_inicial": _fila_previa["risco"],
+        "teto_ciclo": float(p.teto_compra_ciclo),
+        "estoura_caixa": bool(n and fila.custo.to_numpy()[ok].sum()
+                              > p.teto_compra_ciclo + 1e-6),
     }
 
 
@@ -560,6 +611,7 @@ def curva_capital(wh: Warehouse, p: Parametros, pontos: int = 15) -> list[dict]:
 
 def invalidar_cache() -> None:
     _memo_lambda.clear()
+    _fila_previa.clear()
 
 
 # ----------------------------------------------------------------------

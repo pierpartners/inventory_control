@@ -33,6 +33,7 @@ O `dbt build` só é necessário quando os CSVs de origem mudam.
 |---|---|
 | **Painel** | O que decidir hoje: quanto liberar de compra, o que está furando agora, onde o capital está e onde está vazando, e a comparação entre a política atual e as duas ótimas. |
 | **Plano de compra** | A fila operacional, alocada **peça a peça**: a corrida das unidades (100 / 500 / 2.000 / todas as do ciclo, um quadrado por peça, clicável), em que peça cada produto entra, onde o caixa acaba, e a comparação contra a reposição ao estoque ideal. Exporta CSV. |
+| **Critério de parada** | A fronteira risco × caixa e os quatro critérios que decidem até onde comprar — pelo caixa, por retorno mínimo, por chance mínima da peça, ou **por risco assumido** (você declara o risco que aceita e a plataforma devolve o caixa necessário). A prévia de cada critério roda o motor de verdade. |
 | **Itens** | O catálogo com o resultado do modelo item a item, com filtros (família, ABC, regime, risco) e agregados que recalculam conforme a seleção. Clicar em qualquer linha abre o dossiê do item. |
 | **Conferência** | A fila inteira, **uma linha por peça candidata**, com todos os valores intermediários — μ, σ, F(k−1), P, M, L, ganho, custo, V, nota, caixa acumulado e o motivo da decisão. Clicar numa linha mostra a conta refeita passo a passo. Exporta o CSV completo (todas as colunas, todas as linhas) para conferir no Excel. |
 | **Metodologia** | Cinco perguntas em linguagem simples, com **os números de um produto de verdade** (escolhido no seletor). Cada fórmula aparece como uma sequência de caixas — nome em português, valor do produto e o símbolo usado —, mais um glossário de todos os símbolos e letras gregas. Feita para quem não conhece o modelo. |
@@ -162,6 +163,23 @@ fila inteira.
    ordenada pela nota. O motor desce a fila comprando; um bloco que não cabe no caixa restante é
    pulado, não encerra a fila. Como `P` cai a cada peça, o retorno marginal de um item decresce
    sozinho — **o dinheiro se espalha por muitos produtos sem nenhuma regra de diversificação**.
+
+**Onde parar de comprar**
+
+5. **Critério de parada.** Os quatro critérios operam na mesma fila ordenada — um critério
+   não é um motor diferente, é só *onde a fila é cortada*:
+
+   | Critério | Entrada | Saída |
+   |---|---|---|
+   | Pelo caixa do ciclo | quanto tenho | com que risco eu fico |
+   | Por retorno mínimo | piso de retorno por real por dia | onde a fila deixa de pagar |
+   | Por chance mínima da peça | piso de chance de vender | quanta prateleira parada eu aceito |
+   | **Por risco assumido** | quanto risco eu aceito | **quanto caixa preciso** |
+
+   A **fronteira** (`res_fronteira`) é a curva completa: para cada ponto de corte, o caixa
+   aplicado, a margem capturada e a margem que ainda sobra em risco. Ela usa uma identidade
+   exata — `E[max(0, D − posição)] = Σ P(D ≥ k)` — então comprar a peça *k* reduz a falta
+   esperada em exatamente `P(D ≥ k)`, e a curva de risco é uma soma acumulada, sem aproximação.
 
 **Camada de política (referência, não decide a compra)**
 

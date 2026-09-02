@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +34,8 @@ sys.path.insert(0, str(RAIZ))
 
 from backend import analitico  # noqa: E402
 from backend import modelo as motor  # noqa: E402
-from backend.config import Parametros, CAMPOS, CHAVES, GRUPOS  # noqa: E402
+from backend.config import (Parametros, CAMPOS, CHAVES,  # noqa: E402
+                            CRITERIOS, GRUPOS)
 from backend.warehouse import (BigQueryWarehouse, DuckDBWarehouse,  # noqa: E402
                                carregar_env, ref)
 
@@ -568,6 +570,93 @@ def api_capital():
 
 
 # ======================================================================
+# CRITERIO DE PARADA
+# ======================================================================
+@app.get("/criterios")
+def criterios(request: Request, msg: str = "", erro: str = ""):
+    w = wh()
+    if not pronto(w) or not w.existe("res_criterios"):
+        return sem_dados(request)
+    p = Parametros.carregar()
+    cr = w.query(f"select * from {ref('res_criterios')}")
+    ctx = cr.iloc[0]
+    return tpl.TemplateResponse(request, "criterios.html", contexto(
+        request, "criterios", p=p, criterios=analitico.registros(cr),
+        meta=[dict(chave=c[0], rotulo=c[1], campo=c[2], unidade=c[3], tipo=c[4],
+                   descricao=c[5], pergunta=c[6]) for c in CRITERIOS],
+        base={"risco_inicial": float(ctx.risco_inicial),
+              "falta_inicial": float(ctx.falta_inicial),
+              "teto_ciclo": float(ctx.teto_ciclo),
+              "custo_capital_dia": float(ctx.custo_capital_dia)},
+        msg=msg, erro=erro))
+
+
+@app.get("/api/criterios")
+def api_criterios():
+    """A fronteira inteira mais o corte de cada criterio.
+
+    A tela simula os quatro cortes em cima desta curva, sem ida ao servidor -
+    todo criterio de parada e apenas um ponto sobre a mesma fila.
+    """
+    w = wh()
+    p = Parametros.carregar()
+    return JSONResponse({
+        "fronteira": analitico.registros(
+            w.query(f"select * from {ref('res_fronteira')} order by posicao_fila")),
+        "criterios": analitico.registros(w.query(f"select * from {ref('res_criterios')}")),
+        "atual": p.criterio_parada,
+    })
+
+
+@app.get("/api/criterios/previa")
+def api_criterios_previa(criterio: str, valor: float):
+    """Roda o motor com um valor hipotetico e devolve onde a fila seria cortada."""
+    r = analitico.previa_criterio(wh(), Parametros.carregar(), criterio, valor)
+    if not r:
+        return JSONResponse({"erro": "criterio desconhecido"}, status_code=400)
+    return JSONResponse(r)
+
+
+@app.post("/criterios")
+async def criterios_salvar(request: Request):
+    form = await request.form()
+    atual = Parametros.carregar()
+    dados = asdict(atual)
+
+    escolhido = str(form.get("criterio_parada") or atual.criterio_parada)
+    if escolhido not in {c[0] for c in CRITERIOS}:
+        escolhido = "caixa"
+    dados["criterio_parada"] = escolhido
+
+    for _chave, _rot, campo, _un, tipo, _d, _q in CRITERIOS:
+        bruto = form.get(campo)
+        if bruto is None or bruto == "":
+            continue
+        try:
+            dados[campo] = float(bruto) / 100.0 if tipo == "pct" else float(bruto)
+        except ValueError:
+            pass
+
+    p = Parametros(**dados)
+    p.salvar()
+    analitico.invalidar_cache()
+    try:
+        res = motor.executar(wh(), p)
+        motor.gravar_resultados(wh(), res)
+        analitico.invalidar_cache()
+        cr = res["res_criterios"]
+        linha = cr[cr.criterio == escolhido].iloc[0]
+        msg = (f"Critério aplicado: {linha.rotulo}. "
+               f"{int(linha.pecas):,} peças de {int(linha.itens)} produtos, "
+               f"R$ {linha.caixa:,.0f} de compra, "
+               f"R$ {linha.margem_em_risco:,.0f} de margem ainda em risco."
+               ).replace(",", ".")
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(url=f"/criterios?erro={str(exc)[:280]}", status_code=303)
+    return RedirectResponse(url=f"/criterios?msg={msg}", status_code=303)
+
+
+# ======================================================================
 # PARAMETROS
 # ======================================================================
 @app.get("/parametros")
@@ -585,7 +674,9 @@ def parametros(request: Request, msg: str = "", erro: str = ""):
 async def parametros_salvar(request: Request):
     form = await request.form()
     atual = Parametros.carregar()
-    dados = {}
+    # parte dos valores atuais: campos que esta tela nao edita (criterio de
+    # parada, pisos) tem de sobreviver ao salvamento
+    dados = asdict(atual)
     for chave, _r, _u, tipo, _mi, _ma, _a, _g in CAMPOS:
         bruto = form.get(chave)
         if bruto is None or bruto == "":

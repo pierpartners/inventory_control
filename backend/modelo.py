@@ -460,6 +460,12 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             # ---- 6. valor da peca
             "ganho_esperado": pv[inicios] * Cu * qtd,
             "custo_esperado": (1.0 - pv[inicios]) * perda * qtd,
+            # quanto esta linha tira da falta esperada. E exato, nao aproximado:
+            #   E[max(0, D - pos)] = soma de P(D >= k) para todo k > pos
+            # entao comprar a peca k reduz a falta esperada em exatamente P(D >= k).
+            # E o que torna a fronteira de risco uma soma acumulada simples.
+            "reducao_falta": np.add.reduceat(pv, inicios)[:corte],
+            "reducao_risco": np.add.reduceat(pv, inicios)[:corte] * Cu,
             "valor_esperado": valor,
             "valor_por_real": valor / custo,
             "custo": custo,
@@ -469,6 +475,30 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
     if not partes:
         return pd.DataFrame()
     return pd.concat(partes, ignore_index=True)
+
+
+def falta_esperada(df: pd.DataFrame, posicoes=None) -> np.ndarray:
+    """Pecas que devem faltar no horizonte, por item, dada uma posicao.
+
+        E[max(0, D - pos)] = soma de P(D >= k) para todo k > pos
+
+    Calculada com a propria distribuicao ajustada (nao com aproximacao
+    normal), porque e a base do criterio de parada por risco: se este numero
+    nao fechar com a soma das reducoes por peca, a fronteira mente.
+    """
+    if posicoes is None:
+        posicoes = df.posicao_estoque
+    fora = []
+    for r, pos in zip(df.itertuples(index=False), posicoes):
+        if r.mu_periodo <= 0:
+            fora.append(0.0)
+            continue
+        _, dist, _, _ = ajustar_distribuicao(float(r.mu_periodo), float(r.sd_periodo))
+        base = int(max(0, round(float(pos))))
+        topo = int(max(dist.ppf(0.999999), base + 1))
+        k = np.arange(base + 1, topo + 2)
+        fora.append(float((1.0 - dist.cdf(k - 1)).sum()))
+    return np.array(fora)
 
 
 def valor_esperado_da_compra(df: pd.DataFrame, quantidades, p: Parametros) -> np.ndarray:
@@ -513,6 +543,182 @@ def pecas_com_baixa_chance(df: pd.DataFrame, quantidades, corte: float = 0.5) ->
     return total
 
 
+def regra_de_parada(p: Parametros, criterio: str | None = None) -> dict:
+    """Traduz os parametros na regra que corta a fila.
+
+    Os quatro criterios rodam sobre a MESMA fila ordenada por retorno por real
+    por dia. Dois deles so tornam parte das pecas inelegiveis (piso de retorno,
+    piso de chance); um corta pelo dinheiro; e o de risco inverte a conta - o
+    caixa deixa de ser entrada e passa a ser a resposta.
+    """
+    criterio = criterio or str(getattr(p, "criterio_parada", "caixa") or "caixa")
+    return {
+        "criterio": criterio,
+        "piso": {"retorno": float(p.retorno_minimo_dia),
+                 "chance": float(p.chance_minima_peca)}.get(criterio, 0.0),
+        "alvo_risco": float(p.teto_margem_em_risco) if criterio == "risco" else None,
+        "teto": float(p.teto_compra_ciclo),
+        # no criterio por risco o caixa nao limita: ele e o numero que sai
+        "caixa_limita": criterio != "risco",
+    }
+
+
+def caminhar(fila: pd.DataFrame, regra: dict,
+             risco_inicial: float, falta_inicial: float) -> dict:
+    """Desce a fila aplicando a regra de parada, peca por peca.
+
+    Um bloco que nao cabe no caixa restante e *pulado*, nao encerra a fila -
+    assim o troco ainda compra as unidades baratas que vem logo abaixo.
+    """
+    custo = fila.custo.to_numpy(float)
+    skus = fila.sku.to_numpy()
+    blocos = fila.bloco.to_numpy(int)
+    qtds = fila.quantidade.to_numpy(int)
+    valores = fila.valor_esperado.to_numpy(float)
+    red_risco = fila.reducao_risco.to_numpy(float)
+    red_falta = fila.reducao_falta.to_numpy(float)
+
+    n = len(fila)
+    criterio, piso = regra["criterio"], regra["piso"]
+    elegivel = np.ones(n, dtype=bool)
+    if criterio == "retorno" and piso > 0:
+        elegivel = fila.nota.to_numpy(float) >= piso
+    elif criterio == "chance" and piso > 0:
+        elegivel = fila.p_vender.to_numpy(float) >= piso
+    alvo_risco = regra["alvo_risco"]
+    teto = regra["teto"]
+
+    comprado = np.zeros(n, dtype=bool)
+    antes = np.zeros(n, dtype=float)
+    acumulado = np.zeros(n, dtype=float)
+    sobra = np.zeros(n, dtype=float)
+    pecas_ac = np.zeros(n, dtype=int)
+    valor_ac = np.zeros(n, dtype=float)
+    risco_ac = np.zeros(n, dtype=float)
+    falta_ac = np.zeros(n, dtype=float)
+    motivo = np.empty(n, dtype=object)
+
+    ultimo_bloco: dict = {}
+    restante = teto if regra["caixa_limita"] else np.inf
+    gasto, pecas, ganho = 0.0, 0, 0.0
+    risco, falta = risco_inicial, falta_inicial
+
+    for i in range(n):
+        s, b = skus[i], blocos[i]
+        antes[i] = gasto
+        # o bloco k so pode ser comprado se o k-1 do mesmo item ja foi -
+        # nao da para comprar a 90a peca sem ter comprado as 89 anteriores
+        depende = b > 0 and ultimo_bloco.get(s, -1) != b - 1
+        cabe = custo[i] <= restante
+
+        if alvo_risco is not None and risco <= alvo_risco:
+            motivo[i] = "risco assumido ja alcancado"
+        elif not elegivel[i]:
+            motivo[i] = ("abaixo do piso de retorno" if criterio == "retorno"
+                         else "abaixo do piso de chance de vender")
+        elif depende and not cabe:
+            motivo[i] = "caixa ja esgotado quando chegou a vez dela"
+        elif depende:
+            motivo[i] = "bloqueada: a peca anterior deste item nao entrou"
+        elif not cabe:
+            motivo[i] = "nao coube no caixa restante"
+        else:
+            comprado[i] = True
+            restante -= custo[i]
+            gasto += custo[i]
+            pecas += int(qtds[i])
+            ganho += float(valores[i])
+            risco -= float(red_risco[i])
+            falta -= float(red_falta[i])
+            ultimo_bloco[s] = b
+            motivo[i] = "comprada"
+
+        acumulado[i] = gasto
+        sobra[i] = teto - gasto        # sempre contra o caixa do ciclo, para leitura
+        pecas_ac[i] = pecas
+        valor_ac[i] = ganho
+        risco_ac[i] = risco
+        falta_ac[i] = falta
+
+    return {
+        "comprar": comprado, "motivo": motivo,
+        "caixa_antes": antes, "caixa_acumulado": acumulado, "caixa_restante": sobra,
+        "pecas_acumuladas": pecas_ac, "valor_acumulado": valor_ac,
+        "margem_em_risco_restante": risco_ac, "falta_restante": falta_ac,
+    }
+
+
+def fronteira(fila: pd.DataFrame, risco_inicial: float, falta_inicial: float,
+              pontos: int = 1500) -> pd.DataFrame:
+    """A curva completa: se a fila fosse cortada aqui, com que numeros eu ficaria.
+
+    Calculada SEM nenhuma restricao - e a mesma curva para os quatro criterios,
+    e cada criterio e so um ponto sobre ela. Se a curva mudasse de forma ao
+    trocar de criterio, nao daria para comparar os cortes.
+    """
+    f = fila.sort_values("posicao_fila")
+    curva = pd.DataFrame({
+        "posicao_fila": f.posicao_fila.to_numpy(),
+        "caixa": f.custo.cumsum().to_numpy(),
+        "pecas": f.quantidade.cumsum().to_numpy(),
+        "margem": f.valor_esperado.cumsum().to_numpy(),
+        "margem_em_risco": risco_inicial - f.reducao_risco.cumsum().to_numpy(),
+        "falta": falta_inicial - f.reducao_falta.cumsum().to_numpy(),
+        "nota": f.nota.to_numpy(),
+        "p_vender": f.p_vender.to_numpy(),
+        "itens": (~f.sku.duplicated()).cumsum().to_numpy(),
+    })
+    # A amostragem tem de ser fina onde a decisao acontece. Com 1.500 pontos
+    # sobre 37 mil pecas o passo fica em ~25 pecas, ou algumas centenas de
+    # reais na faixa de caixa que a empresa realmente considera - a previa da
+    # tela erra por menos que o arredondamento de um pedido.
+    # a origem: nada comprado ainda
+    zero = pd.DataFrame([dict(posicao_fila=0, caixa=0.0, pecas=0, margem=0.0,
+                              margem_em_risco=risco_inicial, falta=falta_inicial,
+                              nota=float(curva.nota.iloc[0]) if len(curva) else 0.0,
+                              p_vender=1.0, itens=0)])
+    curva = pd.concat([zero, curva], ignore_index=True)
+    if len(curva) > pontos:
+        passo = int(np.ceil(len(curva) / pontos))
+        idx = list(range(0, len(curva), passo))
+        if idx[-1] != len(curva) - 1:
+            idx.append(len(curva) - 1)
+        curva = curva.iloc[idx].reset_index(drop=True)
+    return curva
+
+
+def resumo_criterios(fila: pd.DataFrame, p: Parametros,
+                     risco_inicial: float, falta_inicial: float) -> pd.DataFrame:
+    """Onde cada um dos quatro criterios cortaria a fila, com o mesmo motor.
+
+    E o que a tela de criterios mostra: os quatro cortes lado a lado sobre a
+    mesma fronteira, para a escolha ser comparada e nao adivinhada.
+    """
+    from .config import CRITERIOS
+    linhas = []
+    for chave, rotulo, campo, unidade, _tipo, _desc, _pergunta in CRITERIOS:
+        regra = regra_de_parada(p, chave)
+        r = caminhar(fila, regra, risco_inicial, falta_inicial)
+        ok = r["comprar"]
+        n = int(ok.sum())
+        linhas.append(dict(
+            criterio=chave, rotulo=rotulo, campo=campo, unidade=unidade,
+            valor_configurado=float(getattr(p, campo, 0.0)),
+            ativo=bool(chave == regra_de_parada(p)["criterio"]),
+            posicao_corte=int(np.max(np.where(ok)[0]) + 1) if n else 0,
+            blocos=n,
+            pecas=int(fila.quantidade.to_numpy()[ok].sum()) if n else 0,
+            itens=int(pd.unique(fila.sku.to_numpy()[ok]).size) if n else 0,
+            caixa=float(fila.custo.to_numpy()[ok].sum()) if n else 0.0,
+            margem=float(fila.valor_esperado.to_numpy()[ok].sum()) if n else 0.0,
+            margem_em_risco=float(r["margem_em_risco_restante"][-1]),
+            falta=float(r["falta_restante"][-1]),
+            estoura_caixa=bool(n and fila.custo.to_numpy()[ok].sum()
+                               > p.teto_compra_ciclo + 1e-6),
+        ))
+    return pd.DataFrame(linhas)
+
+
 def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Desce a fila de unidades comprando enquanto o caixa do ciclo aguentar.
 
@@ -528,59 +734,23 @@ def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd
     fila = fila.sort_values("nota", ascending=False, kind="mergesort").reset_index(drop=True)
     fila["posicao_fila"] = fila.index + 1
 
-    custo = fila.custo.to_numpy(float)
-    skus = fila.sku.to_numpy()
-    blocos = fila.bloco.to_numpy(int)
-    qtds = fila.quantidade.to_numpy(int)
-    valores = fila.valor_esperado.to_numpy(float)
+    # Ponto de partida do risco: a margem que se perde se NADA for comprado.
+    # E a origem da fronteira - cada peca comprada desconta dela.
+    falta0 = falta_esperada(df)
+    margem_un = (df.lucro_por_peca * p.fator_perda_ruptura).to_numpy(float)
+    risco_inicial = float((falta0 * margem_un).sum())
+    falta_inicial = float(falta0.sum())
 
-    n = len(fila)
-    comprado = np.zeros(n, dtype=bool)
-    antes = np.zeros(n, dtype=float)        # caixa ja gasto quando a linha e avaliada
-    acumulado = np.zeros(n, dtype=float)    # caixa gasto depois de decidir a linha
-    sobra = np.zeros(n, dtype=float)
-    pecas_ac = np.zeros(n, dtype=int)
-    valor_ac = np.zeros(n, dtype=float)
-    motivo = np.empty(n, dtype=object)
+    regra = regra_de_parada(p)
+    passo = caminhar(fila, regra, risco_inicial, falta_inicial)
 
-    ultimo_bloco: dict = {}
-    teto = float(p.teto_compra_ciclo)
-    restante, gasto, pecas, ganho = teto, 0.0, 0, 0.0
-
-    for i in range(n):
-        s, b = skus[i], blocos[i]
-        antes[i] = gasto
-        # o bloco k so pode ser comprado se o k-1 do mesmo item ja foi -
-        # nao da para comprar a 90a peca sem ter comprado as 89 anteriores
-        depende = b > 0 and ultimo_bloco.get(s, -1) != b - 1
-        cabe = custo[i] <= restante
-        if depende and not cabe:
-            motivo[i] = "caixa ja esgotado quando chegou a vez dela"
-        elif depende:
-            motivo[i] = "bloqueada: a peca anterior deste item nao entrou"
-        elif not cabe:
-            motivo[i] = "nao coube no caixa restante"
-        else:
-            comprado[i] = True
-            restante -= custo[i]
-            gasto += custo[i]
-            pecas += int(qtds[i])
-            ganho += float(valores[i])
-            ultimo_bloco[s] = b
-            motivo[i] = "comprada"
-        acumulado[i] = gasto
-        sobra[i] = restante
-        pecas_ac[i] = pecas
-        valor_ac[i] = ganho
-
-    fila["comprar"] = comprado
-    fila["motivo"] = motivo
-    fila["caixa_antes"] = antes
-    fila["caixa_acumulado"] = acumulado
-    fila["caixa_restante"] = sobra
-    fila["pecas_acumuladas"] = pecas_ac
-    fila["valor_acumulado"] = valor_ac
-    fila["teto_ciclo"] = teto
+    for coluna, valores in passo.items():
+        fila[coluna] = valores
+    fila["teto_ciclo"] = float(p.teto_compra_ciclo)
+    fila["criterio_parada"] = regra["criterio"]
+    fila["piso_criterio"] = regra["piso"]
+    fila.attrs["risco_inicial"] = risco_inicial
+    fila.attrs["falta_inicial"] = falta_inicial
 
     compradas = fila[fila.comprar]
     por_item = compradas.groupby("sku").agg(
@@ -814,11 +984,25 @@ def executar(wh: Warehouse, p: Parametros) -> dict:
         itens_na_compra=int(len(mar_compra)),
         itens_na_compra_reposicao=int(len(rep_compra)),
         unidades_avaliadas=int(fila.quantidade.sum()) if len(fila) else 0,
+        criterio_parada=str(p.criterio_parada),
+        margem_em_risco=float(fila.margem_em_risco_restante.iloc[-1]) if len(fila) else 0.0,
+        margem_em_risco_inicial=float(fila.attrs.get("risco_inicial", 0.0)),
         **{f"param_{k}": v for k, v in asdict(p).items()},
     )])
 
+    # a fronteira e o mapa da decisao: onde cada criterio de parada cortaria
+    risco0 = float(fila.attrs.get("risco_inicial", 0.0))
+    falta0 = float(fila.attrs.get("falta_inicial", 0.0))
+    curva = fronteira(fila, risco0, falta0)
+    criterios = resumo_criterios(fila, p, risco0, falta0)
+    criterios["risco_inicial"] = risco0
+    criterios["falta_inicial"] = falta0
+    criterios["teto_ciclo"] = float(p.teto_compra_ciclo)
+    criterios["custo_capital_dia"] = p.taxa_manutencao_ano / p.dias_por_ano
+
     return dict(res_sku_modelo=modelo, res_plano_compra=plano,
                 res_fila_marginal=fila, res_plano_reposicao=reposicao,
+                res_fronteira=curva, res_criterios=criterios,
                 res_estrategias=estrategias,
                 res_comparativo=comparativo, res_execucao=execucao)
 
