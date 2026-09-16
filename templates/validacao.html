@@ -1,0 +1,1062 @@
+{% extends "base.html" %}
+{% block titulo %}Backtest{% endblock %}
+{% block cabecalho %}Backtest{% endblock %}
+{% block subcabecalho %}escolha um dia do passado — a plataforma decide, o banco cobra{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block cabeca %}
+<style>
+  .cx-bt { display: grid; grid-template-columns: minmax(0,320px) minmax(0,1fr); gap: 22px; }
+  @media (max-width: 1000px) { .cx-bt { grid-template-columns: 1fr; } }
+  .quando { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .campo { display: flex; flex-direction: column; gap: 4px; }
+  .campo label { font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--tinta-4); font-weight: 700; }
+  .campo input[type=date] { width: 152px; }
+  .campo input[type=number] { width: 100%; text-align: right; }
+  .params { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px 14px; }
+  @media (max-width: 1200px) { .params { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .params .un { font-family: var(--mono); font-size: 9.5px; color: var(--tinta-4); }
+  .params .aj { font-size: 10px; color: var(--tinta-4); line-height: 1.4; }
+
+  .respostas { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 0;
+    border: 1px solid var(--linha); border-radius: 11px; overflow: hidden;
+    background: radial-gradient(900px 240px at 6% -40%, rgba(85,180,242,.12), transparent 60%),
+                var(--painel); }
+  @media (max-width: 1100px) { .respostas { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .rp { padding: 20px 22px; border-right: 1px solid var(--linha-2); }
+  .rp:last-child { border-right: 0; }
+  @media (max-width: 1100px) {
+    .rp:nth-child(2) { border-right: 0; }
+    .rp:nth-child(-n+2) { border-bottom: 1px solid var(--linha-2); }
+  }
+  .rp .perg { font-size: 11.5px; color: var(--tinta-2); line-height: 1.45;
+    min-height: 34px; font-weight: 500; }
+  .rp .n { font-family: var(--mono); font-size: 36px; line-height: 1; font-weight: 500;
+    letter-spacing: -.05em; margin: 12px 0 0; }
+  .rp .sub { font-size: 11px; color: var(--tinta-3); margin-top: 8px; line-height: 1.55; }
+  .rp .sub b { color: var(--tinta-2); font-weight: 600; }
+
+  .achado { border-left: 3px solid var(--coral); background: rgba(255,106,94,.05);
+    border-radius: 0 9px 9px 0; padding: 14px 18px; font-size: 12.5px;
+    color: var(--tinta-2); line-height: 1.7; }
+  .achado b { color: var(--tinta); font-weight: 600; }
+  .achado em { color: var(--ambar); font-style: normal; font-weight: 600; }
+  .achado .g { font-family: var(--mono); color: var(--coral); font-weight: 600; }
+
+  /* o "!" de ajuda: pequeno, ao lado do rotulo, com a definicao completa no
+     title. Nativo de proposito - funciona com teclado e nao depende de JS */
+  .pin { display: inline-flex; align-items: center; justify-content: center;
+    width: 13px; height: 13px; border-radius: 50%; margin-left: 5px;
+    border: 1px solid var(--linha); color: var(--tinta-4);
+    font-size: 9px; font-weight: 700; cursor: help; vertical-align: middle;
+    font-family: var(--sans); }
+  .pin:hover { border-color: var(--ambar-2); color: var(--ambar); }
+  table.tb th .pin { margin-left: 4px; }
+
+  .fonte-modelo { color: #55B4F2; }
+  .fonte-real { color: #37D6A0; }
+  table.tb th.grupo-modelo { border-top: 2px solid rgba(85,180,242,.5); }
+  table.tb th.grupo-real { border-top: 2px solid rgba(55,214,160,.5); }
+  table.tb th.grupo-fim { border-top: 2px solid rgba(255,106,94,.45); }
+
+  /* a tabela comparativa: a coluna do observado fica visualmente separada das
+     duas simuladas, porque ela nao se compara com elas */
+  table.tb-cmp td:first-child { font-weight: 500; color: var(--tinta-2);
+    font-size: 12px; line-height: 1.45; }
+  table.tb-cmp td:first-child .q { display: block; font-size: 10.5px;
+    color: var(--tinta-4); font-weight: 400; margin-top: 2px; }
+  table.tb-cmp th.col-obs, table.tb-cmp td.col-obs { color: var(--tinta-3);
+    background: rgba(255,255,255,.012); border-right: 2px solid var(--linha); }
+  table.tb-cmp th.col-emp { color: #37D6A0; }
+  table.tb-cmp th.col-mod { color: #55B4F2; }
+  table.tb-cmp td.v { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+  table.tb-cmp tr.destaque td { background: rgba(255,176,32,.05); }
+  table.tb-cmp tr.destaque td.v { font-size: 16px; }
+
+  .legenda-lista { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 11.5px;
+    color: var(--tinta-3); margin-bottom: 12px; }
+  .legenda-lista b { color: var(--tinta-2); font-weight: 600; }
+
+  .espera-bt { padding: 46px; text-align: center; color: var(--tinta-3); font-size: 13px; }
+  .barra-prog { width: 260px; height: 5px; margin: 16px auto 0; border-radius: 3px;
+    background: var(--linha-2); overflow: hidden; }
+  .barra-prog i { display: block; height: 100%; width: 0; background: var(--ambar);
+    transition: width .25s; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<div class="secao">
+  <div class="painel">
+    <div class="painel-int cx-bt">
+      <div>
+        <div class="quando">
+          <div class="campo">
+            <label>O dia da decisão</label>
+            <input type="date" id="corte" value="{{ padrao }}"
+                   min="{{ limites.primeiro }}" max="{{ limites.ultimo }}">
+          </div>
+          <div class="campo">
+            <label>até (opcional)</label>
+            <input type="date" id="ate" value=""
+                   min="{{ limites.primeiro }}" max="{{ limites.ultimo }}">
+          </div>
+          <button class="btn btn-am" id="rodar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9"/><path d="M3 4v5h5"/></svg>
+            Rodar backtest
+          </button>
+        </div>
+        <div class="nota-lat mt14" style="margin-left:0">
+          O banco vai de <b>{{ limites.primeiro }}</b> a <b>{{ limites.ultimo }}</b>
+          ({{ limites.dias }} dias). Preenchendo a segunda data, o backtest roda uma
+          vez por ciclo de revisão dentro do intervalo — é de quantos em quantos dias
+          alguém de fato olharia a lista.
+          <div class="mt6 t4">Prazo de entrega no catálogo: mediana
+            {{ limites.lead_mediano|n(0) }} dias, máximo {{ limites.lead_max }}.
+            Produto cujo horizonte não cabe na janela restante fica fora do relatório,
+            e a tela diz quantos ficaram.</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="pequeno t4 mb10" style="letter-spacing:.1em;text-transform:uppercase;font-weight:700">
+          Os parâmetros daquele dia</div>
+        <div class="params">
+          {% for c in campos %}
+          <div class="campo">
+            <label title="{{ c.ajuda }}">{{ c.rotulo }} <span class="un">{{ c.unidade }}</span></label>
+            <input type="number" step="any" min="0" id="p-{{ c.chave }}"
+                   data-campo="{{ c.chave }}" data-tipo="{{ c.tipo }}"
+                   value="{{ (c.valor * 100)|round(4) if c.tipo == 'pct' else c.valor }}">
+            {% if c.chave in ('teto_compra_ciclo', 'teto_capital') %}
+            <div class="aj" id="aj-{{ c.chave }}">—</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <label class="pequeno t3 mt10" style="display:inline-flex;align-items:center;gap:7px">
+          <input type="checkbox" id="reais" checked>
+          usar o caixa e o estoque <b>reais</b> daquele dia, e não os tetos digitados
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="saida" hidden>
+
+<div class="respostas secao">
+  <div class="rp">
+    <div class="perg">Quantas peças a plataforma mandaria comprar naquele instante?</div>
+    <div class="n ce" id="r-comprar">–</div>
+    <div class="sub" id="r-comprar-x">–</div>
+  </div>
+  <div class="rp">
+    <div class="perg">Quantas peças o mercado pediu de verdade no horizonte?</div>
+    <div class="n mt" id="r-vendeu">–</div>
+    <div class="sub" id="r-vendeu-x">–</div>
+  </div>
+  <div class="rp">
+    <div class="perg">Sobrou componente em estoque no fim do horizonte?</div>
+    <div class="n am" id="r-sobra">–</div>
+    <div class="sub" id="r-sobra-x">–</div>
+  </div>
+  <div class="rp">
+    <div class="perg">Houve ruptura?</div>
+    <div class="n cr" id="r-ruptura">–</div>
+    <div class="sub" id="r-ruptura-x">–</div>
+  </div>
+</div>
+
+<div class="gr gr-23 secao">
+  <div class="painel metrica cr" style="display:flex;flex-direction:column;justify-content:center">
+    <div class="rotulo">Dinheiro parado sem necessidade</div>
+    <div class="valor" style="font-size:44px"><span class="pre">R$</span><span id="r-parado">–</span></div>
+    <div class="nota" id="r-parado-x">–</div>
+  </div>
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>O contexto real daquele dia</h2>
+      <span class="dica">nenhum teto escolhido a mão</span>
+    </div>
+    <div class="painel-int">
+      <div class="gr gr-2" style="gap:0 22px">
+        <div id="ctx-a"></div><div id="ctx-b"></div>
+      </div>
+      <div class="nota-lat mt14" id="ctx-nota">–</div>
+    </div>
+  </div>
+</div>
+
+<div class="secao"><div class="achado" id="achado">–</div></div>
+
+<div class="secao" id="bloco-cmp">
+  <div class="secao-cab">
+    <h2>A compra que foi feita × a compra que o modelo faria</h2>
+    <span class="dica" id="cmp-escopo">todos os produtos avaliados</span>
+  </div>
+  <div class="painel"><div class="painel-int rente">
+    <table class="tb tb-cmp" id="tb-cmp">
+      <thead><tr>
+        <th class="nao-ord"></th>
+        <th class="n nao-ord col-obs">O que aconteceu
+          <span class="pin" title="OBSERVADO. Lido direto do banco, sem simulação: inclui TODAS as compras que a empresa fez — a ordem daquela semana, as entregas de ordens anteriores e todos os ciclos de compra seguintes dentro do horizonte. Por isso esta coluna não se compara com as duas ao lado, que são de uma ordem de compra só.">!</span></th>
+        <th class="n nao-ord col-emp">O pedido daquele ciclo
+          <span class="pin" title="A EMPRESA. A ordem de compra que a empresa colocou na mesma janela de revisão que termina no dia da decisão, chegando nas datas reais em que a mercadoria entrou no estoque. Simulada sozinha ao longo do horizonte, sem nenhuma compra posterior — a mesma restrição que o modelo tem.">!</span></th>
+        <th class="n nao-ord col-mod">A compra do modelo
+          <span class="pin" title="O MODELO. A ordem que a plataforma teria colocado naquele dia, chegando no prazo do fornecedor. Simulada sozinha no mesmo horizonte, com o mesmo dinheiro do pedido real.">!</span></th>
+        <th class="n nao-ord">Diferença
+          <span class="pin" title="Modelo menos empresa, comparando as duas colunas simuladas. Verde é a favor do modelo.">!</span></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div></div>
+  <div class="nota-lat mt14" id="cmp-nota">–</div>
+
+  <div class="gr gr-2 mt18">
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Produtos que ficaram sem estoque de verdade</h2>
+        <span class="dica" id="rup-obs-conta">–</span>
+      </div>
+      <div class="painel-int rente">
+        <div class="rolo rolo-medio">
+          <table class="tb" id="tb-rup-obs">
+            <thead><tr>
+              <th class="nao-ord">Produto</th>
+              <th class="n nao-ord">Dias zerado</th>
+              <th class="n nao-ord">Peças não atendidas</th>
+              <th class="n nao-ord">Margem perdida</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Produtos que ficariam sem estoque com a compra do modelo</h2>
+        <span class="dica" id="rup-mod-conta">–</span>
+      </div>
+      <div class="painel-int rente">
+        <div class="rolo rolo-medio">
+          <table class="tb" id="tb-rup-mod">
+            <thead><tr>
+              <th class="nao-ord">Produto</th>
+              <th class="n nao-ord">Dias zerado</th>
+              <th class="n nao-ord">Faltaria</th>
+              <th class="n nao-ord">Faltaria com o pedido real</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="secao" id="bloco-intervalo" hidden>
+  <div class="secao-cab">
+    <h2>Cada ciclo de revisão do intervalo</h2>
+    <span class="dica">uma decisão de compra por linha</span>
+  </div>
+  <div class="painel"><div class="painel-int rente">
+    <table class="tb" id="tb-datas">
+      <thead><tr>
+        <th class="nao-ord">Dia da decisão</th>
+        <th class="n nao-ord">Mandaria comprar</th>
+        <th class="n nao-ord">Investimento</th>
+        <th class="n nao-ord">Recebido de fato</th>
+        <th class="n nao-ord">Demanda no horizonte</th>
+        <th class="n nao-ord">Sobrou</th>
+        <th class="n nao-ord">Dinheiro parado</th>
+        <th class="n nao-ord">Itens com ruptura</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div></div>
+</div>
+
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Produto por produto, no horizonte de cada um</h2>
+    <span class="dica" id="dica-lista"><b id="conta">–</b> linhas · clique para o dossiê</span>
+    <div class="dir filtros">
+      <input type="search" id="q" placeholder="buscar produto..." style="width:190px">
+      <select id="f-familia"><option value="">todas as famílias</option></select>
+      <select id="f-abc">
+        <option value="">ABC — todas</option>
+        <option value="A">só A</option><option value="B">só B</option><option value="C">só C</option>
+      </select>
+      <select id="f-xyz">
+        <option value="">XYZ — todas</option>
+        <option value="X">só X</option><option value="Y">só Y</option><option value="Z">só Z</option>
+      </select>
+      <select id="f-lista" title="Quais produtos a lista mostra">
+        <option value="modelo">o que o MODELO compraria</option>
+        <option value="real">o que a EMPRESA comprou</option>
+        <option value="comum">os dois compraram</option>
+        <option value="so-modelo">só o modelo quis</option>
+        <option value="so-real">só a empresa pediu</option>
+        <option value="faltou">só onde faltou de verdade</option>
+        <option value="tudo" selected>todos os produtos avaliados</option>
+      </select>
+      <select id="f-caso">
+        <option value="">todos os casos</option>
+        <option value="excesso">só onde sobrou</option>
+        <option value="ruptura">só onde faltou</option>
+        <option value="ambos">sobrou E faltou</option>
+        <option value="cheio">acertou em cheio</option>
+      </select>
+      <button class="btn btn-p" id="limpar">limpar</button>
+    </div>
+  </div>
+  <div class="legenda-lista">
+    <span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#55B4F2;margin-right:6px"></i><b>Azul</b> — o que o MODELO decidiu naquele dia</span>
+    <span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#37D6A0;margin-right:6px"></i><b>Verde</b> — o que ACONTECEU de verdade no banco</span>
+    <span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#FF6A5E;margin-right:6px"></i><b>Vermelho</b> — o veredito: sobra, falta, dinheiro parado</span>
+  </div>
+  <div class="painel"><div class="painel-int rente">
+    <div class="rolo rolo-alto">
+      <table class="tb" id="tb-itens">
+        <thead><tr>
+          <th class="nao-ord"></th>
+          <th>Produto<span class="pin" title="Nome do produto no cadastro, com o código (SKU) e a família embaixo. Clique na linha para abrir o dossiê completo do item.">!</span></th>
+          <th>Classe<span class="pin" title="Classificação ABC × XYZ. ABC ordena pelo lucro que o item gera (A = os que concentram 80% do lucro). XYZ mede a regularidade da demanda (X = regular, Z = errática). AZ, por exemplo, é um item que dá muito lucro e vende de forma imprevisível.">!</span></th>
+          <th class="n">Horizonte<span class="pin" title="Quantos dias esta compra precisa cobrir sozinha: o prazo de entrega do fornecedor mais o intervalo até alguém olhar a lista de novo. É a janela em que o backtest cobra o resultado, e é diferente para cada produto.">!</span></th>
+          <th class="n grupo-modelo fonte-modelo">Estoque no dia<span class="pin" title="MODELO. Quantas peças estavam disponíveis no dia da decisão — o estoque físico menos o que já estava reservado para outro pedido. É a posição de onde o modelo partiu para decidir se precisava comprar.">!</span></th>
+          <th class="n grupo-modelo fonte-modelo">O modelo compraria<span class="pin" title="MODELO. Quantas peças a plataforma teria mandado comprar naquele instante, avaliando peça por peça se a próxima unidade se paga. Não é o que a empresa comprou — essa coluna é a verde, ao lado.">!</span></th>
+          <th class="n grupo-modelo fonte-modelo">Investimento do modelo<span class="pin" title="MODELO. O que a compra sugerida custaria: peças × custo unitário do dia.">!</span></th>
+          <th class="n grupo-modelo fonte-modelo">Previa vender<span class="pin" title="MODELO. Quantas peças o modelo estimava que sairiam dentro do horizonte deste produto. Compare com a coluna verde ao lado para ver o erro de previsão.">!</span></th>
+          <th class="n grupo-real fonte-real">A empresa pediu<span class="pin" title="REAL. Quantas peças a empresa colocou em ordem de compra na mesma janela de revisão que termina no dia da decisão. É a decisão de compra dela, a que compete com a do modelo. Zero significa que ela não pediu este item naquele ciclo.">!</span></th>
+          <th class="n grupo-real fonte-real">Valor do pedido<span class="pin" title="REAL. O valor da nota do que ela pediu: peças × preço unitário do pedido. É esse total, somado no catálogo, que serve de teto de caixa para o modelo — os dois lados decidem com o mesmo dinheiro.">!</span></th>
+          <th class="n grupo-real fonte-real">Demanda real<span class="pin" title="REAL. Quantas peças o mercado pediu dentro do horizonte deste produto. Não é só o que foi vendido: nos dias em que a prateleira estava vazia, a venda registrada é um piso, e a demanda é reconstruída pela taxa dos dias em que havia estoque.">!</span></th>
+          <th class="n grupo-real fonte-real">Usou da compra<span class="pin" title="REAL. Das peças que o modelo mandaria comprar, quantas a demanda do horizonte de fato consumiu. O resto sobrou.">!</span></th>
+          <th class="n grupo-fim">Sobrou<span class="pin" title="VEREDITO. Peças da compra sugerida que a demanda do horizonte não pediu. É a conta de excesso: comprou 36, a demanda pediu 12 e o estoque já tinha 0, então sobraram 24.">!</span></th>
+          <th class="n grupo-fim">Dinheiro parado<span class="pin" title="VEREDITO. As peças que sobraram, ao custo delas. É quanto de capital ficou imobilizado sem que o horizonte que justificou a compra tivesse pedido.">!</span></th>
+          <th class="n grupo-fim">Faltou<span class="pin" title="VEREDITO. Peças que a demanda pediu e não havia na prateleira, simulando dia a dia com a compra do modelo chegando no dia do prazo do fornecedor. É venda perdida.">!</span></th>
+          <th class="n grupo-fim">Dias zerado<span class="pin" title="VEREDITO. Em quantos dias do horizonte o estoque ficou em zero, na mesma simulação. Zero dias significa que a compra segurou o item o horizonte inteiro.">!</span></th>
+          <th class="n grupo-fim">Faltaria com o pedido real<span class="pin" title="VEREDITO. Peças que faltariam se a empresa contasse apenas com a ordem de compra daquele ciclo, chegando nas datas reais em que a mercadoria entrou. Mesma simulação, mesma demanda, mesma posição inicial — só muda quanta mercadoria chega e quando. É a coluna que se compara com &quot;Faltou&quot;.">!</span></th>
+          <th class="n grupo-fim">Falta evitada<span class="pin" title="VEREDITO. Quantas peças o modelo deixaria de perder em relação ao pedido real do ciclo. Positivo e verde: o modelo atenderia mais. Negativo e vermelho: o pedido real atenderia mais.">!</span></th>
+          <th class="n grupo-fim">Faltou de verdade<span class="pin" title="OBSERVADO, sem simulação. Peças que o mercado pediu dentro do horizonte e não levou, lido direto do banco: a demanda corrigida menos a venda registrada. Inclui TODAS as compras da empresa — a ordem daquele ciclo, as entregas de ordens anteriores e todos os ciclos seguintes. Por isso é sempre menor que as colunas simuladas, que têm uma ordem de compra só.">!</span></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div></div>
+  <div class="nota-lat mt14" id="tb-nota">–</div>
+</div>
+
+</div>
+
+<div class="espera-bt" id="espera" hidden>
+  <div class="carregando" style="min-height:0;margin-bottom:14px"><div class="girar"></div></div>
+  <div id="espera-tit">rodando o motor no dia escolhido…</div>
+  <div class="pequeno t4 mt10" id="espera-sub">
+    o motor avalia 1.190 produtos, cada um com o horizonte dele — cerca de
+    11 segundos por data
+  </div>
+  <div class="barra-prog" id="espera-barra" hidden><i id="espera-prog"></i></div>
+  <div class="pequeno t4 mt10" id="espera-relogio">0s</div>
+</div>
+
+<div class="secao" id="falha" hidden>
+  <div class="msg msg-er" id="falha-txt"></div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script>
+(function () {
+  var D = null, motor = null, ITENS = [];
+  function id(x) { return document.getElementById(x); }
+  function kv(k, v) {
+    return '<div class="kv"><span class="k">' + k + '</span><span class="v">' + v + "</span></div>";
+  }
+
+  function paramsURL() {
+    var q = [];
+    document.querySelectorAll("input[data-campo]").forEach(function (el) {
+      var v = parseFloat(String(el.value).replace(",", "."));
+      if (isFinite(v)) q.push(el.dataset.campo + "=" + v);
+    });
+    q.push("reais=" + (id("reais").checked ? "true" : "false"));
+    return q.join("&");
+  }
+
+  /* o contexto real da data preenche os dois tetos, para ninguem ter de
+     adivinhar quanto a empresa tinha para gastar naquele dia */
+  /* o botao fica travado ate o contexto real da data chegar: sem isso um
+     clique rapido roda com os tetos antigos do arquivo de parametros, e o
+     resultado sai diferente do que a tela mostra nos campos */
+  function contexto() {
+    var c = id("corte").value;
+    if (!c) return;
+    id("rodar").disabled = true;
+    var rev = parseFloat(id("p-periodo_revisao_dias").value) || 7;
+    N.buscar("/api/validacao/contexto?corte=" + c + "&revisao=" + rev)
+      .then(function (x) {
+        var a = id("aj-teto_compra_ciclo"), b = id("aj-teto_capital");
+        /* o teto e o PEDIDO do ciclo, nao o recebimento - e o mesmo dinheiro
+           que a empresa poe em ordem de compra, que e o que faz a comparacao
+           valer. Preencher com o recebimento aqui sobrescrevia o teto do
+           backend pela URL e dava ao modelo 57% mais dinheiro que ao
+           comprador, embaixo de um texto dizendo que era o mesmo. */
+        var teto = x.pedido_ciclo_valor || x.compra_real_valor;
+        if (a) a.innerHTML = "pedido colocado na janela: <b>R$ " +
+          N.curto(x.pedido_ciclo_valor) + "</b> · " +
+          N.num(x.pedido_ciclo_pecas) + " peças em " + N.num(x.pedido_ciclo_skus) +
+          " produtos <span class='t4'>(recebido na janela: R$ " +
+          N.curto(x.compra_real_valor) + ")</span>";
+        if (b) b.innerHTML = "estoque naquele dia: <b>R$ " + N.curto(x.estoque_valor) +
+          "</b> · " + N.num(x.estoque_pecas) + " peças";
+        if (id("reais").checked) {
+          if (teto > 0) id("p-teto_compra_ciclo").value = Math.round(teto);
+          if (x.estoque_valor > 0)
+            id("p-teto_capital").value = Math.round(x.estoque_valor);
+        }
+        id("rodar").disabled = false;
+      }).catch(function () { id("rodar").disabled = false; });
+  }
+
+  /* ------------------------------------------------ uma data
+     UMA funcao de agregacao para o total e para o recorte filtrado. Se cada
+     um tivesse a sua, os dois poderiam discordar por caminho de codigo em vez
+     de por conteudo - e o leitor nao teria como saber qual acreditar.
+  */
+  function agregar(rows) {
+    var g = { n: rows.length,
+      mod_itens: 0, mod_pecas: 0, mod_valor: 0, mod_previsto: 0, mod_faltou: 0,
+      mod_dias: 0, mod_rup: 0, mod_atendeu: 0, sobra: 0, parado: 0,
+      excesso: 0, cheio: 0, margem: 0, erro_abs: 0,
+      emp_itens: 0, emp_pecas: 0, emp_valor: 0, emp_nota: 0, emp_faltou: 0,
+      emp_dias: 0, emp_rup: 0, emp_atendeu: 0, emp_chegou: 0,
+      obs_faltou: 0, obs_dias: 0, obs_rup: 0, obs_atendeu: 0,
+      demanda: 0, dem_sim: 0, sem_faltou: 0, evitada: 0, margem_evitada: 0,
+      salva: 0, quebra: 0, rup_nos_dois: 0,
+      tm_c: 0, tr_c: 0, nc: 0, tm_n: 0, tr_n: 0, nn: 0 };
+
+    rows.forEach(function (r) {
+      var Q = r.mandaria_comprar || 0, P = r.pediu_de_verdade || 0;
+      /* --- o modelo */
+      if (Q > 0) { g.mod_itens++; g.mod_pecas += Q; g.mod_valor += r.investimento || 0;
+        g.mod_previsto += r.previsto || 0; g.margem += r.margem_do_plano || 0;
+        g.sobra += r.sobrou_da_compra || 0; g.parado += r.dinheiro_parado || 0;
+        if (r.sobrou_da_compra > 0) g.excesso++;
+        if (r.sobrou_da_compra <= 0 && !r.houve_ruptura) g.cheio++;
+        g.erro_abs += Math.abs(r.erro_previsao || 0);
+        g.tm_c += r.taxa_modelo || 0;
+        if (isFinite(r.taxa_recente)) { g.tr_c += r.taxa_recente; }
+        g.nc++;
+      } else {
+        g.tm_n += r.taxa_modelo || 0;
+        if (isFinite(r.taxa_recente)) { g.tr_n += r.taxa_recente; }
+        g.nn++;
+      }
+      g.mod_faltou += r.faltou_com_plano || 0;
+      g.mod_dias += r.dias_zerado_com_plano || 0;
+      /* "produto com ruptura" = FALTOU PECA, a unica definicao que se compara
+         entre as tres colunas. Dia de prateleira vazia tem a sua propria
+         linha na tabela: um item pode passar dias zerado sem que ninguem
+         tenha pedido nada nesses dias, e os dois numeros nao sao o mesmo. */
+      if ((r.faltou_com_plano || 0) > 0) g.mod_rup++;
+      g.mod_atendeu += r.vendeu_com_o_plano || 0;
+
+      /* --- a empresa, no mesmo ciclo e no mesmo horizonte */
+      if (P > 0) { g.emp_itens++; g.emp_pecas += P;
+        g.emp_valor += r.investiu_no_pedido || 0;
+        g.emp_nota += r.investiu_nota_fiscal || 0; }
+      g.emp_chegou += r.recebeu_no_horizonte || 0;
+      g.emp_faltou += r.faltou_real || 0;
+      g.emp_dias += r.dias_zerado_real || 0;
+      if ((r.faltou_real || 0) > 0) g.emp_rup++;
+      g.emp_atendeu += r.vendeu_com_a_real || 0;
+
+      /* --- o mundo real, sem simulacao */
+      g.obs_faltou += r.ruptura_observada || 0;
+      g.obs_dias += r.dias_sem_estoque_real || 0;
+      if ((r.ruptura_observada || 0) > 0) g.obs_rup++;
+      g.obs_atendeu += r.vendeu_observado || 0;
+
+      g.demanda += r.demanda_real || 0;
+      g.dem_sim += r.demanda_simulada || 0;
+      g.sem_faltou += r.faltou_sem_plano || 0;
+      g.evitada += r.falta_evitada || 0;
+      g.margem_evitada += (r.falta_evitada || 0) * (r.lucro_por_peca || 0);
+      var fr = (r.faltou_real || 0) > 0, fm = (r.faltou_com_plano || 0) > 0;
+      if (fr && fm) g.rup_nos_dois++;
+      if (fr && !fm) g.salva++;
+      if (!fr && fm) g.quebra++;
+    });
+    g.pct_parado = g.mod_valor ? g.parado / g.mod_valor : 0;
+    g.retorno = g.mod_valor ? g.margem / g.mod_valor : 0;
+    g.wape = g.demanda ? g.erro_abs / g.demanda : NaN;
+    g.gap_c = g.nc ? (g.tr_c / g.nc) / (g.tm_c / g.nc) - 1 : NaN;
+    g.gap_n = g.nn ? (g.tr_n / g.nn) / (g.tm_n / g.nn) - 1 : NaN;
+    return g;
+  }
+
+  /* uma linha do comparativo: rotulo, as tres leituras e a diferenca */
+  function lc(rotulo, quest, obs, emp, mod, fmt, melhorMenor, destaque) {
+    var d = (mod === null || emp === null) ? null : mod - emp;
+    var cor = "";
+    if (d !== null && Math.abs(d) > 1e-9)
+      cor = ((d < 0) === !!melhorMenor) ? "c-mt" : "c-cr";
+    return '<tr' + (destaque ? ' class="destaque"' : "") + "><td>" + rotulo +
+      (quest ? '<span class="q">' + quest + "</span>" : "") + "</td>" +
+      '<td class="n v col-obs">' + (obs === null ? '<span class="t4">–</span>' : fmt(obs)) + "</td>" +
+      '<td class="n v">' + (emp === null ? '<span class="t4">–</span>' : fmt(emp)) + "</td>" +
+      '<td class="n v">' + (mod === null ? '<span class="t4">–</span>' : fmt(mod)) + "</td>" +
+      /* `.delta` liga a seta do modo daltonismo. Esta e a unica coluna do
+         sistema em que o numero colorido e de fato uma diferenca - nas outras
+         a cor marca valencia, e uma seta afirmaria direcao que ninguem
+         mediu. O sinal em texto ja da o segundo canal; a seta reforca. */
+      '<td class="n v delta ' + cor + '">' +
+      (d === null || Math.abs(d) < 1e-9 ? '<span class="t4">–</span>'
+        : (d > 0 ? "+" : "\u2212") + fmt(Math.abs(d))) + "</td></tr>";
+  }
+  var fN = function (x) { return N.num(x, 0); };
+  var f1 = function (x) { return N.num(x, 1); };
+  var fR = function (x) { return '<span class="pre">R$</span>' + N.moeda(x); };
+
+  /* as duas listas de ruptura, e o tamanho de cada uma */
+  function listaRuptura(sel, rows, campo, extra, conta, rotulo) {
+    var f = rows.filter(function (r) { return (r[campo] || 0) > 0; })
+                .sort(function (a, b) { return b[campo] - a[campo]; });
+    id(conta).innerHTML = "<b>" + N.num(f.length) + "</b> de " + N.num(rows.length) +
+      " produtos · " + N.num(f.reduce(function (t, r) { return t + r[campo]; }, 0), 0) +
+      " peças " + rotulo;
+    document.querySelector(sel + " tbody").innerHTML = f.length
+      ? f.slice(0, 60).map(function (r) {
+          return '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '">' +
+            '<td class="nome">' + N.esc(r.item) +
+            '<div class="pequeno t4">' + N.esc(r.classificacao || "") +
+            " · horizonte " + N.num(r.horizonte) + "d</div></td>" +
+            '<td class="n fraco">' + N.num(extra.dias(r)) + "</td>" +
+            '<td class="n c-cr forte">' + N.num(r[campo], 1) + "</td>" +
+            '<td class="n">' + extra.tercia(r) + "</td></tr>";
+        }).join("")
+      : '<tr><td colspan="4" class="t4" style="padding:18px">' +
+        "nenhum produto ficou sem estoque neste recorte</td></tr>";
+  }
+
+  /* ------------------------------------------------------------------
+     pinta TUDO a partir de um conjunto de linhas. Chamado no total e a
+     cada mudanca de filtro - e por isso que o filtro vale para o
+     relatorio inteiro, e nao so para a lista.
+  ------------------------------------------------------------------ */
+  function pintar(rows, escopo) {
+    var g = agregar(rows), j = D.janela, ct = D.contexto;
+
+    id("r-comprar").textContent = N.num(g.mod_pecas);
+    id("r-comprar-x").innerHTML =
+      "peças em <b>" + N.num(g.mod_itens) + " produtos</b>, <b>R$ " +
+      N.curto(g.mod_valor) + "</b>. No mesmo ciclo a empresa pediu " +
+      N.num(g.emp_pecas, 0) + " peças em " + N.num(g.emp_itens) + " produtos (R$ " +
+      N.curto(g.emp_nota) + ").";
+
+    id("r-vendeu").textContent = N.num(g.demanda, 0);
+    id("r-vendeu-x").innerHTML =
+      "peças, somando o horizonte de cada produto. Saíram <b>" +
+      N.num(g.obs_atendeu, 0) + "</b> de fato — a diferença é o que a prateleira " +
+      "vazia não deixou vender. O modelo previa <b>" + N.num(g.mod_previsto, 0) +
+      "</b> nos produtos que compraria.";
+
+    id("r-sobra").textContent = N.num(g.sobra, 0);
+    id("r-sobra-x").innerHTML =
+      "peças compradas que a demanda do horizonte não pediu, em <b>" +
+      N.num(g.excesso) + " dos " + N.num(g.mod_itens) + "</b> produtos comprados. " +
+      N.num(g.cheio) + " acertaram em cheio: nem sobra, nem falta.";
+
+    id("r-ruptura").textContent = N.num(g.obs_rup);
+    id("r-ruptura-x").innerHTML =
+      "produtos ficaram sem estoque <b>de verdade</b>, deixando <b>" +
+      N.num(g.obs_faltou, 0) + " peças</b> sem atender. Com a compra do modelo " +
+      "sozinha faltariam " + N.num(g.mod_faltou, 0) + "; com o pedido real sozinho, " +
+      N.num(g.emp_faltou, 0) + ".";
+
+    id("r-parado").textContent = N.moeda(g.parado);
+    id("r-parado-x").innerHTML =
+      "<b>" + N.pct(g.pct_parado, 0) + " do investido</b> ficou em peça que o " +
+      "horizonte não pediu. A compra devolveu R$ " + N.curto(g.margem) +
+      " de margem, R$ " + N.num(g.retorno, 2) + " por real aplicado.";
+
+    /* -------------------------------------------------- o comparativo */
+    id("cmp-escopo").innerHTML = escopo;
+    var h = "";
+    h += lc("Produtos comprados", "em quantos itens cada lado pôs dinheiro",
+            null, g.emp_itens, g.mod_itens, fN, false);
+    h += lc("Peças compradas", "o tamanho da ordem",
+            null, g.emp_pecas, g.mod_pecas, fN, false);
+    h += lc("Valor da compra", "pedido real pelo valor da nota; modelo pelo custo unitário",
+            null, g.emp_nota, g.mod_valor, fR, true);
+    h += lc("Peças que faltaram", "demanda que ficou sem atender no horizonte",
+            g.obs_faltou, g.emp_faltou, g.mod_faltou, f1, true, true);
+    h += lc("Sem comprar nada", "o piso de comparação: quanto faltaria se ninguém " +
+            "tivesse comprado no ciclo", null, g.sem_faltou, g.sem_faltou, f1, true);
+    h += lc("Produtos em que faltou peça", "em quantos itens a demanda ficou sem atender",
+            g.obs_rup, g.emp_rup, g.mod_rup, fN, true);
+    h += lc("Dias de prateleira vazia",
+            "dias com estoque em zero — pode não haver pedido nesses dias, " +
+            "por isso o número é maior que o de cima",
+            g.obs_dias, g.emp_dias, g.mod_dias, fN, true);
+    h += lc("Peças atendidas", "atendidas + faltaram = a demanda da linha abaixo",
+            g.obs_atendeu, g.emp_atendeu, g.mod_atendeu, f1, false);
+    h += lc("Demanda cobrada no horizonte",
+            "no observado é a demanda corrigida; na simulação o vetor guarda a " +
+            "venda registrada nos dias sem estoque em vez da taxa média, e por " +
+            "isso soma um pouco mais",
+            g.demanda, g.dem_sim, g.dem_sim, f1, false);
+    document.querySelector("#tb-cmp tbody").innerHTML = h;
+
+    var favor = g.evitada > 0;
+    id("cmp-nota").className = "nota-lat mt14" + (favor ? "" : " aviso");
+    id("cmp-nota").innerHTML =
+      "<b>As duas colunas simuladas se comparam entre si; a primeira, não.</b> " +
+      "&quot;O que aconteceu&quot; é o banco, com <em>todas</em> as compras da empresa " +
+      "dentro do horizonte — a ordem daquele ciclo, as entregas de ordens " +
+      "anteriores e todos os ciclos seguintes. As outras duas são <b>uma ordem de " +
+      "compra só</b>, cada uma sozinha, com a mesma posição de estoque inicial, a " +
+      "mesma demanda e o mesmo dinheiro (o teto de caixa do modelo é o valor do " +
+      "pedido real). É o que isola a decisão. " +
+      "<br><br>Neste recorte, o modelo " +
+      (favor
+        ? "deixaria de perder <b>" + N.num(g.evitada, 0) + " peças</b> (R$ " +
+          N.curto(Math.abs(g.margem_evitada)) + " de margem) gastando <b>R$ " +
+          N.curto(Math.abs(g.mod_valor - g.emp_nota)) + " " +
+          (g.mod_valor < g.emp_nota ? "menos" : "mais") + "</b>."
+        : "perderia <b>" + N.num(Math.abs(g.evitada), 0) + " peças a mais</b> que o " +
+          "pedido real (R$ " + N.curto(Math.abs(g.margem_evitada)) + " de margem), " +
+          "gastando R$ " + N.curto(Math.abs(g.mod_valor - g.emp_nota)) + " " +
+          (g.mod_valor < g.emp_nota ? "menos" : "mais") + ".") +
+      " Ele salva <b>" + N.num(g.salva) + "</b> produtos que o pedido real deixaria " +
+      "quebrar e quebra <b>" + N.num(g.quebra) + "</b> que o pedido real salvaria; " +
+      "em " + N.num(g.rup_nos_dois) + " os dois faltam." +
+      (IV
+        ? "<br><br><b>Atenção: este é um intervalo de " + IV.iv.rodadas +
+          " decisões.</b> Compra e dinheiro somam certo, porque são ordens de " +
+          "compra distintas. <b>Demanda e falta, não</b>: os horizontes de ciclos " +
+          "consecutivos se sobrepõem, e um mesmo produto aparece em mais de uma " +
+          "data com janelas que se cruzam — parte do período é contada mais de uma " +
+          "vez. Para ler falta sem sobreposição, rode uma data só."
+        : "");
+
+    listaRuptura("#tb-rup-obs", rows, "ruptura_observada",
+      { dias: function (r) { return r.dias_sem_estoque_real || 0; },
+        tercia: function (r) {
+          var m = (r.ruptura_observada || 0) * (r.lucro_por_peca || 0);
+          return m > 0 ? '<span class="c-cr"><span class="pre">R$</span>' +
+            N.moeda(m) + "</span>" : '<span class="t4">–</span>'; } },
+      "rup-obs-conta", "não atendidas");
+
+    listaRuptura("#tb-rup-mod", rows, "faltou_com_plano",
+      { dias: function (r) { return r.dias_zerado_com_plano || 0; },
+        tercia: function (r) {
+          var v = r.faltou_real || 0;
+          return v > 0
+            ? '<span class="' + (v > (r.faltou_com_plano || 0) ? "c-mt" : "c-cr") +
+              '">' + N.num(v, 1) + "</span>"
+            : '<span class="t4">–</span>'; } },
+      "rup-mod-conta", "que faltariam");
+
+    /* -------------------------------------------------- contexto e achado */
+    if (IV) {
+      id("ctx-a").innerHTML =
+        kv("Intervalo", IV.iv.de + " a " + IV.iv.ate) +
+        kv("Decisões avaliadas", N.num(IV.iv.rodadas)) +
+        kv("Passo", N.num(IV.iv.passo_dias) + " dias") +
+        kv("Produtos no recorte", N.num(rows.length) + " linhas produto-data");
+      id("ctx-b").innerHTML =
+        kv("Pedido real somado", "R$ " + N.moeda(IV.t.ped)) +
+        kv("Investimento do plano", "R$ " + N.moeda(IV.t.inv)) +
+        kv("Recebido de fato", "R$ " + N.moeda(IV.t.real)) +
+        kv("Margem do plano", "R$ " + N.moeda(IV.t.mar));
+    } else {
+      id("ctx-a").innerHTML =
+        kv("Dia da decisão", j.corte) +
+        kv("Horizonte cobrado", j.cobre_de + " a " + j.cobre_ate) +
+        kv("Dias disponíveis", N.num(j.dias_para_cobrar) + " dias") +
+        kv("Histórico usado", N.num(j.treino_dias) + " dias");
+      /* estes tres numeros sao do DIA, nao do recorte: o teto de caixa e uma
+         restricao do catalogo inteiro. Sem dizer isso, filtrado por familia o
+         valor se le como o orcamento daquela familia. */
+      id("ctx-b").innerHTML =
+        kv("Pedido do ciclo <span class='t4'>(teto de caixa do dia)</span>",
+           "R$ " + N.moeda(ct.pedido_ciclo_valor)) +
+        kv("Recebido na janela <span class='t4'>(o dia inteiro)</span>",
+           "R$ " + N.moeda(ct.compra_real_valor)) +
+        kv("Estoque naquele dia <span class='t4'>(o dia inteiro)</span>",
+           "R$ " + N.moeda(ct.estoque_valor)) +
+        kv("Produtos no recorte", N.num(rows.length) + " de " + N.num(j.skus_no_relatorio));
+    }
+
+    id("ctx-nota").innerHTML =
+      "O teto de caixa não é número escolhido: é <b>o valor da ordem de compra que a " +
+      "empresa colocou</b> naquela janela de revisão (" +
+      N.num(ct.pedido_ciclo_pecas, 0) + " peças em " + N.num(ct.pedido_ciclo_skus) +
+      " produtos), de <span class='mono t3'>raw_ciclo_pagamento</span>, que registra a " +
+      "data do pedido e a data de entrada em estoque de cada linha atendida. O teto de " +
+      "capital é o valor do estoque naquele dia. <span class='t4'>A tabela de compras " +
+      "do ERP não serve como caixa: ela salta de 18 mil para 322 mil peças por mês em " +
+      "março de 2026 enquanto venda e estoque seguem estáveis.</span>";
+
+    var iguais = Math.abs(g.gap_c - g.gap_n) < 0.5;
+    id("achado").innerHTML = IV
+      ? "<b>" + IV.iv.rodadas + " decisões avaliadas</b> entre " + IV.iv.de +
+        " e " + IV.iv.ate + ", uma a cada " + IV.iv.passo_dias + " dias. A lista " +
+        "traz a data do corte em cada linha, e o mesmo produto pode aparecer em " +
+        "várias datas. Os horizontes se sobrepõem, então as linhas <b>não são " +
+        "independentes</b>."
+      : !isFinite(g.gap_c)
+      ? "Sem produto comprado neste recorte para medir o erro de previsão."
+      : "<b>Por que o modelo previu " + N.num(g.mod_previsto, 0) +
+        " peças e a demanda foi " + N.num(g.demanda, 0) + ".</b> " +
+        "Nos produtos que ele mandou comprar, a taxa dos <b>últimos 90 dias</b> antes " +
+        "da decisão já estava <span class='g'>" + N.pct(g.gap_c, 0) + "</span> acima da " +
+        "média longa que o modelo usa. Nos produtos que ele <em>não</em> mandou comprar, " +
+        "o gap é <span class='g'>" + N.pct(g.gap_n, 0) + "</span>. " +
+        (iguais
+          ? "Como os dois gaps são praticamente o mesmo, <b>não é escolha do modelo: a " +
+            "demanda cresceu e a janela de estimação não acompanhou</b>. O motor estima " +
+            "com " + N.num(j.janela_estimacao_dias) + " dias de histórico, e num negócio " +
+            "que dobrou de volume isso subestima o catálogo inteiro."
+          : "Os gaps são diferentes, então parte do desvio vem de <b>quais</b> produtos " +
+            "o modelo escolhe, e não só da janela de estimação.");
+  }
+
+  /* ------------------------------------------------ a tabela */
+  function tabela(itens, comCorte) {
+    ITENS = itens;
+    var fam = {};
+    itens.forEach(function (r) { if (r.familia) fam[r.familia] = 1; });
+    id("f-familia").innerHTML = '<option value="">todas as famílias</option>' +
+      Object.keys(fam).sort().map(function (f) {
+        return '<option value="' + N.esc(f) + '">' + N.esc(f) + "</option>"; }).join("");
+
+    document.querySelector("#tb-itens tbody").innerHTML = itens.map(function (r, i) {
+      var caso = [];
+      if (r.sobrou_da_compra > 0) caso.push("excesso");
+      if (r.houve_ruptura) caso.push("ruptura");
+      if (r.sobrou_da_compra > 0 && r.houve_ruptura) caso.push("ambos");
+      if (r.sobrou_da_compra <= 0 && !r.houve_ruptura) caso.push("cheio");
+      return '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '" data-i="' + i +
+        '" data-familia="' + N.esc(r.familia || "") + '" data-abc="' +
+        N.esc(r.curva_abc || "") + '" data-xyz="' + N.esc(r.classe_xyz || "") +
+        '" data-caso="' + caso.join(" ") + '" data-lista="' +
+        ((r.mandaria_comprar > 0 ? "modelo " : "") +
+         ((r.pediu_de_verdade || 0) > 0 ? "real " : "") +
+         (r.mandaria_comprar > 0 && (r.pediu_de_verdade || 0) > 0 ? "comum " : "") +
+         (r.mandaria_comprar > 0 && (r.pediu_de_verdade || 0) <= 0 ? "so-modelo " : "") +
+         (r.mandaria_comprar <= 0 && (r.pediu_de_verdade || 0) > 0 ? "so-real " : "") +
+         ((r.dias_sem_estoque_real || 0) > 0 ? "faltou " : "") +
+         "tudo").trim() + '">' +
+        "<td>" + N.pontoProduto(r.sku, 10) + "</td>" +
+        '<td class="nome forte">' + N.esc(r.item) +
+          '<div class="pequeno t4">' + N.esc(r.familia || "") +
+          (comCorte && r.corte ? " · corte " + r.corte : "") + "</div></td>" +
+        '<td><span class="classe classe-' + N.esc(r.curva_abc) + '">' +
+          N.esc(r.classificacao) + "</span></td>" +
+        '<td class="n fraco" data-v="' + r.horizonte + '">' + N.num(r.horizonte) +
+          '<span class="suf">d</span></td>' +
+        '<td class="n fraco" data-v="' + r.posicao_inicial + '">' +
+          N.num(r.posicao_inicial) + "</td>" +
+        '<td class="n forte fonte-modelo" data-v="' + r.mandaria_comprar + '">' +
+          (r.mandaria_comprar > 0 ? N.num(r.mandaria_comprar) : '<span class="t4">–</span>') + "</td>" +
+        '<td class="n" data-v="' + r.investimento + '">' +
+          (r.investimento > 0 ? '<span class="pre">R$</span>' + N.moeda(r.investimento)
+                              : '<span class="t4">–</span>') + "</td>" +
+        '<td class="n fraco" data-v="' + r.previsto + '">' + N.num(r.previsto, 1) + "</td>" +
+        '<td class="n forte fonte-real" data-v="' + (r.pediu_de_verdade || 0) + '">' +
+          ((r.pediu_de_verdade || 0) > 0 ? N.num(r.pediu_de_verdade, 0)
+                                         : '<span class="t4">–</span>') + "</td>" +
+        '<td class="n" data-v="' + (r.investiu_nota_fiscal || 0) + '">' +
+          ((r.investiu_nota_fiscal || 0) > 0
+            ? '<span class="pre">R$</span>' + N.moeda(r.investiu_nota_fiscal)
+            : '<span class="t4">–</span>') + "</td>" +
+        '<td class="n forte c-mt" data-v="' + r.demanda_real + '">' +
+          N.num(r.demanda_real, 1) + "</td>" +
+        '<td class="n" data-v="' + r.usadas_da_compra + '">' +
+          N.num(r.usadas_da_compra, 1) + "</td>" +
+        '<td class="n ' + (r.sobrou_da_compra > 0 ? "c-am forte" : "fraco") +
+          '" data-v="' + r.sobrou_da_compra + '">' +
+          (r.sobrou_da_compra > 0 ? N.num(r.sobrou_da_compra, 1) : "–") + "</td>" +
+        '<td class="n ' + (r.dinheiro_parado > 0 ? "c-cr forte" : "fraco") +
+          '" data-v="' + r.dinheiro_parado + '">' +
+          (r.dinheiro_parado > 0 ? '<span class="pre">R$</span>' +
+            N.moeda(r.dinheiro_parado) : "–") + "</td>" +
+        '<td class="n ' + (r.faltou_com_plano > 0 ? "c-cr" : "fraco") + '" data-v="' +
+          r.faltou_com_plano + '">' +
+          (r.faltou_com_plano > 0 ? N.num(r.faltou_com_plano, 1) : "–") + "</td>" +
+        '<td class="n ' + (r.dias_zerado_com_plano > 0 ? "c-cr" : "fraco") +
+          '" data-v="' + r.dias_zerado_com_plano + '">' +
+          N.num(r.dias_zerado_com_plano) + "</td>" +
+        '<td class="n ' + ((r.faltou_real || 0) > 0 ? "c-cr" : "fraco") +
+          '" data-v="' + (r.faltou_real || 0) + '">' +
+          ((r.faltou_real || 0) > 0 ? N.num(r.faltou_real, 1) : "–") + "</td>" +
+        '<td class="n forte delta ' + ((r.falta_evitada || 0) > 0 ? "c-mt"
+                                : ((r.falta_evitada || 0) < 0 ? "c-cr" : "fraco")) +
+          '" data-v="' + (r.falta_evitada || 0) + '">' +
+          ((r.falta_evitada || 0) === 0 ? "–"
+            : ((r.falta_evitada > 0 ? "+" : "") + N.num(r.falta_evitada, 1))) + "</td>" +
+        '<td class="n ' + ((r.ruptura_observada || 0) > 0 ? "c-am" : "fraco") +
+          '" data-v="' + (r.ruptura_observada || 0) + '">' +
+          ((r.ruptura_observada || 0) > 0 ? N.num(r.ruptura_observada, 1) : "–") +
+          "</td></tr>";
+    }).join("");
+
+    motor = N.tabela("#tb-itens", {
+      busca: "#q", conta: "#conta", col: 11, dir: "desc",
+      filtro: function (tr) {
+        var f = id("f-familia").value, a = id("f-abc").value,
+            x = id("f-xyz").value, cs = id("f-caso").value,
+            li = id("f-lista").value;
+        if (li && tr.dataset.lista.split(" ").indexOf(li) < 0) return false;
+        if (f && tr.dataset.familia !== f) return false;
+        if (a && tr.dataset.abc !== a) return false;
+        if (x && tr.dataset.xyz !== x) return false;
+        if (cs && tr.dataset.caso.split(" ").indexOf(cs) < 0) return false;
+        return true;
+      },
+      /* Todo o relatorio se refaz no recorte visivel - nao so o rodape. Um
+         filtro que muda a lista e deixa o numero grande do topo parado da a
+         impressao de que aquele numero e do recorte, e nao e. */
+      aoFiltrar: function (vis) {
+        var rows = [];
+        vis.forEach(function (tr) {
+          var r = ITENS[parseInt(tr.dataset.i, 10)];
+          if (r) rows.push(r);
+        });
+        var RECORTE = {
+          modelo: "os produtos que o MODELO compraria",
+          real: "os produtos que a EMPRESA pediu naquele ciclo",
+          comum: "os produtos que os dois compraram",
+          "so-modelo": "os produtos que SÓ o modelo quis",
+          "so-real": "os produtos que SÓ a empresa pediu",
+          faltou: "os produtos que ficaram sem estoque de verdade",
+          tudo: "todos os produtos avaliados"
+        };
+        var partes = [RECORTE[id("f-lista").value] || "o recorte escolhido"];
+        if (id("f-familia").value) partes.push("família " + id("f-familia").value);
+        if (id("f-abc").value) partes.push("curva " + id("f-abc").value);
+        if (id("f-xyz").value) partes.push("classe " + id("f-xyz").value);
+        if (id("f-caso").value) partes.push(id("f-caso").value);
+        if (id("q").value) partes.push('busca "' + id("q").value + '"');
+        var escopo = partes.join(" · ") + " — <b>" + N.num(rows.length) + "</b> produtos";
+
+        id("dica-lista").innerHTML = "mostrando <b>" + partes[0] +
+          "</b> · <b id='conta'>" + vis.length + "</b> linhas · clique para o dossiê";
+        if (D && D.janela) pintar(rows, escopo);
+
+        var t = { c: 0, inv: 0, dem: 0, sob: 0, par: 0, fal: 0, real: 0, invreal: 0 };
+        rows.forEach(function (r) {
+          t.c += r.mandaria_comprar; t.inv += r.investimento;
+          t.dem += r.demanda_real; t.sob += r.sobrou_da_compra;
+          t.par += r.dinheiro_parado; t.fal += r.faltou_com_plano;
+          t.real += (r.pediu_de_verdade || 0);
+          t.invreal += (r.investiu_nota_fiscal || 0);
+        });
+        id("tb-nota").innerHTML =
+          "<b>No recorte visível:</b> o modelo compraria " + N.num(t.c) + " peças (R$ " +
+          N.curto(t.inv) + ") e a empresa pediu " + N.num(t.real, 0) + " peças (R$ " +
+          N.curto(t.invreal) + "). A demanda pediu " + N.num(t.dem, 0) + " peças. " +
+          "Da compra do modelo sobraram " + N.num(t.sob, 0) + ", <b>R$ " +
+          N.curto(t.par) + " parados</b>, e faltaram " + N.num(t.fal, 0) + " peças.";
+      }
+    });
+  }
+
+  /* ------------------------------------------------ intervalo
+     A soma vem do cliente porque as datas chegam uma a uma. E o mesmo total
+     que a rota de intervalo devolvia, com a diferenca de que aqui a tela
+     avanca a cada data em vez de esperar todas.
+  */
+  var IV = null;   /* contexto do intervalo, quando e um intervalo */
+
+  function intervalo(rodadas, itens, iv) {
+    var t = { inv: 0, real: 0, ped: 0, mar: 0 };
+    var datas = rodadas.map(function (d) {
+      var s = d.resumo, ct = d.contexto;
+      t.inv += s.investimento;
+      t.real += ct.compra_real_valor;
+      t.ped += ct.pedido_ciclo_valor;
+      t.mar += s.margem_do_plano;
+      return { corte: d.janela.corte, resumo: s, contexto: ct };
+    });
+    IV = { iv: iv, t: t };
+    /* pintar() le D.janela para o rotulo da janela de estimacao; no intervalo
+       ele fica com a ultima rodada, e o contexto proprio do intervalo vem de
+       IV. Sem isso a guarda `if (D && D.janela)` no gancho do filtro deixava
+       o comparativo em branco - o intervalo nunca setava D. */
+    D = rodadas[rodadas.length - 1];
+
+    id("bloco-intervalo").hidden = false;
+    id("bloco-cmp").hidden = false;
+    document.querySelector("#tb-datas tbody").innerHTML = datas.map(function (x) {
+      var s = x.resumo, c = s.comparativo || {};
+      return "<tr>" +
+        '<td class="forte mono">' + x.corte + "</td>" +
+        '<td class="n">' + N.num(s.pecas_que_compraria) + "</td>" +
+        '<td class="n"><span class="pre">R$</span>' + N.moeda(s.investimento) + "</td>" +
+        '<td class="n fraco"><span class="pre">R$</span>' +
+          N.moeda(x.contexto.pedido_ciclo_valor) + "</td>" +
+        '<td class="n c-mt">' + N.num(s.demanda_real_dos_comprados, 0) + "</td>" +
+        '<td class="n c-am">' + N.num(s.pecas_sobrando, 0) + "</td>" +
+        '<td class="n c-cr forte"><span class="pre">R$</span>' +
+          N.moeda(s.dinheiro_parado) + "</td>" +
+        '<td class="n">' + N.num(c.modelo_itens_com_ruptura || 0) + "</td></tr>";
+    }).join("");
+
+    /* uma unica pintura, pelo mesmo caminho da rodada de uma data */
+    tabela(itens, true);
+  }
+  /* ------------------------------------------------ rodar
+     Uma data leva ~11 s: 1,6 s de contexto, 8,9 s de motor e 1,1 s para ler o
+     diario de 1,3 milhao de linhas. Nao da para esconder essa espera, so da
+     para ser honesto sobre ela - relogio correndo, e no intervalo uma data por
+     vez, com o resultado de cada uma aparecendo ao chegar em vez de tudo no
+     fim. A rota de intervalo do servidor rodava as cinco datas antes de
+     responder: 58 s de tela muda.
+  */
+  var relogio = null;
+
+  function abrirEspera(titulo, sub, comBarra) {
+    id("saida").hidden = true;
+    id("falha").hidden = true;
+    id("espera").hidden = false;
+    id("espera-tit").textContent = titulo;
+    id("espera-sub").innerHTML = sub;
+    id("espera-barra").hidden = !comBarra;
+    id("espera-prog").style.width = "0%";
+    id("rodar").disabled = true;
+    var t0 = Date.now();
+    clearInterval(relogio);
+    relogio = setInterval(function () {
+      id("espera-relogio").textContent =
+        Math.round((Date.now() - t0) / 1000) + "s";
+    }, 250);
+  }
+  function fecharEspera() {
+    clearInterval(relogio);
+    id("espera").hidden = true;
+    id("rodar").disabled = false;
+  }
+  function falhar(msg) {
+    fecharEspera();
+    id("falha").hidden = false;
+    id("falha-txt").textContent = msg;
+  }
+  function progresso(feito, total, texto) {
+    id("espera-prog").style.width = Math.round(100 * feito / total) + "%";
+    id("espera-sub").innerHTML = texto;
+  }
+
+  function pedir(corte) {
+    return fetch("/api/validacao?corte=" + corte + "&" + paramsURL())
+      .then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok || d.erro) throw new Error(d.erro || ("HTTP " + r.status));
+          return d;
+        });
+      });
+  }
+
+  /* as datas de um intervalo: uma por ciclo de revisao, que e de quantos em
+     quantos dias alguem de fato olharia a lista */
+  function datasDoIntervalo(de, ate, passo) {
+    var out = [], d = new Date(de + "T00:00:00"), f = new Date(ate + "T00:00:00");
+    while (d <= f && out.length < 26) {
+      out.push(d.toISOString().slice(0, 10));
+      d = new Date(d.getTime() + passo * 86400000);
+    }
+    return out;
+  }
+
+  function rodar() {
+    var c = id("corte").value, a = id("ate").value;
+    if (!c) { falhar("escolha o dia da decisão."); return; }
+
+    if (a && a > c) {
+      var passo = Math.max(parseInt(id("p-periodo_revisao_dias").value, 10) || 7, 1);
+      var datas = datasDoIntervalo(c, a, passo);
+      abrirEspera("rodando " + datas.length + " decisões de compra…",
+                  "uma a cada " + passo + " dias, cerca de 11 segundos por data — " +
+                  "o resultado de cada uma aparece assim que chega", true);
+      var acc = [], itens = [];
+      (function proxima(i) {
+        if (i >= datas.length) {
+          if (!acc.length) { falhar("nenhuma data do intervalo produziu relatório."); return; }
+          fecharEspera();
+          id("saida").hidden = false;
+          intervalo(acc, itens, { de: c, ate: a, passo_dias: passo,
+                                  rodadas: acc.length });
+          return;
+        }
+        progresso(i, datas.length,
+          "<b>" + (i + 1) + " de " + datas.length + "</b> — " + datas[i] +
+          (acc.length ? " · já somados " + N.num(
+            acc.reduce(function (t, x) { return t + x.resumo.pecas_que_compraria; }, 0)) +
+            " peças" : ""));
+        pedir(datas[i]).then(function (d) {
+          acc.push(d);
+          /* a uniao das duas decisoes. So as do modelo deixaria a coluna da
+             empresa vazia por construcao, e a comparacao perderia sentido. */
+          d.itens.forEach(function (x) {
+            if (x.mandaria_comprar > 0 || (x.pediu_de_verdade || 0) > 0)
+              itens.push(Object.assign({}, x, { corte: datas[i] }));
+          });
+          proxima(i + 1);
+        }).catch(function (e) {
+          /* uma data sem janela suficiente nao derruba o intervalo */
+          progresso(i, datas.length, "<b>" + datas[i] + "</b> pulada: " + e.message);
+          setTimeout(function () { proxima(i + 1); }, 400);
+        });
+      })(0);
+      return;
+    }
+
+    abrirEspera("rodando o motor em " + c + "…",
+                "o motor avalia 1.190 produtos, cada um com o horizonte dele — " +
+                "cerca de 11 segundos", false);
+    pedir(c).then(function (d) {
+      fecharEspera();
+      id("saida").hidden = false;
+      D = d;
+      id("bloco-intervalo").hidden = true;
+      id("bloco-cmp").hidden = false;
+      IV = null;
+      /* tabela() monta as linhas e dispara aoFiltrar, que chama pintar() -
+         entao a primeira pintura ja sai no mesmo caminho de codigo que as
+         seguintes, e nao ha como as duas discordarem */
+      tabela(d.itens, false);
+    }).catch(function (e) {
+      falhar("não deu para rodar " + c + ": " + e.message);
+    });
+  }
+
+  id("rodar").addEventListener("click", rodar);
+  id("corte").addEventListener("change", contexto);
+  id("reais").addEventListener("change", contexto);
+  id("p-periodo_revisao_dias").addEventListener("change", contexto);
+  ["f-familia", "f-abc", "f-xyz", "f-caso", "f-lista"].forEach(function (k) {
+    id(k).addEventListener("change", function () { if (motor) motor.aplicar(); });
+  });
+  id("limpar").addEventListener("click", function () {
+    ["f-familia", "f-abc", "f-xyz", "f-caso"].forEach(function (k) { id(k).value = ""; });
+    id("f-lista").value = "tudo";
+    id("q").value = "";
+    if (motor) motor.aplicar();
+  });
+  document.body.addEventListener("click", function (e) {
+    var tr = e.target.closest("#tb-itens tr[data-sku], #tb-rup-obs tr[data-sku], " +
+                              "#tb-rup-mod tr[data-sku]");
+    if (tr) abrirItem(tr.dataset.sku);
+  });
+
+  contexto();
+})();
+</script>
+{% endblock %}

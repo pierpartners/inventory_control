@@ -8,6 +8,7 @@ select
     e.dia_censurado,
     e.saldo_inicial,
     e.saldo_final,
+    e.disponivel_final,
     e.pecas_vendidas,
     coalesce(v.receita_liquida, 0) as receita_liquida,
     coalesce(v.lucro, 0)           as lucro,

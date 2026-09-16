@@ -16,6 +16,207 @@
       (cls || "") + '">' + v + "</span></div>";
   }
 
+  /* uma tabela de conferencia: cabecalho, linhas e um rodape de soma */
+  function tab(titulo, cols, linhas, rodape, aviso, par) {
+    if (!linhas.length) {
+      return '<div class="mt18"><div class="t4 pequeno" style="letter-spacing:.09em;' +
+        'text-transform:uppercase;font-weight:700">' + titulo + "</div>" +
+        '<div class="nota-lat mt6" style="margin-left:0">nenhum registro</div></div>';
+    }
+    return '<div class="mt18">' +
+      '<div class="t4 pequeno mb8" style="letter-spacing:.09em;text-transform:uppercase;' +
+      'font-weight:700">' + titulo + ' <span class="t4">· ' +
+      (par && par[1] > par[0]
+        ? "mostrando as " + N.num(par[0], 0) + " mais recentes de " +
+          N.num(par[1], 0) + " (o rodapé soma todas)"
+        : N.num(linhas.length, 0) + " registros") + "</span></div>" +
+      (aviso ? '<div class="nota-lat mb8" style="margin-left:0">' + aviso + "</div>" : "") +
+      '<div class="rolo rolo-medio"><table class="tb" style="font-size:11.5px">' +
+      "<thead><tr>" + cols.map(function (c) {
+        return '<th' + (c[2] ? ' class="n nao-ord"' : ' class="nao-ord"') + ">" +
+          c[0] + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      linhas.map(function (r) {
+        return "<tr>" + cols.map(function (c) {
+          return "<td" + (c[2] ? ' class="n"' : "") + ">" + c[1](r) + "</td>";
+        }).join("") + "</tr>";
+      }).join("") +
+      (rodape ? '<tr data-fixo style="background:var(--painel-2)">' + rodape + "</tr>" : "") +
+      "</tbody></table></div></div>";
+  }
+  function dt(x) { return x ? String(x).slice(0, 10) : '<span class="t4">–</span>'; }
+  function rs(x, c) {
+    return x === null || x === undefined
+      ? '<span class="t4">–</span>'
+      : '<span class="pre">R$</span>' + N.moeda(x, c === undefined ? 2 : c);
+  }
+
+  function conferencia(c, m) {
+    var t = c.totais, cab = c.cabecalho;
+    var resetou = (c.custos || []).filter(function (x) {
+      return x.estoque <= 0 && x.custo < cab.custo_mediano * 0.5; });
+
+    var h = '<div class="gr gr-2" style="gap:0 22px"><div>' +
+      kv("Vendeu no total", N.num(t.vendas_pecas, 0) + " un em " +
+         N.num(t.vendas_linhas) + " linhas" +
+         (t.primeira_venda ? ' <span class="t4">(' + N.dataLonga(t.primeira_venda) +
+          " → " + N.dataLonga(t.ultima_venda) + ")</span>" : "")) +
+      kv("Receita líquida", "R$ " + N.moeda(t.vendas_receita)) +
+      kv("Custo do vendido (CMV)", "R$ " + N.moeda(t.vendas_cmv)) +
+      kv("Lucro observado", "R$ " + N.moeda(t.vendas_lucro),
+         t.vendas_lucro >= 0 ? "mt" : "cr") +
+      "</div><div>" +
+      kv("Preço médio praticado", "R$ " + N.moeda(t.preco_medio, 2)) +
+      kv("Custo médio do vendido", "R$ " + N.moeda(t.custo_medio_vendido, 2)) +
+      kv("Lucro por peça", "R$ " + N.moeda(t.lucro_medio, 2),
+         t.lucro_medio >= 0 ? "mt" : "cr") +
+      kv("Custo que o modelo usa", "R$ " + N.moeda(cab.custo_unitario, 2), "am") +
+      "</div></div>";
+
+    /* O cruzamento de procedencia do custo. Duas causas possiveis para a
+       divergencia, e elas pedem acoes opostas:
+         - custo fora da faixa do proprio item  -> lancamento suspeito
+         - custo dentro da faixa, longe do CMV  -> o preco se moveu no tempo
+       Diagnosticar sempre a primeira seria errar em 64 dos 65 casos desta
+       base. */
+    var med = cab.custo_mediano || 0;
+    var razao = med ? cab.custo_unitario / med : 1;
+    var naFaixa = !med || (razao > 0.6 && razao < 1.6);
+    var dif = cab.custo_unitario / (t.custo_medio_vendido || 1) - 1;
+    var subiu = dif > 0;
+
+    h += '<div class="nota-lat mt14 ' + (naFaixa ? "" : "aviso") +
+      '" style="margin-left:0">' +
+      "O modelo usa <b>R$ " + N.moeda(cab.custo_unitario, 2) + "</b> por peça " +
+      "— o último custo médio lançado num dia com estoque. A média do que foi " +
+      "de fato vendido nos últimos anos é <b>R$ " +
+      N.moeda(t.custo_medio_vendido, 2) + "</b>, e a mediana histórica do item " +
+      "é <b>R$ " + N.moeda(med, 2) + "</b>. " +
+      (Math.abs(dif) < 0.1
+        ? "As três leituras estão juntas: custo estável."
+        : (naFaixa
+            ? "Hoje o item custa <b>" + N.pct(Math.abs(dif), 0) + " " +
+              (subiu ? "mais" : "menos") + "</b> do que a média do que já foi " +
+              "vendido, e o valor de hoje está na faixa da própria história do " +
+              "item — <b>é o preço que se moveu</b>, não um lançamento errado. " +
+              "A decisão de compra usa o custo de hoje, que é o que se vai pagar."
+            : "<b>O custo de hoje está fora da faixa da própria história do " +
+              "item</b> (" + N.num(razao, 2) + "× a mediana). Vale conferir os " +
+              "lançamentos abaixo antes de confiar na nota deste item.")) +
+      (resetou.length
+        ? " <span class=\"fraco\">O ERP lançou custo abaixo de metade da mediana " +
+          "em " + resetou.length + " dos dias listados abaixo, com estoque zero; o " +
+          "modelo não usa esses dias.</span>"
+        : "") + "</div>";
+
+    /* as duas leituras da margem, e a divergencia que explica a fila */
+    if (m && m.preco_liquido_peca) {
+      var mh = m.lucro_por_peca_historico, mn = m.lucro_por_peca;
+      var dm = mh ? mn / mh - 1 : 0;
+      h += '<div class="nota-lat mt10 ' + (Math.abs(dm) > 0.25 ? "aviso" : "") +
+        '" style="margin-left:0"><b>A margem que decide a compra</b> é o preço ' +
+        "praticado (R$ " + N.moeda(m.preco_liquido_peca, 2) + ") menos o custo de " +
+        "hoje (R$ " + N.moeda(m.custo_unitario, 2) + ") = <b>R$ " + N.moeda(mn, 2) +
+        "</b> por peça. A margem que as vendas passadas <i>observaram</i> é R$ " +
+        N.moeda(mh, 2) + ", porque cada venda subtraiu o custo do dia dela — " +
+        (Math.abs(dm) > 0.25
+          ? "<b>" + N.pct(dm, 0) + " de diferença</b>. O custo deste item se " +
+            "moveu, e por isso as duas leituras discordam. A decisão usa a " +
+            "primeira: é o custo que se vai pagar, não o que já se pagou."
+          : "uma diferença de " + N.pct(dm, 0) + ", ou seja, custo estável.") +
+        "</div>";
+    }
+
+    h += tab("Vendas", [
+      ["Data", function (r) { return dt(r.data); }],
+      ["Pedido", function (r) { return '<span class="mono t3">' + N.esc(r.pedido || "") + "</span>"; }],
+      ["Canal / vendedor", function (r) {
+        return N.esc(r.vendedor || r.canal || ""); }],
+      ["UF", function (r) { return N.esc(r.uf || ""); }],
+      ["Peças", function (r) { return N.num(r.pecas_vendidas, 0); }, 1],
+      ["Preço/un", function (r) { return rs(r.valor_da_peca); }, 1],
+      ["Receita líq.", function (r) { return rs(r.receita_liquida); }, 1],
+      ["Custo/un", function (r) { return rs(r.custo_unitario); }, 1],
+      ["CMV", function (r) { return rs(r.cmv); }, 1],
+      ["Lucro", function (r) {
+        return '<span class="' + (r.lucro >= 0 ? "c-mt" : "c-cr") + '">' +
+          rs(r.lucro) + "</span>"; }, 1]
+    ], c.vendas,
+      '<td colspan="4" class="forte">total do histórico</td>' +
+      '<td class="n forte">' + N.num(t.vendas_pecas, 0) + "</td><td></td>" +
+      '<td class="n forte">' + rs(t.vendas_receita, 0) + "</td><td></td>" +
+      '<td class="n forte">' + rs(t.vendas_cmv, 0) + "</td>" +
+      '<td class="n forte ' + (t.vendas_lucro >= 0 ? "c-mt" : "c-cr") + '">' +
+      rs(t.vendas_lucro, 0) + "</td>",
+      (t.primeira_venda
+        ? "Vendeu de " + N.dataLonga(t.primeira_venda) + " a " + N.dataLonga(t.ultima_venda) +
+          ". <b>Custo/un</b> é o custo médio do estoque no dia da venda, e " +
+          "<b>lucro</b> é receita líquida menos esse custo — não a margem do ERP, " +
+          "que carrega rateio de despesa e por isso não serve para decidir compra."
+        : ""),
+      c.mostrados.vendas);
+
+    h += tab("Compras — o pedido como o ERP registra", [
+      ["Data", function (r) { return dt(r.data); }],
+      ["Pedido", function (r) { return '<span class="mono t3">' + N.esc(r.idpedido || "") + "</span>"; }],
+      ["Fornecedor", function (r) { return N.esc((r.fornecedor || "").slice(0, 30)); }],
+      ["Pedido/atendido", function (r) {
+        return N.num(r.solicitado, 0) + " / " + N.num(r.atendido, 0); }, 1],
+      ["Valor/un", function (r) { return rs(r.valor_unitario); }, 1],
+      ["Total", function (r) { return rs(r.valor_total); }, 1],
+      ["Prazo combinado", function (r) {
+        return r.prazo_previsto ? N.num(r.prazo_previsto, 0) + "d" : '<span class="t4">–</span>'; }, 1],
+      ["Prazo realizado", function (r) {
+        return r.prazo_realizado === null || r.prazo_realizado === undefined
+          ? '<span class="t4">–</span>'
+          : '<span class="' + (r.prazo_realizado > (r.prazo_previsto || 0)
+              ? "c-cr" : "c-mt") + '">' + N.num(r.prazo_realizado, 0) + "d</span>"; }, 1],
+      ["Entrou em", function (r) { return dt(r.entrou_em); }],
+      ["Pagamento", function (r) {
+        return (r.prazo_pagamento ? N.num(r.prazo_pagamento, 0) + "d · " : "") +
+          N.esc((r.pagamento || "").slice(0, 18)); }]
+    ], c.compras,
+      '<td colspan="3" class="forte">total do histórico</td>' +
+      '<td class="n forte">' + N.num(t.compras_solicitado, 0) + " / " +
+      N.num(t.compras_atendido, 0) + "</td><td></td>" +
+      '<td class="n forte">' + rs(t.compras_valor, 0) + "</td>" +
+      '<td colspan="4"></td>',
+      "O prazo <b>combinado</b> é o que o cadastro do pedido diz; o " +
+      "<b>realizado</b> é a diferença entre a data do pedido e a entrada em " +
+      "estoque. O modelo dimensiona pelo realizado, e é a mediana dele que " +
+      "aparece como prazo do item (" + N.num(cab.lead_time_dias, 0) + " dias, de " +
+      N.num(cab.lead_time_pedidos, 0) + " pedidos).", c.mostrados.compras);
+
+    h += tab("Entradas em estoque — o que de fato chegou", [
+      ["Data", function (r) { return dt(r.data); }],
+      ["Peças", function (r) { return N.num(r.pecas, 0); }, 1],
+      ["Valor ao custo", function (r) { return rs(r.valor); }, 1]
+    ], c.entradas,
+      '<td class="forte">total do histórico</td>' +
+      '<td class="n forte">' + N.num(t.entradas_pecas, 0) + "</td>" +
+      '<td class="n forte">' + rs(t.entradas_valor, 0) + "</td>",
+      "Reconstruído do estoque diário — a subida do saldo de um dia para o " +
+      "outro. Fecha com o estoque por construção, ao contrário da tabela de " +
+      "compras do ERP, que salta de 18 mil para 322 mil peças por mês em março " +
+      "de 2026 sem o estoque acusar.", c.mostrados.entradas);
+
+    h += tab("Lançamentos de custo médio", [
+      ["Data", function (r) { return dt(r.data); }],
+      ["Custo lançado", function (r) { return rs(r.custo); }, 1],
+      ["Estoque no dia", function (r) {
+        return '<span class="' + (r.estoque <= 0 ? "c-cr" : "fraco") + '">' +
+          N.num(r.estoque, 1) + "</span>"; }, 1],
+      ["", function (r) {
+        return r.estoque <= 0
+          ? '<span class="c-cr pequeno">estoque zerado — o ERP reseta o custo aqui</span>'
+          : ""; }]
+    ], c.custos, "",
+      "Só os dias em que o custo mudou. O modelo usa o último lançamento de um " +
+      "dia <b>com estoque</b> (R$ " + N.moeda(cab.custo_ultimo_lancado, 2) +
+      "), e a mediana histórica é R$ " + N.moeda(cab.custo_mediano, 2) + ".");
+
+    return h;
+  }
+
   raiz.abrirItem = function (sku) {
     var alvo = N.abrir(
       '<span class="carregando" style="min-height:0"></span>',
@@ -79,7 +280,14 @@
           N.num(m.sd_periodo, 1) + " un", "ce") +
         kv("Distribuição ajustada", m.distribuicao, "vi");
       h += bloco("Demanda", '<div class="gr gr-2" style="gap:0 22px"><div>' + linhasDem +
-        '</div><div><div id="gv-dist" class="gfx" style="height:238px"></div></div></div>');
+        '</div><div><div id="gv-dist" class="gfx" style="height:206px"></div>' +
+        '<div class="legenda" style="font-size:10.5px;margin-top:8px">' +
+        '<span><i style="background:' + N.sombra(C.violeta, .8) + '"></i>' +
+        'demanda que o estoque cobre</span>' +
+        '<span><i style="background:' + N.sombra(C.coral, .75) + '"></i>' +
+        'demanda que passaria do ponto de pedido</span>' +
+        '<span><i style="background:' + C.ambar + '"></i>ponto de pedido</span>' +
+        '</div></div></div>');
 
       /* ------- 4. política */
       var pol = "";
@@ -89,7 +297,12 @@
           "Guarda a k-ésima peça enquanto a chance de precisar dela for maior que " +
           "<em>" + N.pct(m.limite_marginal, 1) + "</em> — o ponto em que o custo de mantê-la " +
           "parada empata com a margem que se perde se ela faltar.</div>" +
-          '<div id="gv-marg" class="gfx" style="height:210px"></div>';
+          '<div id="gv-marg" class="gfx" style="height:184px"></div>' +
+          '<div class="legenda" style="font-size:10.5px;margin-top:8px">' +
+          '<span><i style="background:' + N.sombra(C.menta, .8) + '"></i>vale carregar</span>' +
+          '<span><i style="background:' + N.sombra(C.tinta4, .6) + '"></i>não vale</span>' +
+          '<span><i style="background:' + C.ambar + '"></i>limite de ' +
+          N.pct(m.limite_marginal, 1) + '</span></div>';
       } else {
         pol = '<div id="gv-seg" class="gfx" style="height:210px"></div>' +
           '<div class="nota-lat mt10">O mínimo da curva é o estoque de segurança escolhido: ' +
@@ -123,7 +336,34 @@
         '<div class="mt14"><a class="btn btn-p" href="/metodologia?sku=' +
         encodeURIComponent(m.sku) + '">Ver este item passo a passo na metodologia →</a></div>');
 
+      /* ------- 6. conferencia: o dado cru, sob demanda */
+      h += bloco("Conferência do dado cru",
+        '<div class="prosa mb14" style="font-size:12.5px">Toda venda, toda compra e ' +
+        'todo lançamento de custo deste item, direto da base — <b>sem passar pelo ' +
+        'modelo</b>. É a trilha para conferir a mão de onde saiu cada número da ' +
+        'decisão.</div>' +
+        '<button class="btn btn-am" id="gv-conf-btn" data-sku="' + N.esc(m.sku) +
+        '">Carregar conferência</button>' +
+        '<div id="gv-conf" class="mt14"></div>',
+        "venda, compra e custo, linha por linha");
+
       alvo.innerHTML = h;
+
+      /* ---------------------------------------------------- conferencia */
+      var btn = document.getElementById("gv-conf-btn");
+      if (btn) btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.textContent = "carregando…";
+        var alvoC = document.getElementById("gv-conf");
+        alvoC.innerHTML = '<div class="carregando"><div class="girar"></div></div>';
+        N.buscar("/api/item/" + encodeURIComponent(m.sku) + "/conferencia")
+          .then(function (c) { alvoC.innerHTML = conferencia(c, m); btn.remove(); })
+          .catch(function (e) {
+            btn.disabled = false; btn.textContent = "Carregar conferência";
+            alvoC.innerHTML = '<div class="msg msg-er">não deu para carregar: ' +
+              N.esc(String(e)) + "</div>";
+          });
+      });
 
       /* ---------------------------------------------------- fita */
       document.getElementById("gv-fita").innerHTML = d.dias.map(function (x) {
@@ -157,7 +397,8 @@
           N.eixoY({ show: false })],
         series: [
           { name: "Saldo", type: "line", data: dias.map(function (x) { return x.saldo_final; }),
-            symbol: "none", smooth: 0.15, lineStyle: { color: C.ceu, width: 1.5 },
+            symbol: "none", smooth: 0.15, itemStyle: { color: C.ceu },
+            lineStyle: { color: C.ceu, width: 1.5 },
             areaStyle: { color: N.area(C.ceu, 0.18) },
             markLine: { silent: true, symbol: "none",
               lineStyle: { color: C.ambarEsc, type: [4, 4], width: 1 },
@@ -261,11 +502,14 @@
             formatter: function (v) { return N.curto(v); } } }),
           series: [
             { name: "Manter", type: "line", data: sg.map(function (r) { return r.custo_manter; }),
-              symbol: "none", lineStyle: { color: C.ambar, width: 1.3, type: [4, 3] } },
+              symbol: "none", itemStyle: { color: C.ambar },
+              lineStyle: { color: C.ambar, width: 1.3, type: [4, 3] } },
             { name: "Faltar", type: "line", data: sg.map(function (r) { return r.custo_ruptura; }),
-              symbol: "none", lineStyle: { color: C.coral, width: 1.3, type: [4, 3] } },
+              symbol: "none", itemStyle: { color: C.coral },
+              lineStyle: { color: C.coral, width: 1.3, type: [4, 3] } },
             { name: "Total", type: "line", data: sg.map(function (r) { return r.custo_total; }),
-              symbol: "none", smooth: 0.2, lineStyle: { color: C.tinta, width: 2 },
+              symbol: "none", smooth: 0.2, itemStyle: { color: C.tinta },
+              lineStyle: { color: C.tinta, width: 2 },
               areaStyle: { color: N.area(C.tinta, 0.08) },
               markPoint: { symbol: "circle", symbolSize: 8,
                 itemStyle: { color: C.menta, borderColor: C.fundo, borderWidth: 2 },

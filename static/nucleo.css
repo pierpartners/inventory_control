@@ -4,7 +4,22 @@
    acento ambar (cor de obra) sobre grafite.
    ===================================================================== */
 
-/* ---------------------------------------------------------------- 1. base */
+/* ---------------------------------------------------------------- 1. base
+
+   Tres eixos independentes, todos em variavel:
+
+     data-tema="escuro" | "claro"        no elemento <html>
+     data-daltonismo="on"               no elemento <html>
+
+   O :root nu e o tema escuro, para a pagina sair certa mesmo sem atributo
+   nenhum - a preferencia e aplicada por um script no <head>, antes da
+   primeira pintura, e se ele falhar o padrao continua valendo.
+
+   Nada aqui pode ter cor cravada. Cada valor cravado no CSS e uma mancha
+   escura no tema claro, e foram treze deles: o texto sobre o ambar, o hover
+   do link, a sombra da gaveta, a fita de dia disponivel, a tinta das tres
+   mensagens. Todos viraram variavel com o valor que ja tinham.
+--------------------------------------------------------------------------- */
 :root {
   /* superficies */
   --void:      #090C10;
@@ -34,6 +49,24 @@
   --violeta:   #A78BFA;
   --violeta-lav: rgba(167,139,250,.12);
 
+  /* o que antes estava cravado */
+  --sobre-ambar:   #14100A;   /* tinta sobre fundo ambar (botao, selecao) */
+  --ambar-claro:   #FFC169;   /* hover de link e de botao ambar */
+  --vinco:         rgba(255,255,255,.05);
+  --linha-hover:   rgba(255,255,255,.022);
+  --sombra:        rgba(0,0,0,.35);
+  --sombra-gaveta: rgba(0,0,0,.8);
+  --menta-esc:     #2C5A4A;   /* fita de dia disponivel */
+  --conceito-ok:      #3E8A70;
+  --conceito-ok-tinta:#5FC0A0;
+  --msg-ok-tinta:  #8AE9C6;
+  --msg-er-tinta:  #FFA79F;
+  --msg-in-tinta:  #A5D9FA;
+  --serie-6:       #E2E8F0;
+  --serie-7:       #F472B6;
+  --serie-8:       #94A5B6;
+  --trilho-glifo:  #140F06;
+
   --raio:     8px;
   --raio-p:   5px;
   --trilho-w: 236px;
@@ -41,6 +74,115 @@
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
   --sans: "Instrument Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+}
+
+/* ------------------------------------------------------------- tema claro
+
+   Nao e o escuro invertido. Num tema claro o acento tem de ESCURECER para
+   manter contraste sobre branco: o ambar #F2A93B tem 2,1:1 contra papel e
+   fica ilegivel como texto, entao o texto ambar usa #96590A (4,9:1) e o ambar
+   de preenchimento continua vivo, com tinta escura em cima.
+--------------------------------------------------------------------------- */
+:root[data-tema="claro"] {
+  --void:      #EFF1F4;
+  --fundo:     #F6F7F9;
+  --painel:    #FFFFFF;
+  --painel-2:  #F4F6F8;
+  --painel-3:  #E9ECF0;
+  --linha:     #D8DEE5;
+  --linha-2:   #E7EBEF;
+
+  --tinta:     #131A22;
+  --tinta-2:   #4A5665;
+  --tinta-3:   #6E7B8A;
+  --tinta-4:   #98A3AF;
+
+  --ambar:     #9A5F09;   /* era #B8730D, 3,82:1 sobre painel branco - abaixo do minimo de 4,5 */
+  --ambar-2:   #96590A;
+  --ambar-lav: rgba(184,115,13,.10);
+  --menta:     #0A7052;   /* era #0E8A63, 4,34:1 - abaixo do minimo de 4,5 */
+  --menta-lav: rgba(14,138,99,.10);
+  --coral:     #C7362A;
+  --coral-lav: rgba(199,54,42,.10);
+  --ceu:       #1268A8;
+  --ceu-lav:   rgba(18,104,168,.10);
+  --violeta:   #6D4CC4;
+  --violeta-lav: rgba(109,76,196,.10);
+
+  --sobre-ambar:   #FFF8EC;
+  --ambar-claro:   #8A5108;
+  --vinco:         rgba(0,0,0,.045);
+  --linha-hover:   rgba(19,26,34,.032);
+  --sombra:        rgba(19,26,34,.10);
+  --sombra-gaveta: rgba(19,26,34,.22);
+  --menta-esc:     #9CD2BE;
+  --conceito-ok:      #1E7A5C;
+  --conceito-ok-tinta:#0C6B4C;
+  --msg-ok-tinta:  #0A6B4C;
+  --msg-er-tinta:  #A82A20;
+  --msg-in-tinta:  #0D5687;
+  --serie-6:       #4A5665;
+  --serie-7:       #B03A78;
+  --serie-8:       #7B8794;
+  --trilho-glifo:  #FFF8EC;
+}
+
+/* -------------------------------------------------------- modo daltonismo
+
+   Conjunto Okabe-Ito. O positivo sai do verde e vai para o AZUL, porque o
+   eixo azul-amarelo e o que a visao dicromatica preserva; o negativo vai
+   para o vermelhao, que para um deuteranope aparece como um marrom bem mais
+   escuro que o laranja do acento - diferenca de luminancia, nao de matiz.
+
+   Isto sozinho nao basta. Ver `.c-mt` / `.c-cr` mais abaixo: no modo
+   daltonismo os numeros ganham seta, que se le sem cor nenhuma.
+--------------------------------------------------------------------------- */
+:root[data-daltonismo="on"] {
+  /* Medido contra o painel escuro (#11171E), so entra valor acima de 4,5:1.
+     O azul Okabe-Ito #0072B2 ficou de fora de proposito: da 3,48:1 aqui, e
+     ele foi desenhado para fundo claro.
+
+     A convencao que as legendas escrevem em texto - "azul e o modelo",
+     "verde e o que aconteceu" - e preservada: o azul continua sendo o azul.  */
+  --menta:     #009E73;   /* verde-azulado = positivo        5,27:1 */
+  --menta-lav: rgba(0,158,115,.16);
+  --menta-esc: #14624B;
+  --coral:     #D55E00;   /* vermelhao     = negativo        4,66:1 */
+  --coral-lav: rgba(213,94,0,.16);
+  --ceu:       #56B4E9;   /* azul-ceu      = a fonte modelo  7,81:1 */
+  --ceu-lav:   rgba(86,180,233,.14);
+  --violeta:   #CC79A7;   /*                                 5,89:1 */
+  --violeta-lav: rgba(204,121,167,.14);
+  --ambar:     #E69F00;   /*                                 8,00:1 */
+  --ambar-2:   #C08500;
+  --ambar-lav: rgba(230,159,0,.14);
+  --conceito-ok:      #14624B;
+  --conceito-ok-tinta:#3FC49B;
+  --msg-ok-tinta:  #3FC49B;
+  --msg-er-tinta:  #F0A472;
+  --serie-7:       #CC79A7;
+}
+:root[data-tema="claro"][data-daltonismo="on"] {
+  /* Os mesmos papeis do escuro, escurecidos para o papel branco. A versao
+     anterior deste bloco tinha `--menta` e `--ceu` os dois em azul
+     (#0F6D9E e #00538A): indistinguiveis entre si, e ainda quebrando a
+     convencao das legendas de que azul e o modelo. */
+  --menta:     #00674C;   /* verde-azulado = positivo */
+  --menta-lav: rgba(0,103,76,.10);
+  --menta-esc: #8CC7B4;
+  --coral:     #A84800;   /* vermelhao     = negativo */
+  --coral-lav: rgba(168,72,0,.10);
+  --ceu:       #005A8F;   /* azul          = a fonte modelo */
+  --ceu-lav:   rgba(0,90,143,.10);
+  --violeta:   #8E3A69;
+  --violeta-lav: rgba(142,58,105,.10);
+  --ambar:     #8A5E00;
+  --ambar-2:   #6F4B00;
+  --ambar-lav: rgba(138,94,0,.10);
+  --conceito-ok:      #00674C;
+  --conceito-ok-tinta:#00553E;
+  --msg-ok-tinta:  #00553E;
+  --msg-er-tinta:  #8A3B00;
 }
 
 * { box-sizing: border-box; }
@@ -57,7 +199,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-::selection { background: var(--ambar); color: #0A0D11; }
+::selection { background: var(--ambar); color: var(--sobre-ambar); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -65,7 +207,7 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--tinta-4); }
 
 a { color: var(--ambar); text-decoration: none; }
-a:hover { color: #FFC169; }
+a:hover { color: var(--ambar-claro); }
 
 /* ------------------------------------------------------------ 2. tipografia */
 .rotulo {
@@ -191,7 +333,7 @@ h3 { font-size: 13.5px; }
 }
 .painel::before {
   content: ""; position: absolute; inset: 0 0 auto; height: 1px; pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.05) 22%, rgba(255,255,255,.05) 78%, transparent);
+  background: linear-gradient(90deg, transparent, var(--vinco) 22%, var(--vinco) 78%, transparent);
   border-radius: var(--raio) var(--raio) 0 0;
 }
 .painel-cab {
@@ -301,19 +443,26 @@ h3 { font-size: 13.5px; }
 }
 .selo::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 5px; }
 .selo.liso::before { display: none; }
-.selo-am { background: var(--ambar-lav); color: var(--ambar); border-color: rgba(242,169,59,.22); }
-.selo-mt { background: var(--menta-lav); color: var(--menta); border-color: rgba(55,214,160,.22); }
-.selo-cr { background: var(--coral-lav); color: var(--coral); border-color: rgba(255,106,94,.22); }
-.selo-ce { background: var(--ceu-lav); color: var(--ceu); border-color: rgba(85,180,242,.22); }
-.selo-vi { background: var(--violeta-lav); color: var(--violeta); border-color: rgba(167,139,250,.22); }
+.selo-am { background: var(--ambar-lav); color: var(--ambar);
+  border-color: color-mix(in srgb, var(--ambar) 26%, transparent); }
+.selo-mt { background: var(--menta-lav); color: var(--menta);
+  border-color: color-mix(in srgb, var(--menta) 26%, transparent); }
+.selo-cr { background: var(--coral-lav); color: var(--coral);
+  border-color: color-mix(in srgb, var(--coral) 26%, transparent); }
+.selo-ce { background: var(--ceu-lav); color: var(--ceu);
+  border-color: color-mix(in srgb, var(--ceu) 26%, transparent); }
+.selo-vi { background: var(--violeta-lav); color: var(--violeta);
+  border-color: color-mix(in srgb, var(--violeta) 26%, transparent); }
 .selo-nu { background: var(--painel-3); color: var(--tinta-2); border-color: var(--linha); }
 
 .classe {
   display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
   padding: 2px 6px; border-radius: 4px; letter-spacing: .04em;
 }
-.classe-A { background: rgba(242,169,59,.16); color: var(--ambar); }
-.classe-B { background: rgba(85,180,242,.14); color: var(--ceu); }
+.classe-A { background: color-mix(in srgb, var(--ambar) 17%, transparent);
+  color: var(--ambar); }
+.classe-B { background: color-mix(in srgb, var(--ceu) 15%, transparent);
+  color: var(--ceu); }
 .classe-C { background: var(--painel-3); color: var(--tinta-3); }
 
 /* ------------------------------------------------------------ 8. controles */
@@ -326,10 +475,11 @@ h3 { font-size: 13.5px; }
 }
 .btn:hover { background: var(--painel-3); color: var(--tinta); border-color: var(--tinta-4); }
 .btn-am {
-  background: var(--ambar); border-color: var(--ambar); color: #14100A; font-weight: 600;
+  background: var(--ambar); border-color: var(--ambar); color: var(--sobre-ambar); font-weight: 600;
   box-shadow: 0 3px 14px -6px rgba(242,169,59,.7);
 }
-.btn-am:hover { background: #FFBC55; border-color: #FFBC55; color: #14100A; }
+.btn-am:hover { background: var(--ambar-claro); border-color: var(--ambar-claro);
+  color: var(--sobre-ambar); }
 .btn-p { padding: 5px 10px; font-size: 11.5px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -340,7 +490,7 @@ h3 { font-size: 13.5px; }
   transition: all .12s; white-space: nowrap;
 }
 .seg a:hover, .seg button:hover { color: var(--tinta); }
-.seg a.on, .seg button.on { background: var(--painel-3); color: var(--tinta); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.seg a.on, .seg button.on { background: var(--painel-3); color: var(--tinta); font-weight: 600; box-shadow: 0 1px 3px var(--sombra); }
 
 input[type=text], input[type=number], input[type=search], select, textarea {
   background: var(--void); border: 1px solid var(--linha);
@@ -395,7 +545,8 @@ input[type=range]:focus { box-shadow: none; }
 input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 3px; background: var(--painel-3); }
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--ambar);
-  margin-top: -5.5px; box-shadow: 0 0 0 3px rgba(242,169,59,.2), 0 1px 4px rgba(0,0,0,.5); border: none;
+  margin-top: -5.5px; box-shadow: 0 0 0 3px var(--ambar-lav), 0 1px 4px var(--sombra);
+  border: none;
 }
 input[type=range]::-moz-range-track { height: 4px; border-radius: 3px; background: var(--painel-3); }
 input[type=range]::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--ambar); border: none; }
@@ -425,7 +576,7 @@ table.tb td {
   white-space: nowrap; color: var(--tinta-2); vertical-align: middle;
 }
 table.tb tbody tr { transition: background .1s; }
-table.tb tbody tr:hover td { background: rgba(255,255,255,.022); }
+table.tb tbody tr:hover td { background: var(--linha-hover); }
 table.tb tbody tr.clicavel { cursor: pointer; }
 table.tb tbody tr.clicavel:hover td { background: rgba(242,169,59,.07); }
 table.tb td.n, table.tb th.n { text-align: right; }
@@ -466,7 +617,7 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
 .fita { display: flex; gap: 1px; height: 32px; border-radius: 4px; overflow: hidden; background: var(--painel-3); }
 .fita i { flex: 1 1 0; min-width: 0; transition: opacity .1s; }
 .fita i:hover { opacity: .65; }
-.fita i.dsp { background: #2C5A4A; }
+.fita i.dsp { background: var(--menta-esc); }
 .fita i.par { background: var(--ambar); }
 .fita i.sem { background: var(--coral); }
 
@@ -518,8 +669,8 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
 }
 .conceito .t { font-size: 12.5px; font-weight: 600; color: var(--tinta); margin-bottom: 3px; }
 .conceito .d { font-size: 11.5px; color: var(--tinta-3); line-height: 1.55; }
-.conceito.ok { border-left-color: #3E8A70; }
-.conceito.ok .t { color: #5FC0A0; }
+.conceito.ok { border-left-color: var(--conceito-ok); }
+.conceito.ok .t { color: var(--conceito-ok-tinta); }
 .conceito.meio { border-left-color: var(--ambar-2); }
 .conceito.meio .t { color: var(--ambar); }
 .conceito.ruim { border-left-color: var(--coral); }
@@ -599,7 +750,7 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
   position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 96vw);
   background: var(--fundo); border-left: 1px solid var(--linha);
   z-index: 91; transform: translateX(100%); transition: transform .26s cubic-bezier(.32,.72,0,1);
-  display: flex; flex-direction: column; box-shadow: -24px 0 60px -20px rgba(0,0,0,.8);
+  display: flex; flex-direction: column; box-shadow: -24px 0 60px -20px var(--sombra-gaveta);
 }
 .gaveta.on { transform: none; }
 .gaveta-cab { padding: 18px 22px; border-bottom: 1px solid var(--linha-2); display: flex; align-items: flex-start; gap: 14px; }
@@ -614,9 +765,12 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
 .fechar:hover { color: var(--tinta); background: var(--painel-3); }
 
 .msg { padding: 11px 15px; border-radius: var(--raio-p); font-size: 12.5px; margin-bottom: 16px; border: 1px solid; line-height: 1.55; }
-.msg-ok { background: var(--menta-lav); border-color: rgba(55,214,160,.3); color: #8AE9C6; }
-.msg-er { background: var(--coral-lav); border-color: rgba(255,106,94,.3); color: #FFA79F; }
-.msg-in { background: var(--ceu-lav); border-color: rgba(85,180,242,.3); color: #A5D9FA; }
+.msg-ok { background: var(--menta-lav); border-color: var(--menta);
+  color: var(--msg-ok-tinta); }
+.msg-er { background: var(--coral-lav); border-color: var(--coral);
+  color: var(--msg-er-tinta); }
+.msg-in { background: var(--ceu-lav); border-color: var(--ceu);
+  color: var(--msg-in-tinta); }
 
 .carregando { display: grid; place-items: center; height: 100%; min-height: 130px; color: var(--tinta-4); font-size: 12px; }
 .girar { width: 15px; height: 15px; border: 2px solid var(--linha); border-top-color: var(--ambar); border-radius: 50%; animation: gira .7s linear infinite; }
@@ -624,6 +778,90 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
 
 .entra { animation: entra .3s ease both; }
 @keyframes entra { from { opacity: 0; transform: translateY(7px); } }
+
+/* ------------------------------------------------------------------ o "!"
+
+   Pequeno, ao lado do rotulo, com a definicao inteira no atributo `title`.
+   Nativo de proposito: funciona com teclado, funciona com leitor de tela e
+   nao depende de JS para aparecer. Nao vira tooltip desenhado porque tooltip
+   desenhado nunca sobrevive a um `overflow: auto` - e quase toda tabela do
+   sistema esta dentro de um.
+--------------------------------------------------------------------------- */
+.pin {
+  /* `--tinta-3` e nao `--tinta-4`: o quarto nivel de tinta da 1,99:1 sobre o
+     painel escuro, o que serve para decoracao mas nao para um controle que o
+     usuario precisa encontrar. O terceiro da 3,35:1 e atende o minimo de 3:1
+     da norma para componente de interface, continuando discreto. */
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%; margin-left: 5px;
+  border: 1px solid var(--tinta-4); color: var(--tinta-3);
+  font-size: 9px; font-weight: 700; cursor: help; vertical-align: middle;
+  font-family: var(--sans); flex: 0 0 13px; text-transform: none;
+  letter-spacing: 0; line-height: 1; user-select: none;
+}
+.pin:hover, .pin:focus-visible {
+  border-color: var(--ambar-2); color: var(--ambar); outline: none;
+}
+table.tb th .pin { margin-left: 4px; }
+.painel-cab h2 .pin, .secao-cab h2 .pin { margin-left: 7px; }
+/* num rotulo em caixa alta o "!" nao deve herdar o letter-spacing */
+.rotulo .pin, .kv .k .pin { margin-left: 4px; }
+
+/* ------------------------------------------------------- modo daltonismo
+
+   A troca de matiz e metade da solucao. A outra metade e um segundo canal,
+   mas so onde a cor for o UNICO canal.
+
+   Auditei os 45 usos de `.c-mt` / `.c-cr` antes de decidir onde por seta:
+   eles marcam VALENCIA, nao direcao. "Dinheiro parado R$ 213.028" e vermelho
+   por ser ruim, nao por ter caido; "Demanda real" e verde por ser bom, nao
+   por ter subido. Uma seta para baixo ali afirmaria uma queda que ninguem
+   mediu - o glifo estaria mentindo com confianca, que e pior que nao ter
+   glifo. E nessas colunas a valencia ja esta no NOME ("Faltou", "Margem
+   perdida", "Dinheiro parado"): a cor e reforco.
+
+   Entao a seta entra so em `.delta`, onde o numero E uma diferenca. O que
+   precisava de segundo canal de verdade era o que se distingue APENAS por
+   cor - o selo, a fita de dias e a serie do grafico -, e e o que os blocos
+   abaixo resolvem: forma no selo, textura na fita, paleta Okabe-Ito na serie.
+--------------------------------------------------------------------------- */
+:root[data-daltonismo="on"] .c-mt.delta::before { content: "\25B2 "; font-size: .74em; }
+:root[data-daltonismo="on"] .c-cr.delta::before { content: "\25BC "; font-size: .74em; }
+:root[data-daltonismo="on"] .selo-mt::before { border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+:root[data-daltonismo="on"] .selo-cr::before { border-radius: 0;
+  clip-path: polygon(0 0, 100% 0, 50% 100%); }
+/* a fita de dias fica com textura, para os tres estados nao dependerem so
+   da cor num bloco de 3px de largura */
+:root[data-daltonismo="on"] .fita i.par {
+  background-image: repeating-linear-gradient(45deg,
+    transparent 0 2px, var(--vinco) 2px 4px);
+}
+:root[data-daltonismo="on"] .fita i.sem {
+  background-image: repeating-linear-gradient(-45deg,
+    transparent 0 1px, rgba(0,0,0,.35) 1px 3px);
+}
+
+/* ---------------------------------------------------------- preferencias
+   O bloco de tema e daltonismo, no pe do trilho.
+--------------------------------------------------------------------------- */
+.prefs { padding: 12px 14px; border-top: 1px solid var(--linha-2); display: grid;
+  gap: 8px; }
+.prefs .prefs-tit { font-size: 9.5px; font-weight: 700; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--tinta-4); }
+.pref-lin { display: flex; align-items: center; gap: 6px; }
+.pref-lin .seg { flex: 1; }
+.pref-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center;
+  gap: 5px; padding: 5px 7px; border-radius: var(--raio-p);
+  border: 1px solid var(--linha); background: var(--painel);
+  color: var(--tinta-3); font-family: var(--sans); font-size: 10.5px;
+  font-weight: 600; cursor: pointer; line-height: 1.2;
+}
+.pref-btn:hover { color: var(--tinta); border-color: var(--tinta-4); }
+.pref-btn.on { background: var(--ambar-lav); border-color: var(--ambar-2);
+  color: var(--ambar); }
+.pref-btn svg { flex: 0 0 13px; }
 
 /* utilitarios */
 .mt6{margin-top:6px}.mt10{margin-top:10px}.mt14{margin-top:14px}.mt18{margin-top:18px}.mt24{margin-top:24px}

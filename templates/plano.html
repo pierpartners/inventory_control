@@ -222,7 +222,7 @@
       <div class="rolo">
         <table class="tb" id="tb-compra">
           <thead><tr>
-            <th class="nao-ord">#</th>
+            <th class="nao-ord" data-ajuda="Posição na fila global de compra: a ordem em que esta peça entra, da melhor nota para a pior.">#</th>
             <th>Item</th>
             <th>Classe</th>
             <th class="n">Posição hoje</th>
@@ -511,22 +511,24 @@
       series: [
         { name: "Caixa acumulado", type: "line",
           data: f.map(function (r) { return r.caixa_acumulado; }),
-          symbol: "none", lineStyle: { color: C.ambar, width: 2 },
+          symbol: "none", itemStyle: { color: C.ambar },
+          lineStyle: { color: C.ambar, width: 2 },
           areaStyle: { color: N.area(C.ambar, 0.24) },
+          /* o teto vai para a esquerda e o corte para a direita: os dois
+             rotulos ficavam em cima um do outro no canto superior direito */
           markLine: { silent: true, symbol: "none",
             data: [
-              { yAxis: d.teto, lineStyle: { color: C.menta, width: 1.5, type: [5, 4] },
-                label: { color: C.menta, fontSize: 10.5, position: "insideEndTop",
-                  formatter: "caixa do ciclo · R$ " + N.curto(d.teto) } },
-              { xAxis: corte - 1, lineStyle: { color: C.coral, width: 1.4, type: [4, 4] },
-                label: { color: C.coral, fontSize: 10.5, position: "insideEndTop",
-                  rotate: 0, distance: 5, formatter: "o caixa acaba aqui" } }
-            ] },
+              N.marcaY(d.teto, C.menta, "caixa do ciclo · R$ " + N.curto(d.teto),
+                       { label: { position: "insideStartTop" } })
+            ].concat(N.marcasX(
+              [{ x: corte - 1, cor: C.coral, ativo: true, texto: "o caixa acaba aqui" }],
+              { faixa: f.length, alturas: [8] })) },
           markArea: { silent: true, itemStyle: { color: "rgba(55,214,160,.05)" },
             data: [[{ xAxis: 0 }, { xAxis: Math.max(corte - 1, 0) }]] } },
         { name: "Retorno da peça (× 1.000, por real por dia)", type: "line", yAxisIndex: 1,
           data: f.map(function (r) { return r.nota; }),
-          symbol: "none", lineStyle: { color: C.violeta, width: 1.5 } }
+          symbol: "none", itemStyle: { color: C.violeta },
+          lineStyle: { color: C.violeta, width: 1.5 } }
       ]
     });
   });

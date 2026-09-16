@@ -6,14 +6,45 @@
   "use strict";
 
   /* -------------------------------------------------------- 1. formatos */
+  /* As cores vem do CSS, nao daqui.
+
+     O ECharts recebe cor como VALOR: um grafico montado com "#37D6A0" fica
+     com "#37D6A0" para sempre, indiferente a qualquer troca de variavel. Se
+     esta tabela tivesse hex cravado, trocar para o tema claro deixaria a
+     pagina clara e todos os graficos na paleta escura.
+
+     Os valores abaixo sao o fallback para o caso de o CSS nao ter carregado
+     (ou de `getComputedStyle` falhar): sao exatamente o tema escuro, que e o
+     `:root` nu do nucleo.css. */
   var COR = {
     ambar: "#F2A93B", ambarEsc: "#C4801F", menta: "#37D6A0", coral: "#FF6A5E",
     ceu: "#55B4F2", violeta: "#A78BFA", tinta: "#E9F0F7", tinta2: "#94A5B6",
     tinta3: "#5D6C7C", tinta4: "#3E4A57", linha: "#212B36", linha2: "#19212A",
     painel: "#11171E", painel2: "#161D26", painel3: "#1C242E",
-    fundo: "#0C1015", vazio: "#090C10"
+    fundo: "#0C1015", vazio: "#090C10",
+    serie6: "#E2E8F0", serie7: "#F472B6", serie8: "#94A5B6"
   };
-  var SERIE = [COR.ambar, COR.ceu, COR.menta, COR.violeta, COR.coral, "#E2E8F0", "#F472B6", "#94A5B6"];
+  var DE_CSS = {
+    ambar: "--ambar", ambarEsc: "--ambar-2", menta: "--menta", coral: "--coral",
+    ceu: "--ceu", violeta: "--violeta", tinta: "--tinta", tinta2: "--tinta-2",
+    tinta3: "--tinta-3", tinta4: "--tinta-4", linha: "--linha", linha2: "--linha-2",
+    painel: "--painel", painel2: "--painel-2", painel3: "--painel-3",
+    fundo: "--fundo", vazio: "--void",
+    serie6: "--serie-6", serie7: "--serie-7", serie8: "--serie-8"
+  };
+  function lerCoresDoCSS() {
+    try {
+      var cs = getComputedStyle(document.documentElement);
+      for (var k in DE_CSS) {
+        var v = cs.getPropertyValue(DE_CSS[k]).trim();
+        if (v) COR[k] = v;   /* muta no lugar: N.COR ja esta referenciado */
+      }
+    } catch (e) {}
+  }
+  lerCoresDoCSS();
+
+  var SERIE = [COR.ambar, COR.ceu, COR.menta, COR.violeta, COR.coral,
+               COR.serie6, COR.serie7, COR.serie8];
 
   function num(v, casas) {
     if (v === null || v === undefined || isNaN(v)) return "–";
@@ -102,26 +133,37 @@
      e o unico valor correto quando ha barras: com `false` a barra fica
      centrada no tique e a primeira/ultima sai cortada pelo eixo. Graficos
      so de linha passam `boundaryGap: false` explicitamente. */
+  /* Object.assign e raso: quem passa `axisLabel: {color}` apagaria margem,
+     fonte e hideOverlap junto. Estes dois merges evitam isso - e e por
+     hideOverlap que os rotulos de eixo param de se empilhar. */
+  function fundir(base, extra, chaves) {
+    var r = Object.assign({}, base, extra || {});
+    chaves.forEach(function (k) {
+      if (base[k] && extra && extra[k]) r[k] = Object.assign({}, base[k], extra[k]);
+    });
+    return r;
+  }
   function eixoX(extra) {
-    return Object.assign({
+    return fundir({
       type: "category",
       axisLine: { lineStyle: { color: COR.linha } },
       axisTick: { show: false },
-      axisLabel: { color: COR.tinta3, fontSize: 10.5, margin: 11 },
+      axisLabel: { color: COR.tinta3, fontSize: 10.5, margin: 11, hideOverlap: true },
       splitLine: { show: false },
-      boundaryGap: true
-    }, extra || {});
+      boundaryGap: true,
+      nameTextStyle: { color: COR.tinta4, fontSize: 10 }
+    }, extra, ["axisLabel", "axisLine", "splitLine", "nameTextStyle"]);
   }
   function eixoY(extra) {
-    return Object.assign({
+    return fundir({
       type: "value",
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: COR.tinta3, fontSize: 10.5, margin: 12,
+      axisLabel: { color: COR.tinta3, fontSize: 10.5, margin: 12, hideOverlap: true,
         fontFamily: '"JetBrains Mono", monospace' },
       splitLine: { lineStyle: { color: COR.linha2, type: [3, 4] } },
       nameTextStyle: { color: COR.tinta4, fontSize: 10 }
-    }, extra || {});
+    }, extra, ["axisLabel", "axisLine", "splitLine", "nameTextStyle"]);
   }
   function grade(extra) {
     return Object.assign({ left: 8, right: 14, top: 20, bottom: 6, containLabel: true }, extra || {});
@@ -144,6 +186,100 @@
     return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + alfa + ")";
   }
 
+  /* ---------------------------------------------- series com cor coerente */
+  /* O quadradinho da legenda do ECharts vem de `itemStyle`, nao de
+     `lineStyle`. Definir so a cor da linha faz a legenda mostrar a cor da
+     paleta padrao - foi assim que quase todo grafico daqui ficou com legenda
+     de uma cor e linha de outra. Estes dois construtores fecham a porta:
+     a cor entra uma vez e vale para linha, area, ponto e legenda. */
+  function serieLinha(nome, dados, cor, extra) {
+    extra = extra || {};
+    var s = {
+      name: nome, type: "line", data: dados, symbol: "none",
+      itemStyle: { color: cor },                       // <- a legenda le daqui
+      lineStyle: Object.assign({ color: cor, width: 2 }, extra.lineStyle || {}),
+    };
+    if (extra.area) s.areaStyle = { color: area(cor, extra.area === true ? 0.2 : extra.area) };
+    Object.keys(extra).forEach(function (k) {
+      if (k !== "lineStyle" && k !== "area") s[k] = extra[k];
+    });
+    return s;
+  }
+
+  function serieBarra(nome, dados, cor, extra) {
+    extra = extra || {};
+    var s = {
+      name: nome, type: "bar", data: dados,
+      itemStyle: Object.assign({ color: cor }, extra.itemStyle || {}),
+    };
+    Object.keys(extra).forEach(function (k) {
+      if (k !== "itemStyle") s[k] = extra[k];
+    });
+    return s;
+  }
+
+  /* ------------------------------------------- marcadores verticais */
+  /* Varios marcadores no mesmo lugar viram um borrao de texto. Aqui os que
+     caem praticamente no mesmo x sao fundidos num unico rotulo, e os que
+     sobram sao escalonados na vertical para nao encavalar. */
+  function marcasX(itens, opcoes) {
+    opcoes = opcoes || {};
+    var faixa = opcoes.faixa || 1;                  // largura total do eixo
+    var minimo = opcoes.minimo || 0;                // origem do eixo
+    var junta = (opcoes.tolerancia || 0.035) * faixa;
+    var alturas = opcoes.alturas || [8, 28, 48, 68];
+    var ordenados = itens.slice().filter(function (m) {
+      return m && isFinite(m.x);
+    }).sort(function (a, b) { return a.x - b.x; });
+
+    // marcadores vizinhos viram um rotulo unico: dois textos empilhados no
+    // mesmo pixel nao se leem, e a distincao de 1% nao interessa a ninguem
+    var grupos = [];
+    ordenados.forEach(function (m) {
+      var g = grupos[grupos.length - 1];
+      if (g && Math.abs(m.x - g.x) <= junta) {
+        if (m.ativo) { g.cor = m.cor; g.ativo = true; g.textos.unshift(m.texto); }
+        else { g.textos.push(m.texto); }
+      } else {
+        grupos.push({ x: m.x, cor: m.cor, ativo: !!m.ativo, textos: [m.texto] });
+      }
+    });
+
+    return grupos.map(function (g, i) {
+      // rotulo sempre para dentro do grafico: encostado na direita ele sai
+      // pela borda, encostado na esquerda ele e cortado pelo eixo
+      var esquerda = (g.x - minimo) / faixa < 0.62;
+      return {
+        xAxis: g.x,
+        lineStyle: { color: g.cor, width: g.ativo ? 2 : 1,
+                     type: g.ativo ? "solid" : [4, 4] },
+        label: {
+          color: g.cor, fontSize: 10.5, rotate: 0,
+          position: "insideEndTop", align: esquerda ? "left" : "right",
+          verticalAlign: "top",
+          distance: [esquerda ? 6 : -6, alturas[i % alturas.length]],
+          formatter: (g.ativo ? "▸ " : "") + g.textos.join("  ·  "),
+          backgroundColor: "rgba(9,12,16,.86)", padding: [3, 6], borderRadius: 3,
+          borderColor: g.cor, borderWidth: g.ativo ? 1 : 0,
+        },
+      };
+    });
+  }
+
+  /* marcador horizontal unico (teto, limite).
+     O merge de `label` e profundo de proposito: quem so quer mudar a posicao
+     nao pode perder o formatter no caminho - foi assim que o rotulo "caixa
+     do ciclo" desapareceu do grafico da fila. */
+  function marcaY(valor, cor, texto, extra) {
+    return fundir({
+      yAxis: valor,
+      lineStyle: { color: cor, width: 1.5, type: [5, 4] },
+      label: { color: cor, fontSize: 10.5, position: "insideEndTop", rotate: 0,
+               formatter: texto, backgroundColor: "rgba(9,12,16,.86)",
+               padding: [3, 6], borderRadius: 3 },
+    }, extra, ["label", "lineStyle"]);
+  }
+
   /* inicializa um grafico com o tema aplicado e responsividade */
   var _graficos = [];
   function grafico(el, opcoes) {
@@ -159,6 +295,162 @@
     if (_graficos.indexOf(g) < 0) _graficos.push(g);
     return g;
   }
+  /* =================================================================
+     Preferencias: tema e daltonismo.
+
+     Gravar e recarregar. O script do <head> aplica antes da pintura, entao
+     nao ha piscada; e o recarregamento e o unico caminho que garante grafico
+     repintado, porque canvas ja desenhado nao acompanha variavel de CSS.
+  ================================================================= */
+  function lerPref(k, padrao) {
+    try { return localStorage.getItem(k) || padrao; } catch (e) { return padrao; }
+  }
+  function gravarPref(k, v) {
+    try { localStorage.setItem(k, v); } catch (e) {}
+  }
+  function montarPrefs() {
+    var r = document.documentElement;
+    var tema = r.getAttribute("data-tema") || "escuro";
+    var dalt = r.getAttribute("data-daltonismo") === "on";
+
+    document.querySelectorAll("[data-tema-btn]").forEach(function (b) {
+      if (b.dataset.temaBtn === tema) b.classList.add("on");
+      b.addEventListener("click", function () {
+        gravarPref("nucleo-tema", b.dataset.temaBtn);
+        raiz.location.reload();
+      });
+    });
+
+    var bd = document.getElementById("btn-daltonismo");
+    if (bd) {
+      if (dalt) bd.classList.add("on");
+      var rot = document.getElementById("rot-daltonismo");
+      if (rot) rot.textContent = dalt ? "Daltonismo: ligado" : "Modo daltonismo";
+      bd.setAttribute("aria-pressed", dalt ? "true" : "false");
+      bd.addEventListener("click", function () {
+        gravarPref("nucleo-daltonismo", dalt ? "off" : "on");
+        raiz.location.reload();
+      });
+    }
+  }
+
+  /* =================================================================
+     O "!" de ajuda, pendurado automaticamente.
+
+     Por que automatico e nao escrito a mao em cada <th>: sao 163 cabecalhos
+     de tabela em nove telas, mais titulo de painel, rotulo de metrica e
+     formula - e boa parte deles e montada por JS em tempo de execucao (a
+     lista do backtest, a gaveta do item, a conferencia). Escrever a mao
+     significaria manter a mesma definicao repetida em varios arquivos, e
+     divergir. Aqui a definicao mora num lugar so, o glossario.
+
+     O casamento e por texto normalizado - minusculo, sem acento, sem
+     pontuacao -, entao "Custo/peça" e "custo peca" chegam na mesma chave e
+     um mesmo verbete serve a todas as telas que usam aquele rotulo.
+
+     Quem ja tem "!" escrito a mao fica como esta: a tela de backtest tem
+     descricoes especificas do contexto dela, mais precisas que um verbete
+     geral, e sobrescrever seria perder informacao.
+  ================================================================= */
+  var SEM_ACENTO = /[\u0300-\u036f]/g;
+  function chaveGlossario(t) {
+    return String(t).normalize("NFKD").replace(SEM_ACENTO, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+  /* pega so o texto proprio do elemento, sem o de filhos que sao legenda,
+     contador ou o proprio pin - senao a chave nunca casa */
+  function textoDoRotulo(el) {
+    var t = "";
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var n = el.childNodes[i];
+      if (n.nodeType === 3) { t += n.nodeValue; continue; }
+      if (n.nodeType !== 1) continue;
+      if (n.classList && (n.classList.contains("pin") ||
+                          n.classList.contains("dica") ||
+                          n.classList.contains("q") ||
+                          n.classList.contains("suf") ||
+                          n.classList.contains("un") ||
+                          n.classList.contains("t4"))) continue;
+      if (n.tagName === "SVG" || n.tagName === "svg") continue;
+      t += n.textContent;
+    }
+    return t.replace(/\s+/g, " ").trim();
+  }
+
+  var ALVOS = "table.tb th, .painel-cab h2, .secao-cab h2, .metrica .rotulo, " +
+              ".rp .perg, .formula .titulo, .kv > .k";
+
+  function pinarUm(el) {
+    if (!el || el.querySelector(":scope > .pin")) return 0;
+    var txt = textoDoRotulo(el);
+    /* `data-ajuda` no proprio elemento vence o glossario. E a valvula de
+       escape para o rotulo que nao da para indexar por texto - coluna de um
+       simbolo so, como "#" ou "μ", cuja chave normalizada fica vazia - e para
+       o caso em que uma tela precisa de uma descricao mais especifica que o
+       verbete geral. */
+    var d = el.getAttribute("data-ajuda");
+    if (!d) {
+      var g = raiz.N && raiz.N.GLOSSARIO;
+      if (!g) return 0;
+      if (!txt || txt.length > 90) return 0;
+      d = g[chaveGlossario(txt)];
+    }
+    if (!d) return 0;
+    var sp = document.createElement("span");
+    sp.className = "pin";
+    sp.setAttribute("title", d);
+    sp.setAttribute("tabindex", "0");
+    sp.setAttribute("role", "note");
+    sp.setAttribute("aria-label", txt + ": " + d);
+    sp.textContent = "!";
+    el.appendChild(sp);
+    return 1;
+  }
+
+  function pinar(raizEl) {
+    var base = raizEl || document;
+    var n = 0;
+    if (base.matches && base.matches(ALVOS)) n += pinarUm(base);
+    var lista = base.querySelectorAll ? base.querySelectorAll(ALVOS) : [];
+    for (var i = 0; i < lista.length; i++) n += pinarUm(lista[i]);
+    return n;
+  }
+
+  /* o que e montado por JS depois - lista do backtest, gaveta, conferencia -
+     tambem recebe o "!", sem precisar que cada um desses lugares se lembre de
+     chamar pinar(). Em lote, num rAF, para nao pinar linha por linha
+     enquanto uma tabela de mil linhas esta sendo escrita. */
+  var _pend = [], _agendado = false;
+  /* MICROTAREFA, nao requestAnimationFrame.
+     rAF nao dispara em aba de fundo nem em painel oculto, e a tabela montada
+     ali ficaria sem "!" ate a aba receber foco - foi exatamente o que
+     aconteceu no primeiro teste, com tres cabecalhos do painel sem pin porque
+     a tabela deles e montada depois do fetch. A microtarefa roda ao fim da
+     tarefa atual, sempre, e junta num passo so todas as escritas de innerHTML
+     da mesma funcao. */
+  function agendarPin() {
+    if (_agendado) return;
+    _agendado = true;
+    var correr = function () {
+      _agendado = false;
+      var f = _pend; _pend = [];
+      for (var k = 0; k < f.length; k++) { try { pinar(f[k]); } catch (e) {} }
+    };
+    if (raiz.queueMicrotask) raiz.queueMicrotask(correr);
+    else setTimeout(correr, 0);
+  }
+  function observarParaPinar() {
+    if (!raiz.MutationObserver) return;
+    new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var add = muts[i].addedNodes;
+        for (var j = 0; j < add.length; j++)
+          if (add[j].nodeType === 1) _pend.push(add[j]);
+      }
+      if (_pend.length) agendarPin();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
   var _tmr;
   raiz.addEventListener("resize", function () {
     clearTimeout(_tmr);
@@ -375,11 +667,27 @@
     rs: rs, esc: esc, sombra: sombra, area: area,
     dica: dica, dicaTit: dicaTit, dicaLin: dicaLin,
     eixoX: eixoX, eixoY: eixoY, grade: grade,
+    serieLinha: serieLinha, serieBarra: serieBarra,
+    marcasX: marcasX, marcaY: marcaY,
     grafico: grafico, espera: espera, buscar: buscar,
     tabela: tabela, abrir: abrir, fechar: fechar,
     barraPosicao: barraPosicao, categoriaMaisProxima: categoriaMaisProxima,
     corProduto: corProduto, corProdutoFundo: corProdutoFundo, pontoProduto: pontoProduto,
     seloClasse: seloClasse, seloRegime: seloRegime,
-    seloDecisao: seloDecisao, seloRisco: seloRisco
+    seloDecisao: seloDecisao, seloRisco: seloRisco,
+    pinar: pinar, chaveGlossario: chaveGlossario, GLOSSARIO: {}
   };
+
+  /* O arranque fica aqui, DEPOIS da exportacao. `pinarUm` le
+     `raiz.N.GLOSSARIO`, e `raiz.N` so passa a existir na linha acima - iniciar
+     antes daria zero pin, em silencio. E o glossario.js, carregado a seguir,
+     preenche o objeto antes do DOMContentLoaded. */
+  function iniciar() {
+    montarPrefs();
+    pinar(document);
+    observarParaPinar();
+  }
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", iniciar);
+  else iniciar();
 })(window);

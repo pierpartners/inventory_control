@@ -32,8 +32,9 @@ from fastapi.templating import Jinja2Templates
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from backend import analitico  # noqa: E402
+from backend import acompanhamento, analitico, qualidade  # noqa: E402
 from backend import modelo as motor  # noqa: E402
+from backend import validacao  # noqa: E402
 from backend.config import (Parametros, CAMPOS, CHAVES,  # noqa: E402
                             CRITERIOS, GRUPOS)
 from backend.warehouse import (BigQueryWarehouse, DuckDBWarehouse,  # noqa: E402
@@ -124,6 +125,15 @@ def contexto(request: Request, pagina: str, **extra) -> dict:
     """Base de todo template: pagina ativa + o cabecalho de execucao."""
     base = {"request": request, "pagina": pagina,
             "motor_dados": os.environ.get("WAREHOUSE", "duckdb")}
+    # o contador de achados no menu sai do cache, nunca da bateria: rodar as 21
+    # verificacoes em cada abertura de pagina custaria 13 segundos por clique.
+    # Enquanto o cache estiver frio o menu fica sem numero, e e isso mesmo -
+    # um numero errado ali seria pior que nenhum.
+    q = _cache_qualidade.get("d")
+    if q:
+        n = q["resumo"]["erro"] + q["resumo"]["aviso"]
+        if n:
+            base["qualidade_alerta"] = n
     try:
         w = wh()
         if pronto(w):
@@ -145,6 +155,31 @@ def contexto(request: Request, pagina: str, **extra) -> dict:
         pass
     base.update(extra)
     return base
+
+
+# a avaliacao roda o motor inteiro e a janela de validacao: ~2s por data. Cara
+# demais para refazer a cada clique, barata demais para gravar no warehouse.
+_cache_validacao: dict = {}
+# a bateria de qualidade varre 1,3 milhao de linhas de estoque contra 790 mil
+# de venda: 13 segundos. Fica em cache e cai quando o pipeline roda.
+_cache_qualidade: dict = {}
+# a mesma reconciliacao dia a dia, de novo: 1,3 milhao de linhas viram
+# item-dia com pandas. Fica em cache pelo mesmo motivo.
+_cache_ranking: dict = {}
+
+
+def invalidar_caches() -> None:
+    """Derruba tudo o que depende de parametro ou de resultado do motor.
+
+    A validacao historica guarda a avaliacao de cada data de corte porque cada
+    uma custa ~2s. Se os parametros mudam, aquelas avaliacoes passam a descrever
+    um modelo que nao existe mais - e o cache tem de cair junto com o de
+    analitico, num lugar so, para nao sobrar cache orfao.
+    """
+    analitico.invalidar_cache()
+    _cache_validacao.clear()
+    _cache_qualidade.clear()
+    _cache_ranking.clear()
 
 
 def sem_dados(request: Request):
@@ -487,17 +522,37 @@ def itens(request: Request):
                                "valor_da_compra", "decisao", "risco_de_faltar"]],
         on="sku", how="left")
     df = df.sort_values("lucro_potencial_periodo", ascending=False)
+    # preco praticado por peca, refeito da venda: e a unica forma de conferir a
+    # margem na propria linha. `lucro_por_peca` ja e o lucro observado medio, e
+    # custo + lucro tem de dar o preco - se nao der, a conta esta errada e a
+    # tela mostra isso em vez de escondor.
+    df["preco_por_peca"] = df.custo_unitario + df.lucro_por_peca
+    df["margem_por_peca_pct"] = np.where(
+        df.preco_por_peca > 0, df.lucro_por_peca / df.preco_por_peca, np.nan)
     cols = ["sku", "item", "familia", "classificacao", "curva_abc", "classe_xyz", "regime",
             "demanda_media_dia", "cv_diario", "posicao_estoque", "ponto_de_pedido",
             "estoque_maximo", "lote_compra", "estoque_seguranca", "nivel_servico",
             "cobertura_dias", "giro_ano", "capital_imobilizado", "lucro_bruto_ano",
             "lucro_perdido_ruptura", "faltas_esperadas_ano", "risco_de_faltar",
             "decisao", "lead_time_dias", "custo_unitario", "distribuicao",
-            "dias_sem_estoque", "dias_ruptura_parcial", "subestimacao_ingenua_pct"]
+            "dias_sem_estoque", "dias_ruptura_parcial", "subestimacao_ingenua_pct",
+            "preco_por_peca", "lucro_por_peca", "margem_por_peca_pct",
+            "pecas_vendidas", "quantidade_a_comprar", "valor_da_compra",
+            "lead_time_desvio_dias", "lead_time_pedidos", "mu_periodo"]
     cols = [c for c in cols if c in df.columns]
     familias = sorted(df.familia.dropna().unique().tolist())
     return tpl.TemplateResponse(request, "itens.html", contexto(
         request, "itens", linhas=analitico.registros(df[cols]), familias=familias))
+
+
+@app.get("/api/item/{sku}/conferencia")
+def api_item_conferencia(sku: str, limite: int = 400):
+    """Toda venda, toda compra e todo custo lancado do item, sem passar pelo
+    modelo. E a trilha de conferencia a mao."""
+    d = analitico.conferencia_item(wh(), sku, limite)
+    if not d:
+        return JSONResponse({"erro": "item nao encontrado"}, status_code=404)
+    return JSONResponse(d)
 
 
 @app.get("/api/item/{sku}")
@@ -570,6 +625,167 @@ def api_capital():
 
 
 # ======================================================================
+# BACKTEST
+# ======================================================================
+@app.get("/validacao")
+def validacao_pagina(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    p = Parametros.carregar()
+    lim = validacao.datas_disponiveis(w)
+    # a data padrao: seis meses antes do fim, que deixa horizonte suficiente
+    # para quase todo o catalogo ser cobrado
+    padrao = str((pd.Timestamp(lim["ultimo"]) - pd.Timedelta(days=184)).date())
+    return tpl.TemplateResponse(request, "validacao.html", contexto(
+        request, "validacao", limites=lim, padrao=padrao,
+        campos=[dict(chave=c[0], rotulo=c[1], unidade=c[2], tipo=c[3], ajuda=c[4],
+                     valor=getattr(p, c[0]))
+                for c in validacao.PARAMETROS_BACKTEST]))
+
+
+# Uma rodada roda o motor inteiro sobre 1.190 itens mais a janela futura:
+# ~10 s. Cara demais para refazer a cada clique de filtro, barata demais para
+# gravar no warehouse.
+_cache_validacao: dict = {}
+
+
+def _ajustes_da_url(request: Request) -> dict:
+    """Os parametros que vierem na URL, com o nome do proprio campo do modelo."""
+    validos = {c[0]: c[3] for c in validacao.PARAMETROS_BACKTEST}
+    fora = {}
+    for k, v in request.query_params.items():
+        if k not in validos or v == "":
+            continue
+        try:
+            fora[k] = float(v) / 100.0 if validos[k] == "pct" else float(v)
+        except ValueError:
+            pass
+    return fora
+
+
+@app.get("/api/validacao")
+def api_validacao(request: Request, corte: str = "", reais: bool = True):
+    """O backtest de uma data exata."""
+    w = wh()
+    aj = _ajustes_da_url(request)
+    chave = "bt|" + corte + "|" + str(reais) + "|" + repr(sorted(aj.items()))
+    if chave not in _cache_validacao:
+        _cache_validacao[chave] = validacao.rodar(w, corte, aj, reais)
+    r = _cache_validacao[chave]
+    if "erro" in r:
+        return JSONResponse(r, status_code=400)
+    return JSONResponse(r)
+
+
+@app.get("/api/validacao/intervalo")
+def api_validacao_intervalo(request: Request, de: str, ate: str,
+                            reais: bool = True, passo: int = 0):
+    """O mesmo backtest em varias datas, uma por ciclo de revisao."""
+    w = wh()
+    aj = _ajustes_da_url(request)
+    chave = f"bti|{de}|{ate}|{reais}|{passo}|" + repr(sorted(aj.items()))
+    if chave not in _cache_validacao:
+        _cache_validacao[chave] = validacao.rodar_intervalo(
+            w, de, ate, aj, reais, passo or None)
+    r = _cache_validacao[chave]
+    if "erro" in r:
+        return JSONResponse(r, status_code=400)
+    return JSONResponse(r)
+
+
+@app.get("/api/validacao/contexto")
+def api_validacao_contexto(corte: str, revisao: int = 0):
+    """O caixa e o estoque reais da data, para a tela preencher os campos."""
+    p = Parametros.carregar()
+    return JSONResponse(validacao.contexto_da_data(
+        wh(), corte, int(revisao or p.periodo_revisao_dias)))
+
+
+# ======================================================================
+# RETORNO DO DINHEIRO
+# ======================================================================
+@app.get("/retorno")
+def retorno(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    return tpl.TemplateResponse(request, "retorno.html", contexto(request, "retorno"))
+
+
+@app.get("/qualidade")
+def pagina_qualidade(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    return tpl.TemplateResponse(request, "qualidade.html",
+                                contexto(request, "qualidade"))
+
+
+@app.get("/api/qualidade")
+def api_qualidade(recarregar: bool = False):
+    """As 21 verificacoes de dados, agrupadas.
+
+    Em cache porque a bateria confronta as duas maiores tabelas da base linha a
+    linha. `recarregar=true` forca, para quando alguem quer conferir depois de
+    mexer no ERP sem rodar o pipeline inteiro.
+    """
+    if recarregar:
+        _cache_qualidade.clear()
+    if "d" not in _cache_qualidade:
+        _cache_qualidade["d"] = qualidade.verificar(wh(), Parametros.carregar())
+    return JSONResponse(_cache_qualidade["d"])
+
+
+@app.get("/api/retorno")
+def api_retorno():
+    """Retorno sobre o capital: total, cascata, curva marginal e por item."""
+    return JSONResponse(analitico.retorno_do_capital(wh(), Parametros.carregar()))
+
+
+# ======================================================================
+# ACOMPANHAMENTO DE VENDAS (conferencia)
+# ======================================================================
+@app.get("/acompanhamento")
+def pagina_acompanhamento(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    return tpl.TemplateResponse(request, "acompanhamento.html",
+                                contexto(request, "acompanhamento"))
+
+
+@app.get("/api/acompanhamento/serie")
+def api_acompanhamento_serie(sku: str):
+    """A serie diaria de um item: venda por canal + estoque disponivel e
+    reservado. Sem isso o grafico principal da pagina nao tem o que desenhar."""
+    d = acompanhamento.serie_item(wh(), sku)
+    if not d:
+        return JSONResponse({"erro": "item sem posicao de estoque nesta base"},
+                            status_code=404)
+    return JSONResponse(d)
+
+
+@app.get("/api/acompanhamento/ranking")
+def api_acompanhamento_ranking(recarregar: bool = False):
+    """Os itens ordenados por dias em que estoque, venda e reserva nao batem
+    entre si. Em cache pelo mesmo motivo da tela de qualidade: refaz a conta
+    de 1,3 milhao de linhas item-dia."""
+    if recarregar:
+        _cache_ranking.clear()
+    if "d" not in _cache_ranking:
+        _cache_ranking["d"] = acompanhamento.ranking_dias_nao_ok(wh())
+    return JSONResponse(_cache_ranking["d"])
+
+
+@app.get("/api/acompanhamento/item/{sku}")
+def api_acompanhamento_item(sku: str, so_nao_ok: bool = False, limite: int = 400):
+    """A tabela dia a dia que sustenta o numero do item na lista: estoque,
+    venda, reserva e o veredito, linha por linha."""
+    return JSONResponse(acompanhamento.detalhe_item(wh(), sku, so_nao_ok, limite))
+
+
+# ======================================================================
 # CRITERIO DE PARADA
 # ======================================================================
 @app.get("/criterios")
@@ -583,7 +799,8 @@ def criterios(request: Request, msg: str = "", erro: str = ""):
     return tpl.TemplateResponse(request, "criterios.html", contexto(
         request, "criterios", p=p, criterios=analitico.registros(cr),
         meta=[dict(chave=c[0], rotulo=c[1], campo=c[2], unidade=c[3], tipo=c[4],
-                   descricao=c[5], pergunta=c[6]) for c in CRITERIOS],
+                   descricao=c[5], pergunta=c[6], acao=c[7]) for c in CRITERIOS],
+        ativos=motor.criterios_ativos(p),
         base={"risco_inicial": float(ctx.risco_inicial),
               "falta_inicial": float(ctx.falta_inicial),
               "teto_ciclo": float(ctx.teto_ciclo),
@@ -604,16 +821,21 @@ def api_criterios():
         "fronteira": analitico.registros(
             w.query(f"select * from {ref('res_fronteira')} order by posicao_fila")),
         "criterios": analitico.registros(w.query(f"select * from {ref('res_criterios')}")),
-        "atual": p.criterio_parada,
+        "atual": motor.criterios_ativos(p),
     })
 
 
 @app.get("/api/criterios/previa")
-def api_criterios_previa(criterio: str, valor: float):
-    """Roda o motor com um valor hipotetico e devolve onde a fila seria cortada."""
-    r = analitico.previa_criterio(wh(), Parametros.carregar(), criterio, valor)
-    if not r:
-        return JSONResponse({"erro": "criterio desconhecido"}, status_code=400)
+def api_criterios_previa(request: Request, ativos: str = ""):
+    """Corta a fila com um conjunto de criterios e valores hipoteticos.
+
+    Os valores chegam como parametros com o nome do proprio campo do modelo
+    (teto_compra_ciclo=..., chance_minima_peca=...), o que deixa a tela mandar
+    o formulario inteiro sem tradutor no meio.
+    """
+    campos = {c[2] for c in CRITERIOS}
+    valores = {k: v for k, v in request.query_params.items() if k in campos}
+    r = analitico.simular_criterios(wh(), Parametros.carregar(), ativos, valores)
     return JSONResponse(r)
 
 
@@ -623,12 +845,13 @@ async def criterios_salvar(request: Request):
     atual = Parametros.carregar()
     dados = asdict(atual)
 
-    escolhido = str(form.get("criterio_parada") or atual.criterio_parada)
-    if escolhido not in {c[0] for c in CRITERIOS}:
-        escolhido = "caixa"
-    dados["criterio_parada"] = escolhido
+    # varios criterios podem vir marcados: a compra e cortada pelo primeiro
+    validos = [c[0] for c in CRITERIOS]
+    marcados = [x for x in form.getlist("criterio_parada") if x in validos]
+    escolhidos = [c for c in validos if c in marcados] or ["caixa"]
+    dados["criterio_parada"] = ",".join(escolhidos)
 
-    for _chave, _rot, campo, _un, tipo, _d, _q in CRITERIOS:
+    for _chave, _rot, campo, _un, tipo, _d, _q, _a in CRITERIOS:
         bruto = form.get(campo)
         if bruto is None or bruto == "":
             continue
@@ -639,13 +862,13 @@ async def criterios_salvar(request: Request):
 
     p = Parametros(**dados)
     p.salvar()
-    analitico.invalidar_cache()
+    invalidar_caches()
     try:
         res = motor.executar(wh(), p)
         motor.gravar_resultados(wh(), res)
-        analitico.invalidar_cache()
+        invalidar_caches()
         cr = res["res_criterios"]
-        linha = cr[cr.criterio == escolhido].iloc[0]
+        linha = cr[cr.criterio == "combinado"].iloc[0]
         msg = (f"Critério aplicado: {linha.rotulo}. "
                f"{int(linha.pecas):,} peças de {int(linha.itens)} produtos, "
                f"R$ {linha.caixa:,.0f} de compra, "
@@ -696,7 +919,7 @@ async def parametros_salvar(request: Request):
 
     p = Parametros(**dados)
     p.salvar()
-    analitico.invalidar_cache()
+    invalidar_caches()
 
     acao = form.get("acao", "salvar")
     msg = "Parametros salvos. Recalcule para aplicar."
@@ -716,7 +939,7 @@ async def parametros_salvar(request: Request):
                                             status_code=303)
             res = motor.executar(w, p)
             motor.gravar_resultados(w, res)
-            analitico.invalidar_cache()
+            invalidar_caches()
             e = res["res_execucao"].iloc[0]
             msg = (f"Modelo recalculado - premio de escassez {e.premio_escassez:.3f}, "
                    f"{int(e.itens_regime_discreto)} itens no regime discreto, "
@@ -733,7 +956,7 @@ def recalcular():
         p = Parametros.carregar()
         res = motor.executar(w, p)
         motor.gravar_resultados(w, res)
-        analitico.invalidar_cache()
+        invalidar_caches()
         e = res["res_execucao"].iloc[0]
         return JSONResponse({"ok": True, "lam": float(e.premio_escassez),
                              "capital": float(e.capital_total)})

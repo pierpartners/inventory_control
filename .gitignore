@@ -11,6 +11,25 @@ credenciais/
 data/*.duckdb
 data/*.duckdb.wal
 data/*.db
+data/*.bak
+
+# ------------------------------------------------- extrato real do cliente
+# 455 MB de extrato do ERP da Elevato (3 anos de venda, compra, estoque e
+# cadastro). Fica FORA do repositorio por dois motivos independentes:
+#   1. e dado confidencial do cliente;
+#   2. vendas_todas_3anos.csv tem 246 MB e compras_3anos.csv tem 91 MB - o
+#      GitHub recusa qualquer arquivo acima de 100 MB, entao o push falharia.
+# Quem for rodar com a base real recebe a pasta por fora e a coloca aqui; o
+# `scripts/rodar_pipeline.py` detecta a presenca dela sozinho (base=real).
+data/fonte_verdadeira/
+
+# ------------------------------------------- rascunho de analise pontual
+# artefatos de investigacao que nascem na raiz durante uma sessao e nao fazem
+# parte da aplicacao (recortes de SKU, dumps de rotulo de tela, pickles)
+_rotulos.json
+_rotulos.txt
+x_*.pkl
+skus_coerentes_*.csv
 
 # ---------------------------------------------------------- artefatos dbt
 dbt_elevato/target/

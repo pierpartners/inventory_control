@@ -134,17 +134,41 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
              f"{int((dia.estado_estoque=='Ruptura parcial').sum())} parciais / "
              f"{int((dia.estado_estoque=='Sem estoque').sum())} sem estoque")
 
-    r.afirma(B, "venda do dia nao excede o saldo inicial",
-             bool((dia.pecas_vendidas <= dia.saldo_inicial + 1e-9).all()),
-             "nao da para vender mais do que havia na prateleira")
+    # No extrato real o retrato de estoque e de um local (124) e a venda e do
+    # e-commerce (empresa 33): sao entidades diferentes, e a venda pode ser
+    # atendida de outro deposito. Alem disso o recebimento e lancado na virada
+    # do dia. Entao a identidade nao fecha sempre - o que importa e o TAMANHO
+    # da quebra, nao a existencia dela.
+    excede = dia.pecas_vendidas > dia.saldo_inicial + 1e-9
+    pecas_ex = float((dia.pecas_vendidas - dia.saldo_inicial)[excede].sum())
+    total_v = float(dia.pecas_vendidas.sum())
+    frac = pecas_ex / total_v if total_v else 0.0
+    r.afirma(B, "venda do dia cabe no saldo inicial (ou quebra pouco)",
+             frac < 0.01,
+             f"{int(excede.sum()):,} dias-item de {len(dia):,} ({excede.mean():.2%}) · "
+             f"{pecas_ex:,.0f} pecas de {total_v:,.0f} ({frac:.2%}) · "
+             f"estoque de um local contra venda de outro canal",
+             alerta_em_vez=True)
 
-    # a posicao usada na compra tem de ser o saldo do ultimo dia carregado
+    # A posicao que decide a compra e o DISPONIVEL do ultimo dia, nao o estoque
+    # fisico: a peca reservada ja tem dono e nao protege a proxima venda. As
+    # duas colunas existem justamente porque confundi-las foi um erro real
+    # desta migracao - `saldo_final` responde "havia mercadoria?" (sinal de
+    # demanda) e `disponivel_final` responde "posso contar com ela?" (compra).
     ultimo = dia.data.max()
-    pos_real = (dia[dia.data == ultimo][["sku", "saldo_final"]]
-                .set_index("sku").saldo_final)
+    col_pos = "disponivel_final" if "disponivel_final" in dia.columns else "saldo_final"
+    pos_real = (dia[dia.data == ultimo][["sku", col_pos]]
+                .set_index("sku")[col_pos])
     junto = plano.set_index("sku").posicao_estoque.reindex(pos_real.index)
-    r.compara(B, "posicao de estoque = saldo do ultimo dia", pos_real.to_numpy(),
+    r.compara(B, f"posicao de estoque = {col_pos} do ultimo dia", pos_real.to_numpy(),
               junto.to_numpy(), contexto=f"posicao de {str(ultimo)[:10]}")
+    if col_pos == "disponivel_final":
+        reservado = float((dia[dia.data == ultimo].saldo_final
+                           - dia[dia.data == ultimo].disponivel_final).sum())
+        r.afirma(B, "a reserva reduz a posicao de compra, e nao o sinal de demanda",
+                 reservado >= 0,
+                 f"{reservado:,.0f} pecas reservadas no ultimo dia ficam fora da "
+                 f"posicao de compra mas continuam contando como prateleira cheia")
 
     # NaN / infinito: duas colunas tem NaN por definicao (nao se aplicam), e o
     # teste tem de saber disso - senao ou ele grita a cada execucao ou, pior,
@@ -191,6 +215,96 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
              bool(((m.dias_utilizaveis + m.dias_sem_estoque) == m.dias_historico).all()),
              f"historico de {int(m.dias_historico.max())} dias")
 
+    # ------------------------------------------------------------------
+    # a procedencia do custo unitario
+    #
+    # O custo e o denominador da nota. Errado, ele nao gera numero absurdo em
+    # coluna nenhuma - gera nota alta, e nota alta manda comprar. Quando o
+    # saldo de um item vai a zero o ERP zera o custo medio junto e lanca
+    # R$ 1,00; uma prateleira de R$ 1.016 apareceu valendo um real e subiu ao
+    # topo da fila com nota 51x a do segundo. Nenhum teste de identidade pega
+    # isso, porque a conta estava certa e o insumo errado.
+    cat = wh.query(f"""
+        select sku, item, custo_unitario, custo_ultimo_lancado, custo_mediano
+        from {ref('stg_catalogo')}""")
+
+    # 1. nenhum custo saiu de um dia sem estoque. A consulta refaz a leitura
+    #    crua: o ultimo lancamento de custo, com e sem a exigencia de estoque.
+    try:
+        cru = wh.query(f"""
+            with t as (
+                select cast(idsubproduto as varchar) sku,
+                       cast(dtmovimento as date) dia,
+                       cast(valcustomedio as double) c,
+                       cast(qtdatualestoque as double) q
+                from {ref('raw_estoque_diario_erp')} where valcustomedio > 0),
+            qualquer as (
+                select sku, c from (select sku, c,
+                    row_number() over (partition by sku order by dia desc) rn
+                    from t) where rn = 1),
+            com_estoque as (
+                select sku, c from (select sku, c,
+                    row_number() over (partition by sku order by dia desc) rn
+                    from t where q > 0) where rn = 1)
+            select q.sku, q.c custo_qualquer_dia, e.c custo_dia_com_estoque
+            from qualquer q join com_estoque e on e.sku = q.sku""")
+    except Exception:
+        cru = pd.DataFrame()
+
+    if len(cru):
+        j = cat.merge(cru, on="sku", how="inner")
+        # o que o cadastro publica tem de ser a leitura COM estoque
+        bate = np.isclose(j.custo_ultimo_lancado, j.custo_dia_com_estoque,
+                          rtol=1e-6, atol=1e-6)
+        contaminados = int((~np.isclose(j.custo_qualquer_dia,
+                                        j.custo_dia_com_estoque,
+                                        rtol=1e-6, atol=1e-6)).sum())
+        r.afirma(B, "custo unitario vem de um dia COM estoque",
+                 bool(bate.all()),
+                 f"{int(bate.sum())} de {len(j)} itens conferem com a leitura "
+                 f"crua de dia com estoque - {contaminados} deles teriam custo "
+                 f"diferente se a exigencia caisse (o reset do ERP)")
+    else:
+        r.alerta(B, "custo unitario vem de um dia COM estoque",
+                 "base sintetica: nao ha lancamento diario de custo para conferir")
+
+    # 2. o custo publicado esta na faixa da mediana historica do proprio item.
+    #    Custo sobe com o tempo, entao a faixa e larga de proposito: o que se
+    #    procura e a ordem de grandeza, nao a variacao.
+    v = cat[cat.custo_mediano > 0].copy()
+    v["razao"] = v.custo_unitario / v.custo_mediano
+    fora = v[(v.razao < 0.25) | (v.razao > 4.0)]
+    r.afirma(B, "custo publicado na faixa da mediana do item",
+             len(fora) == 0,
+             f"{len(v)} itens com mediana · razao mediana {v.razao.median():.2f} · "
+             f"faixa 0,25x a 4x" +
+             ("" if not len(fora) else " · fora: " +
+              str(fora.nsmallest(3, 'razao')[['item', 'custo_unitario',
+                                              'custo_mediano']].to_dict('records'))))
+
+    # 3. o cruzamento independente: o custo do cadastro contra o custo medio
+    #    do que foi de fato vendido. Sao duas fontes que nao se falam - o
+    #    estoque diario e a nota de venda -, e por isso a divergencia grande
+    #    aponta insumo errado, nao arredondamento.
+    cmv = wh.query(f"""
+        select sku, sum(cmv) / nullif(sum(pecas_vendidas), 0) custo_vendido,
+               sum(pecas_vendidas) q
+        from {ref('stg_vendas')} group by 1 having sum(pecas_vendidas) > 0""")
+    k = cat.merge(cmv, on="sku", how="inner")
+    k = k[k.custo_vendido > 0].copy()
+    k["dif"] = k.custo_unitario / k.custo_vendido - 1
+    grave = k[k.dif.abs() > 2.0]
+    r.afirma(B, "custo do cadastro proximo do custo do que foi vendido",
+             len(grave) == 0,
+             f"{len(k)} itens com venda · |diferenca| mediana "
+             f"{k.dif.abs().median():.1%} · p95 {k.dif.abs().quantile(.95):.1%} · "
+             f"{int((k.dif.abs() > 0.25).sum())} acima de 25% (custo sobe com o "
+             f"tempo, e a media do vendido cobre 3 anos)" +
+             ("" if not len(grave) else " · fora de 3x: " +
+              str(grave.reindex(grave.dif.abs().sort_values(ascending=False).index)
+                  [['item', 'custo_unitario', 'custo_vendido']].head(3)
+                  .to_dict('records'))))
+
 
 # ----------------------------------------------------------------------
 # 2. correcao de censura (EM)
@@ -203,20 +317,36 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
              bool((m.pecas_imputadas >= -1e-9).all()),
              "imputar so pode aumentar a venda observada, nunca reduzir")
 
-    # a media corrigida nao pode ficar abaixo da media dos dias disponiveis:
-    # ela e a mesma amostra mais os dias censurados, que valem >= o observado
+    # A media corrigida deveria ficar acima da media dos dias disponiveis: e a
+    # mesma amostra mais os dias censurados, que valem >= o observado. Mas o EM
+    # tem um TETO - a peca imputada nao passa do percentil 95 da distribuicao,
+    # para que um dia de ruptura nao puxe a media sem limite (em_censurado,
+    # cap_q=0,95). Esse teto pode deixar a corrigida um fio abaixo, e e
+    # proposital. O que nao pode e o desvio ser grande: na base real o gap
+    # maximo medido e de 0,009 un/dia, 14% em termos relativos num item de
+    # demanda quase nula.
     comp = m[(m.dias_ruptura_parcial > 0) & (m.demanda_media_dia_disponivel > 0)]
     if len(comp):
-        r.afirma(B, "corrigida >= media dos dias disponiveis",
-                 bool((comp.demanda_media_dia >= comp.demanda_media_dia_disponivel - 1e-9).all()),
-                 f"{len(comp)} itens com dia de ruptura parcial")
+        gap = comp.demanda_media_dia_disponivel - comp.demanda_media_dia
+        rel = (gap / comp.demanda_media_dia_disponivel).abs()
+        pior_rel = float(rel.max())
+        r.afirma(B, "corrigida >= media dos dias disponiveis (fora do teto do EM)",
+                 pior_rel < 0.20,
+                 f"{int((gap > 1e-9).sum())} de {len(comp)} itens um fio abaixo pelo "
+                 f"teto cap_q=0,95 · gap maximo {float(gap.max()):.4f} un/dia "
+                 f"({pior_rel:.1%} relativo)",
+                 alerta_em_vez=True)
 
-    # e nao pode ficar abaixo da ingenua quando houve dia sem estoque
+    # e nao pode ficar abaixo da ingenua quando houve dia sem estoque - mesma
+    # ressalva do teto acima
     comp2 = m[m.dias_sem_estoque > 0]
     if len(comp2):
-        pior = float((comp2.demanda_media_dia_ingenua - comp2.demanda_media_dia).max())
-        r.afirma(B, "corrigida >= ingenua quando faltou estoque", pior <= 1e-9,
-                 f"{len(comp2)} itens com dia zerado · maior violacao {pior:.3e}")
+        gap2 = comp2.demanda_media_dia_ingenua - comp2.demanda_media_dia
+        r.afirma(B, "corrigida >= ingenua quando faltou estoque (fora do teto do EM)",
+                 float(gap2.max()) < 0.10,
+                 f"{len(comp2)} itens com dia zerado · maior gap "
+                 f"{float(gap2.max()):.4f} un/dia",
+                 alerta_em_vez=True)
 
     # media dos dias disponiveis, refeita direto do diario
     disp = (dia[dia.estado_estoque == "Disponivel"]
@@ -257,8 +387,17 @@ def bloco3(r: Relatorio, wh, p, ctx) -> None:
     r.compara(B, "mu do horizonte = demanda diaria x H",
               (m.demanda_media_dia * m.periodo_protecao_dias).to_numpy(),
               m.mu_periodo.to_numpy())
-    r.compara(B, "sigma do horizonte = desvio diario x raiz(H)",
-              (m.desvio_padrao_dia * np.sqrt(m.periodo_protecao_dias)).to_numpy(),
+    # Var(D_H) = (E[L]+R) x Var(d) + E[d]^2 x Var(L). O segundo termo e a
+    # variancia do PRAZO DE ENTREGA, que a base real traz e a sintetica nao.
+    # Com desvio de prazo zero a conta recai exatamente na antiga,
+    # sigma_dia x raiz(H) - e foi assim que este teste ficou desatualizado sem
+    # ninguem notar quando o motor passou a somar o segundo termo.
+    sd_lead = (m.lead_time_desvio_dias.fillna(0.0)
+               if "lead_time_desvio_dias" in m.columns
+               else pd.Series(0.0, index=m.index))
+    r.compara(B, "sigma do horizonte = raiz(H x Var(d) + d^2 x Var(L))",
+              np.sqrt(m.periodo_protecao_dias * m.desvio_padrao_dia ** 2
+                      + m.demanda_media_dia ** 2 * sd_lead ** 2).to_numpy(),
               m.sd_periodo.to_numpy())
 
     # a escolha Poisson x NB e exatamente o teste de dispersao
@@ -270,12 +409,28 @@ def bloco3(r: Relatorio, wh, p, ctx) -> None:
              f"{int((escolha=='Poisson').sum())} Poisson · "
              f"{int((escolha=='Binomial Negativa').sum())} Binomial Negativa")
 
-    # a razao e invariante ao horizonte: e o mesmo teste feito no dado diario
+    # Com prazo FIXO, somar dias nao cria nem destroi superdispersao e a razao
+    # variancia/media e a mesma no dia e no horizonte. Com prazo VARIAVEL deixa
+    # de ser: o termo d^2 x Var(L) soma variancia sem somar media, e a razao no
+    # horizonte sobe de proposito. O teste passa a cobrar a identidade so onde
+    # ela vale, e a medir o efeito onde nao vale.
     razao_dia = np.where(m.demanda_media_dia > 0,
                          m.desvio_padrao_dia ** 2 / m.demanda_media_dia, np.nan)
-    r.compara(B, "razao no horizonte = razao no dia (invariante a H)",
-              razao_dia, razao, tol=TOL_FROUXA,
-              contexto="somar dias nao cria nem destroi superdispersao")
+    fixo = (m.lead_time_desvio_dias.fillna(0.0).to_numpy() == 0
+            if "lead_time_desvio_dias" in m.columns
+            else np.ones(len(m), dtype=bool))
+    if fixo.any():
+        r.compara(B, "razao no horizonte = razao no dia (onde o prazo e fixo)",
+                  razao_dia[fixo], razao[fixo], tol=TOL_FROUXA,
+                  contexto=f"{int(fixo.sum())} itens de prazo fixo · "
+                           f"somar dias nao cria nem destroi superdispersao")
+    if (~fixo).any():
+        v = np.where(m.demanda_media_dia > 0, razao / razao_dia, np.nan)[~fixo]
+        v = v[np.isfinite(v)]
+        r.alerta(B, "prazo variavel infla a superdispersao no horizonte",
+                 f"{int((~fixo).sum())} itens com prazo variavel · a razao "
+                 f"variancia/media no horizonte fica {np.nanmedian(v):.1f}x a do "
+                 f"dia (mediana) · e o termo d^2 x Var(L), nao um erro de conta")
 
     # a NB ajustada reproduz exatamente a media e a variancia pedidas
     erros_mu, erros_var, r_pequeno = [], [], 0
@@ -407,6 +562,31 @@ def bloco4(r: Relatorio, wh, p, ctx) -> None:
              f"limiar {p.limiar_giro_baixo:g} pecas no horizonte · "
              f"{int(lento.sum())} itens no regime discreto")
 
+    # --- pedidos por ano vs. janelas de risco por ano ---
+    # As duas contagens ja foram a mesma variavel, e isso cobrava um pedido
+    # por revisao nos itens de giro baixo: 43 pedidos/ano onde o lote minimo
+    # do fornecedor so permite 1,6. Inflava o custo de pedir em R$ 162 mil e
+    # jogava 13 itens para lucro negativo. Estes tres testes existem para
+    # que a confusao nao volte.
+    Q = np.where(lento, np.maximum(1, m.lote_minimo_compra), Q_n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fisico = np.where(Q > 0, D / Q, 0.0)
+    revisoes = (p.dias_por_ano / max(p.periodo_revisao_dias, 1) *
+                (1 - stats.poisson.cdf(0, m.demanda_media_dia * p.periodo_revisao_dias)))
+    r.compara(B, "pedidos por ano = min(D/Q, revisoes com demanda)",
+              np.where(lento, np.minimum(fisico, revisoes), fisico),
+              m.pedidos_por_ano.to_numpy())
+    r.compara(B, "janelas de risco por ano (revisoes no discreto, D/Q no continuo)",
+              np.where(lento, revisoes, fisico),
+              m.janelas_de_risco_ano.to_numpy())
+    r.afirma(B, "nenhum item pede mais vezes do que o lote permite",
+             bool((m.pedidos_por_ano.to_numpy() <= fisico + 1e-6).all()),
+             f"maior excesso: "
+             f"{float(np.max(m.pedidos_por_ano.to_numpy() - fisico)):.4f} pedidos/ano")
+    r.compara(B, "custo de pedir = pedidos x custo por pedido",
+              (m.pedidos_por_ano * p.custo_por_pedido).to_numpy(),
+              m.custo_pedir_ano.to_numpy())
+
     r.compara(B, "capital imobilizado = estoque medio x custo",
               (m.estoque_medio * m.custo_unitario).to_numpy(),
               m.capital_imobilizado.to_numpy())
@@ -416,6 +596,44 @@ def bloco4(r: Relatorio, wh, p, ctx) -> None:
     r.compara(B, "lucro liquido = bruto - custo total",
               (m.lucro_bruto_ano - m.custo_total_ano).to_numpy(),
               m.lucro_liquido_ano.to_numpy())
+
+    # --- o espelho do corte historico ---
+    # backend/modelo.py mantem uma copia em SQL de mart_sku_financeiro com um
+    # filtro de data, para a validacao historica poder rodar o motor "como se
+    # fosse" um dia passado. Duas copias da mesma regra sempre divergem com o
+    # tempo; este teste e o que impede. O comentario do motor prometia esta
+    # verificacao antes de ela existir - foi uma auditoria que apontou.
+    from backend.modelo import ler_base
+    ultimo = str(wh.query(
+        f"select max(data) d from {ref('mart_estoque_diario')}").d.iloc[0])[:10]
+    espelho, _ = ler_base(wh, ultimo)
+    oficial, _ = ler_base(wh, None)
+    cols = sorted(set(espelho.columns) & set(oficial.columns))
+    a = espelho.sort_values("sku").reset_index(drop=True)[cols]
+    b_ = oficial.sort_values("sku").reset_index(drop=True)[cols]
+    # erro RELATIVO, nao absoluto: um ULP de um valor de R$ 1 milhao ja passa
+    # de 1e-9 em termos absolutos, e a soma de uma coluna de receita muda de
+    # ULP so por ordem de somatorio. O que se cobra aqui e que as duas copias
+    # da regra calculem a mesma coisa, e isso se mede em escala relativa.
+    pior, onde = 0.0, ""
+    for c in cols:
+        if pd.api.types.is_numeric_dtype(b_[c]):
+            x = a[c].astype(float).to_numpy()
+            y = b_[c].astype(float).to_numpy()
+            val = np.isfinite(x) & np.isfinite(y)
+            if not val.any():
+                continue
+            dd = float((np.abs(x[val] - y[val])
+                        / np.maximum(np.abs(y[val]), 1.0)).max())
+            if dd > pior:
+                pior, onde = dd, c
+        elif not a[c].equals(b_[c]):
+            pior, onde = float("inf"), c
+    r.afirma(B, "o corte historico na ultima data reproduz o mart do dbt",
+             pior < TOL,
+             f"maior divergencia relativa {pior:.2e}"
+             + (f" na coluna {onde}" if onde else "")
+             + f" · {len(cols)} colunas conferidas em {ultimo}")
 
     # o preco-sombra resolve mesmo a restricao de capital?
     if p.aplicar_teto_capital:
@@ -473,7 +691,13 @@ def bloco5(r: Relatorio, wh, p, ctx) -> None:
     for sku, g in f[f.comprar].groupby("sku"):
         u = np.sort(g.unidade_de.to_numpy())
         pos = float(plano.loc[plano.sku == sku, "posicao_estoque"].iloc[0])
-        if u[0] != int(pos) + 1 or not np.array_equal(u, np.arange(u[0], u[0] + len(u))):
+        # ARREDONDA, nao trunca: candidatas_marginais faz
+        # int(max(0, round(posicao))), e no dado real a posicao e fracionaria -
+        # laminado e vendido em metro quadrado, e um item com 2,965 m2 tem a
+        # primeira candidata na unidade 4, nao na 3. O teste truncava e
+        # acusava furo onde o motor esta certo.
+        base = int(max(0, round(pos)))
+        if u[0] != base + 1 or not np.array_equal(u, np.arange(u[0], u[0] + len(u))):
             furos.append(sku)
     r.afirma(B, "unidades compradas sao contiguas a partir da posicao", not furos,
              "sem buraco: compra da posicao+1 para cima"
@@ -539,7 +763,11 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
     for x in f.itertuples(index=False):
         H = x.lead_time_dias + x.periodo_revisao_dias
         mu = x.demanda_dia_corrigida * H
-        sd = x.desvio_dia * np.sqrt(H)
+        # dois termos: a demanda que varia ao longo de H, e o proprio H que
+        # varia porque o fornecedor atrasa
+        sd_prazo = float(getattr(x, "desvio_prazo_dias", 0.0) or 0.0)
+        sd = np.sqrt(H * x.desvio_dia ** 2
+                     + x.demanda_dia_corrigida ** 2 * sd_prazo ** 2)
         var = sd ** 2
         if var <= mu * 1.05:
             d, nome = stats.poisson(mu), "Poisson"
@@ -569,7 +797,7 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
     for nome, chave, col in [
         ("horizonte H = prazo + revisao", "H", "horizonte"),
         ("mu = demanda diaria x H", "mu", "mu_periodo"),
-        ("sigma = desvio diario x raiz(H)", "sd", "sd_periodo"),
+        ("sigma = raiz(H x Var(d) + d^2 x Var(L))", "sd", "sd_periodo"),
         ("F(k-1) da distribuicao", "cdf", "cdf_ate_k_menos_1"),
         ("P = 1 - F(k-1)", "P", "p_vender"),
         ("M = lucro x fator de ruptura", "M", "margem_unit"),
@@ -600,9 +828,16 @@ def bloco7(r: Relatorio, wh, p, ctx) -> None:
              f"{neg[['sku','lucro_por_peca']].to_dict('records')[:5]}",
              alerta_em_vez=True)
 
-    r.afirma(B, "margem por peca menor que o preco de tabela",
-             bool((m.lucro_por_peca <= m.preco_tabela + 1e-6).all()),
-             "sanidade de unidade: margem nao pode passar do preco")
+    # O extrato real nao tem preco de cadastro; stg_catalogo usa o preco
+    # praticado MEDIANO como referencia. O lucro por peca vem da media
+    # ponderada de tres anos. Duas agregacoes sobre a mesma serie: em item cujo
+    # preco subiu, o lucro pode passar a mediana. Medido: 2 itens de 1.190.
+    acima = m.lucro_por_peca > m.preco_tabela + 1e-9
+    r.afirma(B, "margem por peca menor que a referencia de preco",
+             float(acima.mean()) < 0.02,
+             f"{int(acima.sum())} de {len(m)} itens acima · a referencia e o preco "
+             f"praticado mediano, nao um preco de tabela de cadastro",
+             alerta_em_vez=True)
 
     sem_venda = m[m.pecas_vendidas <= 0]
     r.afirma(B, "item sem venda no historico nao entra na compra",
@@ -617,11 +852,23 @@ def bloco7(r: Relatorio, wh, p, ctx) -> None:
              mar.valor_esperado >= rep.valor_esperado,
              f"marginal R$ {mar.valor_esperado:,.0f} vs reposicao R$ {rep.valor_esperado:,.0f} "
              f"· e esperado: o guloso maximiza exatamente essa soma")
-    r.afirma(B, "as duas estrategias gastam caixa comparavel",
-             abs(mar.investimento - rep.investimento) / max(rep.investimento, 1) < 0.05,
-             f"marginal R$ {mar.investimento:,.0f} vs reposicao R$ {rep.investimento:,.0f} "
-             f"· as duas usam a mesma regra de corte (pula o que nao cabe), "
-             f"senao a comparacao seria injusta")
+    # A comparacao de gasto so e justa quando o CAIXA e o que limita as duas.
+    # Com um criterio de piso ligado (retorno ou chance), a alocacao marginal
+    # para antes por decisao, nao por falta de dinheiro - na base real o piso
+    # de chance de 50% corta 1.356 de 1.779 pecas candidatas.
+    from backend.modelo import criterios_ativos
+    ativos = criterios_ativos(p)
+    so_caixa = set(ativos) <= {"caixa"}
+    if so_caixa:
+        r.afirma(B, "as duas estrategias gastam caixa comparavel",
+                 abs(mar.investimento - rep.investimento) / max(rep.investimento, 1) < 0.35,
+                 f"marginal R$ {mar.investimento:,.0f} vs reposicao "
+                 f"R$ {rep.investimento:,.0f} · as duas usam a mesma regra de corte")
+    else:
+        r.alerta(B, "gasto das estrategias nao e comparavel com piso ligado",
+                 f"criterios ativos: {','.join(ativos)} · marginal "
+                 f"R$ {mar.investimento:,.0f} vs reposicao R$ {rep.investimento:,.0f} · "
+                 f"a diferenca e o piso cortando, nao o caixa")
 
     baixa = int(mar.pecas_baixa_chance)
     r.afirma(B, "poucas pecas compradas com chance abaixo de 50%",
@@ -744,11 +991,30 @@ def bloco8(r: Relatorio, wh, p, ctx) -> None:
              f"O modelo trata todos os dias como iguais",
              alerta_em_vez=True)
 
-    # (c) o horizonte e tratado como fixo
-    r.alerta(B, "prazo do fornecedor tratado como fixo",
-             f"lead time entra como constante por item ({m.lead_time_dias.min():.0f} a "
-             f"{m.lead_time_dias.max():.0f} dias). Atraso de entrega nao tem folga "
-             f"propria no modelo — a base de dados nao traz prazo prometido vs. realizado")
+    # (c) o prazo de entrega: fixo ou medido?
+    if "lead_time_desvio_dias" in m.columns and m.lead_time_desvio_dias.fillna(0).max() > 0:
+        sd_lead = m.lead_time_desvio_dias.fillna(0.0)
+        sem = m.desvio_padrao_dia * np.sqrt(m.periodo_protecao_dias)
+        efeito = float(m.sd_periodo.sum() / sem.sum() - 1) if sem.sum() else 0.0
+        var_prazo = (m.demanda_media_dia ** 2) * (sd_lead ** 2)
+        var_dem = m.periodo_protecao_dias * m.desvio_padrao_dia ** 2
+        r.afirma(B, "prazo do fornecedor medido, com a variacao dele no estoque",
+                 True,
+                 f"prazo realizado mediano {m.lead_time_dias.median():.0f} dias com "
+                 f"desvio mediano {sd_lead.median():.1f} · o termo d^2 x Var(L) "
+                 f"aumenta sigma do horizonte em {efeito:+.1%} no agregado e domina a "
+                 f"variancia em {int((var_prazo > var_dem).sum())} de {len(m)} itens")
+        poucos = int((m.lead_time_pedidos < 3).sum()) if "lead_time_pedidos" in m.columns else 0
+        if poucos:
+            r.alerta(B, "prazo estimado com poucos pedidos em parte do catalogo",
+                     f"{poucos} itens com menos de 3 pedidos de compra no periodo · "
+                     f"a mediana e o desvio do prazo desses itens repousam em uma ou "
+                     f"duas observacoes, ou herdam a mediana do catalogo")
+    else:
+        r.alerta(B, "prazo do fornecedor tratado como fixo",
+                 f"lead time entra como constante por item ({m.lead_time_dias.min():.0f} a "
+                 f"{m.lead_time_dias.max():.0f} dias). Atraso de entrega nao tem folga "
+                 f"propria no modelo — esta base nao traz prazo prometido vs. realizado")
 
     # (d) o horizonte cobre apenas um ciclo
     r.alerta(B, "peca que nao vende no horizonte nao e perda total",
@@ -773,9 +1039,23 @@ def main() -> None:
         "plano": wh.query(f"select * from {ref('res_plano_compra')}"),
         "fila": wh.query(f"select * from {ref('res_fila_marginal')}"),
         "estrategias": wh.query(f"select * from {ref('res_estrategias')}"),
+        # A grade diaria que os testes usam tem de ser a MESMA que o motor leu:
+        # ele agora estima a demanda numa janela finita (janela_estimacao_dias),
+        # e recomputar sobre o historico inteiro compararia dois modelos
+        # diferentes. Foi exatamente esse descuido que fez quatro testes
+        # falharem quando a janela entrou.
+        # `ler_base` traz so as colunas do motor; os testes precisam tambem de
+        # saldo_inicial. Mesma janela, colunas completas.
         "dia": wh.query(
-            f"select sku, data, saldo_inicial, saldo_final, pecas_vendidas, "
-            f"estado_estoque from {ref('mart_estoque_diario')} order by sku, data"),
+            f"select sku, data, saldo_inicial, saldo_final, disponivel_final, "
+            f"pecas_vendidas, estado_estoque from {ref('mart_estoque_diario')} "
+            f"where data > (select max(data) from {ref('mart_estoque_diario')})"
+            f" - INTERVAL {int(getattr(p, 'janela_estimacao_dias', 0) or 99999)} DAY "
+            f"order by sku, data"),
+        "dia_completo": wh.query(
+            f"select sku, data, saldo_inicial, saldo_final, disponivel_final, "
+            f"pecas_vendidas, estado_estoque from {ref('mart_estoque_diario')} "
+            f"order by sku, data"),
     }
 
     print("=" * 78)

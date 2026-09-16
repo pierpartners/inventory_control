@@ -15,3 +15,9 @@ models:
       +materialized: table
     marts:
       +materialized: table
+
+vars:
+  # qual extrato alimenta o staging: `sintetica` (CSVs de simulacao em
+  # data/fonte) ou `real` (extrato do ERP em data/fonte_verdadeira). O
+  # carregador do pipeline detecta a pasta presente e passa a var.
+  base: sintetica

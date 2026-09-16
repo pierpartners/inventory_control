@@ -19,7 +19,6 @@ from dataclasses import asdict
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.optimize import brentq
 
 from .config import Parametros
 from .warehouse import Warehouse, ref
@@ -182,12 +181,29 @@ def modelar(base: pd.DataFrame, p: Parametros, lam: float) -> pd.DataFrame:
     ns_disc = np.where(mu > 0, stats.poisson.cdf(np.maximum(0, rop - 1), mu_pos), 1.0)
     ns = np.where(lento, ns_disc, ns_n)
 
-    # ciclos e faltas
+    # --- duas contagens diferentes, que antes eram a mesma ---
+    #
+    # JANELAS DE RISCO por ano: quantas vezes por ano o item fica exposto a
+    # faltar. No regime continuo isso acontece uma vez por reposicao (D/Q);
+    # no discreto, a cada revisao em que houve alguma demanda.
+    #
+    # PEDIDOS por ano: quantas vezes um pedido e efetivamente colocado, que
+    # e o que custa o parametro custo_por_pedido. E D/Q nos dois regimes -
+    # so nao pode
+    # passar do numero de revisoes, porque nao se pede fora da revisao.
+    #
+    # Contar um pedido por janela de revisao no regime discreto inflava o
+    # custo de pedir dos itens de giro baixo em ~4x: o lote minimo do
+    # fornecedor cobre varios meses de demanda, e o modelo cobrava como se
+    # ele fosse comprado toda semana. Isso jogava 13 itens para lucro
+    # negativo que na verdade se pagam.
     with np.errstate(divide="ignore", invalid="ignore"):
         ciclos_n = np.where(Q_n > 0, D / Q_n, 0)
-    ciclos_l = p.dias_por_ano / max(p.periodo_revisao_dias, 1) * (
+        fisico = np.where(Q > 0, D / Q, 0.0)
+    revisoes = p.dias_por_ano / max(p.periodo_revisao_dias, 1) * (
         1 - stats.poisson.cdf(0, b.demanda_media_dia * p.periodo_revisao_dias))
-    ciclos = np.where(lento, ciclos_l, ciclos_n)
+    ciclos = np.where(lento, revisoes, ciclos_n)          # janelas de risco
+    pedidos = np.where(lento, np.minimum(fisico, revisoes), ciclos_n)
 
     Gz = stats.norm.pdf(z) - z * (1 - stats.norm.cdf(z))
     falta_n = sd * Gz
@@ -198,7 +214,7 @@ def modelar(base: pd.DataFrame, p: Parametros, lam: float) -> pd.DataFrame:
     faltas_ano = np.where(sem_hist, 0.0, faltas_ano)
 
     custo_manter = emed * h_real
-    custo_pedir = ciclos * p.custo_por_pedido
+    custo_pedir = pedidos * p.custo_por_pedido
     custo_falta = faltas_ano * Cu
     lucro_bruto = D * b.lucro_por_peca
 
@@ -224,7 +240,8 @@ def modelar(base: pd.DataFrame, p: Parametros, lam: float) -> pd.DataFrame:
     out["capital_imobilizado"] = emed * c
     out["cobertura_dias"] = np.where(b.demanda_media_dia > 0, emed / b.demanda_media_dia, 0)
     out["giro_ano"] = np.where(emed > 0, D / emed, 0)
-    out["pedidos_por_ano"] = ciclos
+    out["pedidos_por_ano"] = pedidos
+    out["janelas_de_risco_ano"] = ciclos
     out["faltas_esperadas_ano"] = faltas_ano
     out["custo_manter_ano"] = custo_manter
     out["custo_pedir_ano"] = custo_pedir
@@ -236,19 +253,45 @@ def modelar(base: pd.DataFrame, p: Parametros, lam: float) -> pd.DataFrame:
 
 
 def resolver_premio_escassez(base: pd.DataFrame, p: Parametros) -> float:
-    """Sobe o preco-sombra do capital ate o estoque caber no teto."""
+    """Sobe o preco-sombra do capital ate o estoque caber no teto.
+
+    O capital em funcao de lambda e uma escada: cada degrau e uma peca inteira
+    saindo do plano. Nao existe lambda que faca a soma bater exatamente no
+    teto, e por isso a busca aqui nao procura a igualdade - procura o menor
+    lambda que ja CABE, e devolve esse.
+
+    A diferenca importa. Uma raiz por troca de sinal (brentq) pode parar do
+    lado de cima de um degrau e devolver um plano de R$ 2.000.203 para um teto
+    de R$ 2.000.000: dentro da tolerancia numerica, fora do caixa.
+    """
     if not p.aplicar_teto_capital:
         return 0.0
 
-    def folga(lam: float) -> float:
-        return float(modelar(base, p, lam).capital_imobilizado.sum()) - p.teto_capital
+    def capital(lam: float) -> float:
+        return float(modelar(base, p, lam).capital_imobilizado.sum())
 
-    if folga(0.0) <= 0:
+    if capital(0.0) <= p.teto_capital:
         return 0.0
-    try:
-        return float(brentq(folga, 0.0, 50.0, xtol=1e-5))
-    except ValueError:
+
+    # acha um lambda que cabe, dobrando. O limite de 50 e o mesmo de antes:
+    # acima disso o capital ja esta tao caro que o plano e praticamente vazio.
+    alto = 0.05
+    while alto <= 50.0 and capital(alto) > p.teto_capital:
+        alto *= 2.0
+    if alto > 50.0:
         return 50.0
+
+    # bisseccao guardando a ponta de cima sempre viavel
+    baixo = 0.0
+    for _ in range(40):
+        meio = 0.5 * (baixo + alto)
+        if alto - baixo < 1e-6:
+            break
+        if capital(meio) > p.teto_capital:
+            baixo = meio
+        else:
+            alto = meio
+    return float(alto)
 
 
 # ----------------------------------------------------------------------
@@ -427,6 +470,9 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "demanda_dia_ingenua": float(getattr(r, "demanda_media_dia_ingenua", np.nan)),
             "demanda_dia_corrigida": float(r.demanda_media_dia),
             "desvio_dia": float(r.desvio_padrao_dia),
+            # sem esta coluna nao da para refazer sigma por fora: a
+            # variancia do horizonte agora tem dois termos
+            "desvio_prazo_dias": float(getattr(r, "sd_lead_time_dias", 0.0) or 0.0),
             "subestimacao_pct": float(getattr(r, "subestimacao_ingenua_pct", np.nan)),
             # ---- 2. horizonte
             "lead_time_dias": float(r.lead_time_dias),
@@ -447,6 +493,13 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "p_vender_ultima": pv[fins - 1],
             # ---- 5. economia unitaria
             "lucro_por_peca": float(r.lucro_por_peca),
+            # a margem que a venda observou, com o custo do dia de cada venda.
+            # Fica ao lado da refeita porque a divergencia entre as duas e o
+            # sinal de item com custo em movimento - e o que a tela de
+            # conferencia mostra.
+            "lucro_por_peca_historico": float(
+                getattr(r, "lucro_por_peca_historico", r.lucro_por_peca)),
+            "preco_liquido_peca": float(getattr(r, "preco_liquido_peca", 0.0)),
             "fator_perda_ruptura": float(p.fator_perda_ruptura),
             "margem_unit": Cu,
             "custo_unitario": float(r.custo_unitario),
@@ -543,23 +596,48 @@ def pecas_com_baixa_chance(df: pd.DataFrame, quantidades, corte: float = 0.5) ->
     return total
 
 
-def regra_de_parada(p: Parametros, criterio: str | None = None) -> dict:
+ORDEM_CRITERIOS = ["caixa", "retorno", "chance", "risco"]
+
+
+def criterios_ativos(p: Parametros, criterio=None) -> list[str]:
+    """Le a lista de criterios ligados, na ordem canonica.
+
+    O campo aceita um so ("caixa") ou vários ("caixa,chance") - a compra e
+    cortada pelo primeiro que chegar, que na pratica e o mais restritivo dos
+    ligados. Lista vazia volta para o caixa, que e o unico limite fisico.
+    """
+    if criterio is None:
+        criterio = getattr(p, "criterio_parada", "caixa")
+    if isinstance(criterio, str):
+        pedidos = [x.strip() for x in criterio.split(",")]
+    else:
+        pedidos = [str(x).strip() for x in criterio]
+    ativos = [c for c in ORDEM_CRITERIOS if c in pedidos]
+    return ativos or ["caixa"]
+
+
+def regra_de_parada(p: Parametros, criterio=None) -> dict:
     """Traduz os parametros na regra que corta a fila.
 
-    Os quatro criterios rodam sobre a MESMA fila ordenada por retorno por real
-    por dia. Dois deles so tornam parte das pecas inelegiveis (piso de retorno,
-    piso de chance); um corta pelo dinheiro; e o de risco inverte a conta - o
-    caixa deixa de ser entrada e passa a ser a resposta.
+    Todos os criterios rodam sobre a MESMA fila ordenada por retorno por real
+    por dia, e podem ser combinados. Dois deles so tornam parte das pecas
+    inelegiveis (piso de retorno, piso de chance); um corta pelo dinheiro; e o
+    de risco encerra a fila quando a margem exposta desce ao alvo.
+
+    Com mais de um ligado a peca precisa passar por TODOS - o corte acontece
+    onde o primeiro deles fecha a porta.
     """
-    criterio = criterio or str(getattr(p, "criterio_parada", "caixa") or "caixa")
+    ativos = criterios_ativos(p, criterio)
     return {
-        "criterio": criterio,
-        "piso": {"retorno": float(p.retorno_minimo_dia),
-                 "chance": float(p.chance_minima_peca)}.get(criterio, 0.0),
-        "alvo_risco": float(p.teto_margem_em_risco) if criterio == "risco" else None,
+        "criterios": ativos,
+        "criterio": ",".join(ativos),
+        "piso_retorno": float(p.retorno_minimo_dia) if "retorno" in ativos else 0.0,
+        "piso_chance": float(p.chance_minima_peca) if "chance" in ativos else 0.0,
+        "alvo_risco": float(p.teto_margem_em_risco) if "risco" in ativos else None,
         "teto": float(p.teto_compra_ciclo),
-        # no criterio por risco o caixa nao limita: ele e o numero que sai
-        "caixa_limita": criterio != "risco",
+        # sem o criterio de caixa ligado o dinheiro nao limita: ele e o numero
+        # que sai no fim (e o que o criterio por risco faz)
+        "caixa_limita": "caixa" in ativos,
     }
 
 
@@ -579,12 +657,12 @@ def caminhar(fila: pd.DataFrame, regra: dict,
     red_falta = fila.reducao_falta.to_numpy(float)
 
     n = len(fila)
-    criterio, piso = regra["criterio"], regra["piso"]
-    elegivel = np.ones(n, dtype=bool)
-    if criterio == "retorno" and piso > 0:
-        elegivel = fila.nota.to_numpy(float) >= piso
-    elif criterio == "chance" and piso > 0:
-        elegivel = fila.p_vender.to_numpy(float) >= piso
+    # cada criterio de piso vira uma mascara; a peca precisa passar em todas
+    piso_ret, piso_chc = regra.get("piso_retorno", 0.0), regra.get("piso_chance", 0.0)
+    passa_retorno = (fila.nota.to_numpy(float) >= piso_ret if piso_ret > 0
+                     else np.ones(n, dtype=bool))
+    passa_chance = (fila.p_vender.to_numpy(float) >= piso_chc if piso_chc > 0
+                    else np.ones(n, dtype=bool))
     alvo_risco = regra["alvo_risco"]
     teto = regra["teto"]
 
@@ -611,11 +689,14 @@ def caminhar(fila: pd.DataFrame, regra: dict,
         depende = b > 0 and ultimo_bloco.get(s, -1) != b - 1
         cabe = custo[i] <= restante
 
+        # a ordem de teste e a ordem do relato: o motivo mostrado e o do
+        # primeiro criterio que fechou a porta para esta peca
         if alvo_risco is not None and risco <= alvo_risco:
             motivo[i] = "risco assumido ja alcancado"
-        elif not elegivel[i]:
-            motivo[i] = ("abaixo do piso de retorno" if criterio == "retorno"
-                         else "abaixo do piso de chance de vender")
+        elif not passa_retorno[i]:
+            motivo[i] = "abaixo do piso de retorno"
+        elif not passa_chance[i]:
+            motivo[i] = "abaixo do piso de chance de vender"
         elif depende and not cabe:
             motivo[i] = "caixa ja esgotado quando chegou a vez dela"
         elif depende:
@@ -689,33 +770,54 @@ def fronteira(fila: pd.DataFrame, risco_inicial: float, falta_inicial: float,
 
 def resumo_criterios(fila: pd.DataFrame, p: Parametros,
                      risco_inicial: float, falta_inicial: float) -> pd.DataFrame:
-    """Onde cada um dos quatro criterios cortaria a fila, com o mesmo motor.
+    """Onde cada criterio cortaria a fila, sozinho, e onde a combinacao corta.
 
-    E o que a tela de criterios mostra: os quatro cortes lado a lado sobre a
-    mesma fronteira, para a escolha ser comparada e nao adivinhada.
+    E o que a tela de criterios mostra: cada regra isolada sobre a mesma
+    fronteira, mais a linha `combinado` com o conjunto que esta ligado. So
+    assim a escolha e comparada em vez de adivinhada - e da para ver qual das
+    regras ligadas e a que realmente esta mordendo.
     """
     from .config import CRITERIOS
-    linhas = []
-    for chave, rotulo, campo, unidade, _tipo, _desc, _pergunta in CRITERIOS:
-        regra = regra_de_parada(p, chave)
+    ativos = criterios_ativos(p)
+
+    def medir(regra: dict) -> dict:
         r = caminhar(fila, regra, risco_inicial, falta_inicial)
         ok = r["comprar"]
         n = int(ok.sum())
-        linhas.append(dict(
-            criterio=chave, rotulo=rotulo, campo=campo, unidade=unidade,
-            valor_configurado=float(getattr(p, campo, 0.0)),
-            ativo=bool(chave == regra_de_parada(p)["criterio"]),
+        caixa = float(fila.custo.to_numpy()[ok].sum()) if n else 0.0
+        return dict(
             posicao_corte=int(np.max(np.where(ok)[0]) + 1) if n else 0,
             blocos=n,
             pecas=int(fila.quantidade.to_numpy()[ok].sum()) if n else 0,
             itens=int(pd.unique(fila.sku.to_numpy()[ok]).size) if n else 0,
-            caixa=float(fila.custo.to_numpy()[ok].sum()) if n else 0.0,
+            caixa=caixa,
             margem=float(fila.valor_esperado.to_numpy()[ok].sum()) if n else 0.0,
             margem_em_risco=float(r["margem_em_risco_restante"][-1]),
             falta=float(r["falta_restante"][-1]),
-            estoura_caixa=bool(n and fila.custo.to_numpy()[ok].sum()
-                               > p.teto_compra_ciclo + 1e-6),
-        ))
+            estoura_caixa=bool(caixa > p.teto_compra_ciclo + 1e-6),
+        )
+
+    linhas = []
+    for chave, rotulo, campo, unidade, _t, _d, _q, _a in CRITERIOS:
+        linhas.append(dict(
+            criterio=chave, rotulo=rotulo, campo=campo, unidade=unidade,
+            valor_configurado=float(getattr(p, campo, 0.0)),
+            ativo=bool(chave in ativos),
+            **medir(regra_de_parada(p, chave))))
+
+    # a linha do conjunto: o corte que a plataforma vai usar de fato
+    comb = medir(regra_de_parada(p))
+    solos = {l["criterio"]: l for l in linhas}
+    # qual das regras ligadas e a que amarra: a que sozinha corta mais baixo
+    manda = min(ativos, key=lambda c: solos[c]["caixa"]) if ativos else "caixa"
+    linhas.append(dict(
+        criterio="combinado",
+        rotulo="Combinação em uso" if len(ativos) > 1 else solos[ativos[0]]["rotulo"],
+        campo="", unidade="", valor_configurado=0.0, ativo=True,
+        criterios_ativos=",".join(ativos), manda=manda, **comb))
+    for l in linhas[:-1]:
+        l["criterios_ativos"] = ",".join(ativos)
+        l["manda"] = manda
     return pd.DataFrame(linhas)
 
 
@@ -748,7 +850,8 @@ def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd
         fila[coluna] = valores
     fila["teto_ciclo"] = float(p.teto_compra_ciclo)
     fila["criterio_parada"] = regra["criterio"]
-    fila["piso_criterio"] = regra["piso"]
+    fila["piso_retorno"] = regra["piso_retorno"]
+    fila["piso_chance"] = regra["piso_chance"]
     fila.attrs["risco_inicial"] = risco_inicial
     fila.attrs["falta_inicial"] = falta_inicial
 
@@ -843,12 +946,171 @@ def tabela_probabilidade(modelo: pd.DataFrame, pontos: int = 30) -> pd.DataFrame
 # ----------------------------------------------------------------------
 # 7. Orquestracao
 # ----------------------------------------------------------------------
-def executar(wh: Warehouse, p: Parametros) -> dict:
-    """Le os marts, roda o modelo e devolve os quadros prontos para gravar."""
-    fin = wh.query(f"select * from {ref('mart_sku_financeiro')}")
-    diario = wh.query(
-        f"select sku, data, pecas_vendidas, estado_estoque, saldo_final "
-        f"from {ref('mart_estoque_diario')}")
+# Espelha mart_sku_financeiro.sql com um corte de data. Existe por causa da
+# validacao historica: aquele mart agrega o periodo INTEIRO, e rodar o modelo
+# "como se fosse" uma data passada exige recalcular lucro_por_peca, margem_pct,
+# cmv e pecas_vendidas so com o que se sabia ate ali. Sem isso o backtest
+# adivinha o futuro pelo proprio numero que deveria prever.
+#
+# Se mart_sku_financeiro.sql mudar, este SQL muda junto - scripts/revisao.py
+# cobra a igualdade dos dois com o corte na ultima data.
+SQL_FINANCEIRO_ATE = """
+with v as (
+    select sku,
+           sum(pecas_vendidas)       as pecas_vendidas,
+           count(*)                  as linhas_de_venda,
+           count(distinct pedido)    as pedidos,
+           sum(receita_liquida)      as receita_liquida,
+           sum(total)                as total_faturado,
+           sum(cmv)                  as cmv,
+           sum(valor_do_frete)       as frete_custo,
+           sum(impostos_sobre_venda) as impostos,
+           sum(lucro)                as lucro
+    from {vendas}
+    where data <= DATE '{ate}'
+    group by sku
+)
+select c.sku, c.item, c.familia, c.unidade, c.origem, c.custo_unitario,
+       c.preco_tabela, c.lead_time_dias, c.lote_minimo_compra,
+       coalesce(v.pecas_vendidas, 0)  as pecas_vendidas,
+       coalesce(v.linhas_de_venda, 0) as linhas_de_venda,
+       coalesce(v.pedidos, 0)         as pedidos,
+       coalesce(v.receita_liquida, 0) as receita_liquida,
+       coalesce(v.total_faturado, 0)  as total_faturado,
+       coalesce(v.cmv, 0)             as cmv,
+       coalesce(v.frete_custo, 0)     as frete_custo,
+       coalesce(v.impostos, 0)        as impostos,
+       coalesce(v.lucro, 0)           as lucro_observado,
+       case when coalesce(v.pecas_vendidas, 0) > 0
+            then v.lucro / v.pecas_vendidas else 0 end as lucro_por_peca,
+       case when coalesce(v.total_faturado, 0) > 0
+            then v.lucro / v.total_faturado else 0 end as margem_pct
+from {catalogo} c
+left join v on v.sku = c.sku
+"""
+
+
+def ler_base(wh: Warehouse, ate: str | None = None,
+             janela: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """As duas leituras do motor, com duas janelas diferentes de proposito.
+
+    `ate` = None e a operacao normal (a data mais recente do banco);
+    `ate` = 'AAAA-MM-DD' e o backtest, que devolve o que o motor teria lido
+    naquele dia e nada do que veio depois.
+
+    `janela` limita o historico DIARIO por baixo: so os ultimos N dias entram
+    na estimativa de demanda. Nao e um detalhe de desempenho - e a memoria do
+    modelo. Com todo o historico (1.097 dias nesta base) a taxa estimada saiu
+    mais de 100% abaixo da observada nos ultimos 90 dias, porque a media longa
+    dilui crescimento. O agregado financeiro NAO recebe essa janela: lucro por
+    peca e economia unitaria, nao taxa, e com 90 dias a margem da maioria do
+    catalogo sairia zero.
+
+    `disponivel_final` e a posicao que decide a compra (liquida de reserva);
+    `saldo_final` e o estoque fisico, que diz se o dia tem sinal de demanda.
+    """
+    colunas = ("sku, data, pecas_vendidas, estado_estoque, saldo_final, "
+               "disponivel_final")
+    fim = (f"where data <= DATE '{str(ate)[:10]}'" if ate else
+           f"where data <= (select max(data) from {ref('mart_estoque_diario')})")
+    piso = ""
+    if janela and janela > 0:
+        base = (f"DATE '{str(ate)[:10]}'" if ate
+                else f"(select max(data) from {ref('mart_estoque_diario')})")
+        piso = f" and data > {base} - INTERVAL {int(janela)} DAY"
+
+    diario = wh.query(f"select {colunas} from {ref('mart_estoque_diario')} {fim}{piso}")
+    if ate is None:
+        fin = wh.query(f"select * from {ref('mart_sku_financeiro')}")
+    else:
+        # o corte nunca passa do ultimo dia de ESTOQUE: a grade diaria termina
+        # ali, e o extrato de venda vai quatro dias mais longe. Sem este limite
+        # o espelho somaria venda de dias que a grade nao tem, e deixaria de
+        # reproduzir o mart no ultimo dia - a igualdade que a bateria cobra.
+        fim_estoque = str(wh.query(
+            f"select max(data) d from {ref('mart_estoque_diario')}").iloc[0, 0])[:10]
+        corte = min(str(ate)[:10], fim_estoque)
+        fin = wh.query(SQL_FINANCEIRO_ATE.format(
+            vendas=ref('stg_vendas'), catalogo=ref('stg_catalogo'),
+            ate=corte))
+    return _margem_coerente(wh, fin, ate, janela), diario
+
+
+def _margem_coerente(wh: Warehouse, fin: pd.DataFrame, ate: str | None,
+                     janela: int | None) -> pd.DataFrame:
+    """Pareia a margem com o custo que o modelo vai pagar.
+
+    A nota divide por `custo_unitario` - o custo de hoje - e multiplica pela
+    margem. Mas `lucro_por_peca` vem da venda, e a venda subtrai o custo medio
+    do DIA em que ela aconteceu: uma media de tres anos de custos antigos.
+    Quando o custo de um item muda, os dois lados da razao falam de precos
+    diferentes, e a nota erra - para cima em quem ficou mais caro, para baixo
+    em quem ficou mais barato.
+
+    Aqui a margem e refeita como preco praticado menos o custo de hoje. O
+    preco sai da MESMA janela finita usada para a demanda, porque preco
+    tambem envelhece; item sem venda na janela cai para a media do historico,
+    e item sem venda nenhuma fica com zero, como antes.
+
+    A leitura antiga fica gravada em `lucro_por_peca_historico`: a tela de
+    conferencia mostra as duas, e e a divergencia entre elas que denuncia
+    item com custo em movimento.
+    """
+    fin = fin.copy()
+    fin["lucro_por_peca_historico"] = fin.lucro_por_peca.astype(float)
+
+    q = fin.pecas_vendidas.astype(float).replace(0.0, np.nan)
+    preco_tudo = fin.receita_liquida.astype(float) / q
+
+    corte = (f"DATE '{str(ate)[:10]}'" if ate
+             else f"(select max(data) from {ref('mart_estoque_diario')})")
+    onde = f"where data <= {corte}"
+    if janela and janela > 0:
+        onde += f" and data > {corte} - INTERVAL {int(janela)} DAY"
+    jan = wh.query(f"""
+        select sku, sum(receita_liquida) as receita, sum(pecas_vendidas) as pecas
+        from {ref('stg_vendas')} {onde} group by sku""")
+    jan["preco_janela"] = (jan.receita.astype(float)
+                           / jan.pecas.astype(float).replace(0.0, np.nan))
+    fin = fin.merge(jan[["sku", "preco_janela"]], on="sku", how="left")
+
+    preco = fin.preco_janela.fillna(preco_tudo)
+    fin["preco_liquido_peca"] = preco.fillna(0.0)
+    margem = preco - fin.custo_unitario.astype(float)
+    # sem venda nenhuma nao ha preco praticado: fica zero, como antes
+    fin["lucro_por_peca"] = margem.where(fin.pecas_vendidas.astype(float) > 0,
+                                         0.0).fillna(0.0)
+    # margem_pct tem de acompanhar, ou os dois numeros na tela se contradizem.
+    # A base passa a ser o preco liquido por peca - a mesma base da margem -,
+    # e nao o faturamento bruto de antes, que incluia imposto e frete.
+    fin["margem_pct"] = np.where(fin.preco_liquido_peca > 0,
+                                 fin.lucro_por_peca / fin.preco_liquido_peca,
+                                 0.0)
+    fin = fin.drop(columns=["preco_janela"])
+    return fin
+
+
+def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
+             skus: set[str] | None = None) -> dict:
+    """Le os marts, roda o modelo e devolve os quadros prontos para gravar.
+
+    `ate` corta o passado numa data e faz o motor rodar como se fosse aquele
+    dia - e o que a tela de validacao historica usa. Todo o resto do fluxo e
+    identico, de proposito: se o backtest rodasse por um caminho paralelo,
+    validaria outro modelo, nao este.
+
+    `skus` restringe o universo ANTES de tudo o mais. O filtro entra aqui, e
+    nao no fim, porque o caixa do ciclo e disputado peca a peca no catalogo
+    inteiro: filtrar o plano depois de pronto deixaria o modelo ter gasto
+    dinheiro com itens que o recorte exclui, e o que sobrasse na tela seria
+    um plano que nunca existiu. Filtrando na entrada, o motor decide dentro do
+    recorte com o dinheiro do recorte - que e o unico teste que responde
+    "e se a base fosse confiavel?".
+    """
+    fin, diario = ler_base(wh, ate, getattr(p, "janela_estimacao_dias", None))
+    if skus is not None:
+        fin = fin[fin.sku.isin(skus)].copy()
+        diario = diario[diario.sku.isin(skus)].copy()
 
     est = estatistica_demanda(diario, p)
     b = fin.merge(est, on="sku", how="left").fillna({"demanda_media_dia": 0.0})
@@ -859,8 +1121,25 @@ def executar(wh: Warehouse, p: Parametros) -> dict:
     # essa conta superestima a variacao no horizonte e infla o estoque de
     # seguranca; `fator_desvio_horizonte` permite corrigir com o valor medido
     # em scripts/revisao.py. Fica em 1,00 por padrao - a hipotese conservadora.
-    b["sd_periodo"] = (b.desvio_padrao_dia * np.sqrt(b.periodo_protecao_dias)
-                       * p.fator_desvio_horizonte)
+    # Variancia da demanda no horizonte, com prazo de entrega VARIAVEL:
+    #
+    #     Var(D_H) = (E[L] + R) x Var(d)  +  E[d]^2 x Var(L)
+    #
+    # O primeiro termo e a variacao da demanda diaria acumulada no horizonte -
+    # e o unico que a versao anterior tinha. O segundo e a variacao do proprio
+    # prazo: se o fornecedor pode atrasar, a janela a cobrir e maior, e um item
+    # de giro alto sofre muito mais com isso do que um de giro baixo.
+    #
+    # No extrato real da Elevato o prazo realizado tem mediana de 18 dias e
+    # desvio mediano de 13,2 - um coeficiente de variacao de 0,75. Ignorar esse
+    # termo subdimensionaria o estoque de seguranca justamente nos itens que
+    # mais vendem. Com `lead_time_desvio_dias` = 0, que e o caso da base
+    # sintetica, a conta recai exatamente na anterior.
+    sd_lead = b.get("lead_time_desvio_dias", pd.Series(0.0, index=b.index)).fillna(0.0)
+    b["sd_lead_time_dias"] = sd_lead
+    b["sd_periodo"] = np.sqrt(
+        b.periodo_protecao_dias * b.desvio_padrao_dia ** 2
+        + (b.demanda_media_dia ** 2) * (sd_lead ** 2)) * p.fator_desvio_horizonte
     b["cv_diario"] = np.where(b.demanda_media_dia > 0,
                               b.desvio_padrao_dia / b.demanda_media_dia, 0)
     b["cv_periodo"] = np.where(b.mu_periodo > 0, b.sd_periodo / b.mu_periodo, 0)
@@ -884,8 +1163,10 @@ def executar(wh: Warehouse, p: Parametros) -> dict:
     irrestrito = modelar(b, p, 0.0)
 
     ultimo = diario.data.max()
-    posicoes = (diario[diario.data == ultimo][["sku", "saldo_final"]]
-                .rename(columns={"saldo_final": "estoque_fisico"}))
+    # a posicao que entra na decisao e a DISPONIVEL, nao o estoque fisico: a
+    # peca reservada ja tem dono e nao protege a proxima venda
+    posicoes = (diario[diario.data == ultimo][["sku", "disponivel_final"]]
+                .rename(columns={"disponivel_final": "estoque_fisico"}))
     posicoes["em_transito"] = 0.0
 
     # duas formas de gastar o mesmo caixa do ciclo, para poder comparar:

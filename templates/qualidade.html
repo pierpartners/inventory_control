@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block titulo %}Qualidade dos dados{% endblock %}
+{% block cabecalho %}Qualidade dos dados{% endblock %}
+{% block subcabecalho %}o que as fontes contam quando confrontadas uma com a outra{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block cabeca %}
+<style>
+  /* o veredito: uma faixa que muda de cor e de texto conforme o pior achado */
+  .veredito { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 22px;
+    align-items: center; border: 1px solid var(--linha); border-radius: 11px;
+    padding: 22px 26px; background: var(--painel); }
+  @media (max-width: 900px) { .veredito { grid-template-columns: 1fr; } }
+  .veredito.ok    { border-left: 4px solid var(--menta); }
+  .veredito.aviso { border-left: 4px solid var(--ambar); }
+  .veredito.erro  { border-left: 4px solid var(--coral); }
+  .veredito .t { font-family: var(--serif); font-size: 25px; line-height: 1.2;
+    letter-spacing: -.01em; }
+  .veredito .s { font-size: 12.5px; color: var(--tinta-2); line-height: 1.65;
+    margin-top: 10px; max-width: 78ch; }
+  .placar { display: flex; gap: 8px; }
+  .placar div { text-align: center; padding: 11px 16px; border-radius: 9px;
+    border: 1px solid var(--linha); background: var(--painel-2); min-width: 74px; }
+  .placar .n { font-family: var(--mono); font-size: 24px; font-weight: 500;
+    line-height: 1; letter-spacing: -.04em; }
+  .placar .r { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--tinta-3); margin-top: 6px; font-weight: 700; }
+  .placar .ok .n    { color: var(--menta); }
+  .placar .aviso .n { color: var(--ambar); }
+  .placar .erro .n  { color: var(--coral); }
+
+  /* uma verificacao */
+  .ck { border: 1px solid var(--linha); border-radius: 10px; overflow: hidden;
+    background: var(--painel); }
+  .ck + .ck { margin-top: 10px; }
+  .ck-cab { display: grid; grid-template-columns: 12px minmax(0,1fr) auto;
+    gap: 14px; align-items: center; padding: 15px 18px; cursor: pointer;
+    user-select: none; }
+  .ck-cab:hover { background: var(--painel-2); }
+  .ck-pt { width: 8px; height: 8px; border-radius: 50%; }
+  .ck.ok    .ck-pt { background: var(--menta); }
+  .ck.aviso .ck-pt { background: var(--ambar); }
+  .ck.erro  .ck-pt { background: var(--coral); }
+  .ck-tit { font-size: 13.5px; font-weight: 500; }
+  .ck-conf { font-size: 11px; color: var(--tinta-3); margin-top: 3px;
+    line-height: 1.5; }
+  .ck-val { text-align: right; white-space: nowrap; }
+  .ck-val .v { font-family: var(--mono); font-size: 17px; font-weight: 500;
+    letter-spacing: -.03em; }
+  .ck.ok    .ck-val .v { color: var(--menta); }
+  .ck.aviso .ck-val .v { color: var(--ambar); }
+  .ck.erro  .ck-val .v { color: var(--coral); }
+  .ck-val .u { font-size: 10px; color: var(--tinta-3); margin-top: 3px; }
+  .ck-int { padding: 0 18px 17px; border-top: 1px solid var(--linha-2); }
+  .ck-int.fechado { display: none; }
+  .ck-achado { font-size: 12.5px; color: var(--tinta); line-height: 1.7;
+    margin: 15px 0 0; }
+  .ck-acao { font-size: 12.5px; color: var(--tinta-2); line-height: 1.7;
+    margin-top: 12px; padding-left: 13px; border-left: 2px solid var(--linha); }
+  .ck-acao b { color: var(--tinta); font-weight: 600; }
+  .ck-seta { color: var(--tinta-4); font-size: 11px; }
+
+  .grupo-cab { margin: 26px 0 12px; }
+  .grupo-cab h2 { font-family: var(--serif); font-size: 20px; margin: 0;
+    letter-spacing: -.01em; font-weight: 400; }
+  .grupo-cab .sobre { font-size: 12px; color: var(--tinta-3); margin-top: 6px;
+    line-height: 1.6; max-width: 88ch; }
+  .grupo-cab .conta { font-family: var(--mono); font-size: 11px;
+    color: var(--tinta-4); }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<div id="espera" class="painel">
+  <div class="painel-int" style="padding:46px;text-align:center;color:var(--tinta-3);font-size:13px">
+    <div class="carregando"><div class="girar"></div></div>
+    <div class="mt14">confrontando as fontes uma com a outra…</div>
+    <div class="t4 mt6" style="font-size:11.5px">
+      1,3 milhão de linhas de estoque contra 790 mil de venda · cerca de 13 segundos
+    </div>
+  </div>
+</div>
+
+<div id="falha" class="msg msg-er" hidden><span id="falha-txt"></span></div>
+
+<div id="saida" hidden>
+  <div class="secao"><div class="veredito" id="veredito">
+    <div>
+      <div class="t" id="v-titulo">–</div>
+      <div class="s" id="v-texto">–</div>
+    </div>
+    <div class="placar">
+      <div class="ok"><div class="n" id="p-ok">–</div><div class="r">passam</div></div>
+      <div class="aviso"><div class="n" id="p-aviso">–</div><div class="r">avisos</div></div>
+      <div class="erro"><div class="n" id="p-erro">–</div><div class="r">erros</div></div>
+    </div>
+  </div></div>
+
+  <div id="grupos"></div>
+
+  <div class="secao">
+    <div class="nota-lat">
+      <b>Por que esta tela existe.</b> Durante meses o modelo dimensionou a
+      prateleira do centro de distribuição contra a venda de um canal só — o
+      e-commerce — porque era o único arquivo de venda carregado. Aquele canal
+      responde por 17% das peças que saem daquela posição. E
+      <b>nenhum teste de identidade pegou isso</b>, porque a conta estava certa:
+      o insumo estava errado. Erro de insumo só aparece quando duas fontes que
+      deveriam contar a mesma história são confrontadas e a diferença é medida.
+      É o que cada linha acima faz — e o que a coluna <em>confronta</em> declara.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block rodape %}
+<script>
+(function () {
+  var id = function (x) { return document.getElementById(x); };
+  var D = null;
+
+  var VEREDITO = {
+    ok: ["A base está coerente.",
+         "As {n} verificações passaram. As fontes que deveriam contar a mesma " +
+         "história batem entre si dentro do esperado."],
+    aviso: ["A base está utilizável, com ressalvas.",
+            "{ok} verificações passam e {aviso} pedem leitura. Nenhuma delas " +
+            "impede o plano de compra de significar algo, mas cada uma muda como " +
+            "um número deve ser lido — e a que estiver marcada em amarelo abaixo " +
+            "explica o quê."],
+    erro: ["Há achado que compromete decisão.",
+           "{erro} verificação(ões) em vermelho: elas afetam o plano de compra " +
+           "direto, e vale olhar antes de gastar dinheiro com base nele. Outras " +
+           "{aviso} pedem leitura e {ok} passam."]
+  };
+
+  function pintar() {
+    var s = D.resumo;
+    var v = VEREDITO[s.veredito];
+    id("veredito").className = "veredito " + s.veredito;
+    id("v-titulo").textContent = v[0];
+    id("v-texto").innerHTML = v[1]
+      .replace("{n}", N.num(s.total)).replace("{ok}", N.num(s.ok))
+      .replace("{aviso}", N.num(s.aviso)).replace("{erro}", N.num(s.erro));
+    id("p-ok").textContent = N.num(s.ok);
+    id("p-aviso").textContent = N.num(s.aviso);
+    id("p-erro").textContent = N.num(s.erro);
+
+    /* a ordem dos grupos vem do servidor; dentro do grupo, erro primeiro -
+       quem abre a tela tem de encontrar o que dói sem procurar */
+    var ordem = { erro: 0, aviso: 1, ok: 2 };
+    var h = "";
+    D.grupos.forEach(function (g) {
+      var cks = D.checagens.filter(function (c) { return c.grupo === g.chave; })
+        .sort(function (a, b) { return ordem[a.nivel] - ordem[b.nivel]; });
+      if (!cks.length) return;
+      var conta = { erro: 0, aviso: 0, ok: 0 };
+      cks.forEach(function (c) { conta[c.nivel]++; });
+      h += '<div class="secao">' +
+        '<div class="grupo-cab"><h2>' + N.esc(g.titulo) +
+        ' <span class="conta">· ' + cks.length + " verificações" +
+        (conta.erro ? " · " + conta.erro + " em vermelho" : "") +
+        (conta.aviso ? " · " + conta.aviso + " em amarelo" : "") +
+        "</span></h2>" +
+        '<div class="sobre">' + N.esc(g.sobre) + "</div></div>";
+      cks.forEach(function (c, i) { h += cartao(c, g.chave + "-" + i); });
+      h += "</div>";
+    });
+    id("grupos").innerHTML = h;
+  }
+
+  function cartao(c, k) {
+    /* aberto por padrao quando ha o que fazer: um achado que exige acao nao
+       deve depender de o leitor pensar em clicar */
+    var aberto = c.nivel !== "ok";
+    var corpo =
+      '<div class="ck-achado">' + c.achado + "</div>" +
+      (c.acao ? '<div class="ck-acao">' + c.acao + "</div>" : "") +
+      (c.linhas && c.linhas.length ? tabela(c) : "");
+    return '<div class="ck ' + c.nivel + '" data-k="' + k + '">' +
+      '<div class="ck-cab" data-alvo="int-' + k + '">' +
+      '<div class="ck-pt"></div>' +
+      '<div><div class="ck-tit">' + N.esc(c.titulo) + "</div>" +
+      (c.confronta ? '<div class="ck-conf">confronta ' + N.esc(c.confronta) +
+        "</div>" : "") + "</div>" +
+      '<div class="ck-val"><div class="v">' + c.valor + "</div>" +
+      '<div class="u">' + N.esc(c.unidade) + "</div></div></div>" +
+      '<div class="ck-int' + (aberto ? "" : " fechado") + '" id="int-' + k + '">' +
+      corpo + "</div></div>";
+  }
+
+  function tabela(c) {
+    var cols = c.colunas.length ? c.colunas : Object.keys(c.linhas[0]);
+    var num = {};
+    cols.forEach(function (col) {
+      num[col] = c.linhas.every(function (r) {
+        return r[col] === null || typeof r[col] === "number"; });
+    });
+    return '<div class="mt14"><div class="t4 pequeno mb8" ' +
+      'style="letter-spacing:.09em;text-transform:uppercase;font-weight:700">' +
+      "as linhas que sustentam o número · " + c.linhas.length +
+      (c.linhas.length >= 40 ? " primeiras" : "") + "</div>" +
+      '<div class="rolo rolo-medio"><table class="tb" style="font-size:11.5px">' +
+      "<thead><tr>" + cols.map(function (col) {
+        return '<th class="nao-ord' + (num[col] ? " n" : "") + '">' +
+          N.esc(col.replace(/_/g, " ")) + "</th>"; }).join("") +
+      "</tr></thead><tbody>" +
+      c.linhas.map(function (r) {
+        return "<tr>" + cols.map(function (col) {
+          var v = r[col];
+          if (v === null || v === undefined) return '<td class="t4">–</td>';
+          return "<td" + (num[col] ? ' class="n"' : "") + ">" +
+            (num[col] ? N.num(v, Number.isInteger(v) ? 0 : 2) : N.esc(String(v))) +
+            "</td>";
+        }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div></div>";
+  }
+
+  document.body.addEventListener("click", function (e) {
+    var cab = e.target.closest(".ck-cab");
+    if (!cab) return;
+    var alvo = id(cab.dataset.alvo);
+    if (alvo) alvo.classList.toggle("fechado");
+  });
+
+  N.buscar("/api/qualidade").then(function (d) {
+    D = d;
+    id("espera").hidden = true;
+    id("saida").hidden = false;
+    pintar();
+  }).catch(function (e) {
+    id("espera").hidden = true;
+    id("falha").hidden = false;
+    id("falha-txt").textContent = "não deu para rodar as verificações: " + e.message;
+  });
+})();
+</script>
+{% endblock %}

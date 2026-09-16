@@ -1,0 +1,721 @@
+{% extends "base.html" %}
+{% block titulo %}Retorno do dinheiro{% endblock %}
+{% block cabecalho %}Retorno do dinheiro{% endblock %}
+{% block subcabecalho %}quanto volta para cada real aplicado — e onde ele deixa de voltar{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block cabeca %}
+<style>
+  /* ---- a faixa de abertura ---------------------------------------- */
+  .heroi-ret {
+    border: 1px solid var(--linha); border-radius: 11px; overflow: hidden;
+    background:
+      radial-gradient(1100px 300px at 12% -30%, rgba(55,214,160,.16), transparent 62%),
+      radial-gradient(800px 260px at 88% -20%, rgba(242,169,59,.11), transparent 60%),
+      var(--painel);
+  }
+  .heroi-ret .topo {
+    display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr);
+    gap: 0; align-items: stretch;
+  }
+  @media (max-width: 980px) { .heroi-ret .topo { grid-template-columns: 1fr; } }
+  .heroi-ret .esq { padding: 26px 28px 24px; }
+  .heroi-ret .dir {
+    padding: 26px 28px 24px; border-left: 1px solid var(--linha-2);
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  @media (max-width: 980px) {
+    .heroi-ret .dir { border-left: 0; border-top: 1px solid var(--linha-2); }
+  }
+  .heroi-ret .chapeu {
+    font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--tinta-4); font-weight: 700;
+  }
+  .heroi-ret .enorme {
+    font-family: var(--mono); font-size: 62px; line-height: 1; font-weight: 500;
+    letter-spacing: -.055em; color: var(--menta); margin: 12px 0 0;
+  }
+  .heroi-ret .enorme small {
+    font-size: 22px; color: var(--tinta-3); letter-spacing: -.02em; margin-left: 4px;
+  }
+  .heroi-ret .frase { font-size: 13.5px; color: var(--tinta-2); margin-top: 14px;
+    line-height: 1.7; max-width: 520px; }
+  .heroi-ret .frase b { color: var(--tinta); font-weight: 600; }
+  .heroi-ret .frase em { color: var(--menta); font-style: normal; font-weight: 600; }
+  .par { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px 22px; }
+  .par .rot {
+    font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--tinta-4); font-weight: 700;
+  }
+  .par .val { font-family: var(--mono); font-size: 25px; letter-spacing: -.04em;
+    color: var(--tinta); margin-top: 4px; }
+  .par .sub { font-size: 11px; color: var(--tinta-3); margin-top: 3px; line-height: 1.5; }
+  .faixa-base {
+    border-top: 1px solid var(--linha-2); padding: 14px 28px;
+    display: flex; flex-wrap: wrap; gap: 8px 26px; align-items: center;
+    background: rgba(9,12,16,.4);
+  }
+  .faixa-base span { font-size: 11.5px; color: var(--tinta-3); }
+  .faixa-base b { font-family: var(--mono); color: var(--tinta); font-weight: 500; }
+
+  /* ---- quadrantes -------------------------------------------------- */
+  .quads { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+  @media (max-width: 1100px) { .quads { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .quad {
+    border: 1px solid var(--linha-2); border-radius: 9px; background: var(--painel);
+    padding: 15px 16px; border-top-width: 3px; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .quad:hover { background: var(--painel-2); }
+  .quad.on { border-color: var(--ambar-2); background: rgba(242,169,59,.05); }
+  .quad .nm { font-size: 13px; font-weight: 600; color: var(--tinta); }
+  .quad .ex { font-size: 11px; color: var(--tinta-3); margin-top: 3px; line-height: 1.5;
+    min-height: 33px; }
+  .quad .nums { display: flex; gap: 16px; margin-top: 12px; }
+  .quad .nums div { min-width: 0; }
+  .quad .nums .r { font-size: 9px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--tinta-4); font-weight: 700; }
+  .quad .nums .v { font-family: var(--mono); font-size: 15px; color: var(--tinta);
+    letter-spacing: -.03em; margin-top: 2px; white-space: nowrap; }
+
+  .setas { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 1px solid var(--linha-2); }
+  .setas button {
+    background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+    padding: 9px 15px; font-size: 12.5px; color: var(--tinta-3); font-weight: 500;
+    font-family: inherit;
+  }
+  .setas button:hover { color: var(--tinta); }
+  .setas button.on { color: var(--ambar); border-bottom-color: var(--ambar); }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ a abertura -->
+<div class="heroi-ret secao">
+  <div class="topo">
+    <div class="esq">
+      <div class="chapeu">Retorno anual sobre o capital em estoque</div>
+      <div class="enorme" id="h-retorno">–<small>por ano</small></div>
+      <div class="frase" id="h-frase">–</div>
+    </div>
+    <div class="dir">
+      <div class="par">
+        <div>
+          <div class="rot">Capital aplicado em estoque</div>
+          <div class="val" id="h-capital">–</div>
+          <div class="sub">estoque médio ao custo, em <b id="h-skus">–</b> produtos</div>
+        </div>
+        <div>
+          <div class="rot">Lucro líquido que ele devolve</div>
+          <div class="val mt" id="h-liquido">–</div>
+          <div class="sub">por ano, já pagos manter, pedir e faltar</div>
+        </div>
+        <div>
+          <div class="rot">Cada R$ 1 aplicado devolve</div>
+          <div class="val" id="h-porreal">–</div>
+          <div class="sub">de margem bruta por ano <span class="t4">(GMROI)</span></div>
+        </div>
+        <div>
+          <div class="rot">O capital se paga em</div>
+          <div class="val am" id="h-payback">–</div>
+          <div class="sub">giro médio de <b id="h-giro">–</b> vezes por ano</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="faixa-base">
+    <span>Compra deste ciclo: <b id="h-compra">–</b></span>
+    <span>Margem que ela traz de volta: <b class="mt" id="h-margem-ciclo">–</b></span>
+    <span>Ou seja, <b class="mt" id="h-mult-ciclo">–</b> por real aplicado agora</span>
+    <span>Margem em risco por falta: <b class="am" id="h-risco">–</b></span>
+  </div>
+</div>
+
+<!-- ============================================ a cascata -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Por onde o lucro entra e por onde escapa</h2>
+    <span class="dica">um ano de operação, do lucro bruto ao que sobra na mão</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div id="g-cascata" class="gfx m"></div>
+      <div class="legenda mt10">
+        <span><i style="background:#37D6A0"></i>lucro que entra</span>
+        <span><i style="background:#FF6A5E"></i>custo que escapa</span>
+        <span><i style="background:#F2A93B"></i>o que sobra</span>
+      </div>
+      <div class="nota-lat mt14" id="c-nota">–</div>
+    </div>
+  </div>
+
+  <div class="gr gr-3 mt14">
+    <div class="conceito meio">
+      <div class="t">Custo de manter parado</div>
+      <div class="d">Cada peça na prateleira consome capital, espaço e risco de
+        envelhecer. Cobrado a <b id="c-taxa">–</b> ao ano sobre o custo da peça.</div>
+    </div>
+    <div class="conceito meio">
+      <div class="t">Custo de pedir</div>
+      <div class="d">Cada pedido colocado e recebido custa <b id="c-pedido">–</b>
+        em tempo de compras e recebimento — <b id="c-pedidos">–</b> pedidos ao ano.</div>
+    </div>
+    <div class="conceito ruim">
+      <div class="t">Lucro perdido por faltar</div>
+      <div class="d">A venda que não aconteceu porque a peça não estava lá. Não aparece
+        em nenhum relatório contábil, e é <b id="c-ruptura">–</b> ao ano.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ o real marginal -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Quanto o próximo real ainda paga</h2>
+    <span class="dica">a fila é ordenada da peça mais rentável para a menos —
+      então cada faixa de caixa rende menos que a anterior</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int">
+      <div id="g-marginal" class="gfx gg"></div>
+      <div class="legenda mt10">
+        <span><i style="background:#37D6A0"></i>margem que a faixa devolve por real</span>
+        <span><i style="background:#3E4A57"></i>faixa acima do caixa do ciclo</span>
+        <span><i style="background:#55B4F2"></i>retorno acumulado até ali</span>
+        <span><i style="background:#5D6C7C"></i>média da compra inteira</span>
+      </div>
+      <div class="nota-lat mt14" id="m-nota">–</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ quadrantes -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Onde o dinheiro está e o que ele devolve</h2>
+    <span class="dica">clique num grupo para filtrar a tabela abaixo</span>
+  </div>
+  <div class="quads" id="quads"></div>
+</div>
+
+<div class="secao">
+  <div class="painel">
+    <div class="painel-cab">
+      <h2>Capital preso × retorno que ele devolve</h2>
+      <span class="dica">cada bolha é um produto; o tamanho é o lucro líquido que ele gera
+        por ano — clique para abrir o dossiê</span>
+    </div>
+    <div class="painel-int">
+      <div id="g-mapa" class="gfx gg"></div>
+      <div class="nota-lat mt14" id="mapa-nota">–</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ por item -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Produto por produto</h2>
+    <span class="dica"><b id="conta">–</b> produtos · clique na linha para o dossiê</span>
+    <div class="dir filtros">
+      <input type="search" id="q" placeholder="buscar produto..." style="width:230px">
+      <button class="btn btn-p" id="limpar">limpar filtro</button>
+    </div>
+  </div>
+
+  <div class="setas" id="setas">
+    <button data-v="lucro" class="on">Quem mais devolve lucro</button>
+    <button data-v="retorno">Quem mais rende por real</button>
+    <button data-v="preso">Quem prende mais capital</button>
+    <button data-v="perde">Onde se perde dinheiro</button>
+    <button data-v="risco">Onde se corre risco</button>
+  </div>
+  <div class="nota-lat mb14" id="legenda-vista">–</div>
+
+  <div class="painel">
+    <div class="painel-int rente">
+      <div id="vazio" hidden class="painel-int" style="text-align:center;color:var(--tinta-3);font-size:12.5px">
+        Nenhum produto se encaixa neste corte — e essa é a resposta:
+        no recorte escolhido não há dinheiro sendo perdido.
+      </div>
+      <div class="rolo rolo-alto">
+        <table class="tb" id="tb-ret">
+          <thead><tr>
+            <th class="nao-ord"></th>
+            <th>Produto</th>
+            <th class="n">Capital preso</th>
+            <th class="n">Lucro por peça</th>
+            <th class="n">Peças/ano</th>
+            <th class="n">Lucro bruto/ano</th>
+            <th class="n">Custo de carregar</th>
+            <th class="n">Custo / lucro bruto</th>
+            <th class="n">Lucro líquido/ano</th>
+            <th class="n">Retorno s/ capital</th>
+            <th class="n">Paga-se em</th>
+            <th class="n">Giro</th>
+            <th class="n">Margem em risco</th>
+          </tr></thead>
+          <tbody><tr><td colspan="13"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script>
+(function () {
+  var C = N.COR;
+  var D = null;
+  var QCOR = {
+    "Motor de lucro": C.menta, "Joia pequena": C.ceu,
+    "Dinheiro preso": C.ambar, "Cauda longa": C.tinta3,
+    "Destrói valor": C.coral
+  };
+  var QEXPL = {
+    "Motor de lucro": "capital alto e retorno alto: é aqui que o dinheiro trabalha. Proteger de ruptura vale mais que economizar.",
+    "Joia pequena": "prende pouco capital e devolve muito. Comprar mais fundo aqui custa pouco e rende rápido.",
+    "Dinheiro preso": "capital acima da mediana rendendo abaixo dela. Cada real liberado daqui rende mais em outro lugar.",
+    "Cauda longa": "pouco capital, pouco retorno. Individualmente irrelevante; no conjunto, custa atenção e pedidos.",
+    "Destrói valor": "o que o item devolve não cobre o que custa carregar. Reduzir estoque aqui aumenta o lucro."
+  };
+  var ORDEM_Q = ["Motor de lucro", "Joia pequena", "Dinheiro preso", "Cauda longa",
+                 "Destrói valor"];
+
+  function id(x) { return document.getElementById(x); }
+
+  /* ================================================== abertura */
+  function abertura() {
+    var t = D.total;
+    id("h-retorno").innerHTML = N.pct(t.retorno_capital, 0) + "<small>por ano</small>";
+    id("h-capital").textContent = "R$ " + N.moeda(t.capital);
+    id("h-skus").textContent = N.num(t.skus);
+    id("h-liquido").textContent = "R$ " + N.moeda(t.lucro_liquido);
+    id("h-porreal").textContent = "R$ " + N.num(t.gmroi, 2);
+    id("h-payback").textContent = t.payback_dias
+      ? N.num(t.payback_dias, 0) + " dias" : "–";
+    id("h-giro").textContent = N.num(t.giro_medio, 1);
+    id("h-compra").textContent = "R$ " + N.moeda(t.compra_ciclo);
+    id("h-margem-ciclo").textContent = "R$ " + N.moeda(t.margem_ciclo);
+    id("h-mult-ciclo").textContent = "R$ " + N.num(t.retorno_ciclo, 2);
+    id("h-risco").textContent = "R$ " + N.moeda(t.margem_em_risco);
+
+    id("h-frase").innerHTML =
+      "Os <b>R$ " + N.curto(t.capital) + "</b> parados em estoque devolvem " +
+      "<em>R$ " + N.curto(t.lucro_liquido) + "</em> de lucro líquido por ano. " +
+      "O capital gira <b>" + N.num(t.giro_medio, 1) + " vezes</b>, o que faz cada real " +
+      "aplicado voltar em cerca de <b>" +
+      (t.payback_dias ? N.num(t.payback_dias, 0) + " dias" : "–") + "</b>. " +
+      "E não está distribuído por igual: <b>" + N.pct(0.2, 0) + " do capital</b> " +
+      "responde por <em>" + N.pct(t.parte_dos_20pct, 0) + " do lucro</em>.";
+  }
+
+  /* ================================================== cascata */
+  function cascata() {
+    var c = D.cascata;
+    /* a base invisivel de cada barra: e o que faz a cascata "flutuar" */
+    var base = [], vis = [], acc = 0;
+    c.forEach(function (x, i) {
+      if (x.tipo === "fecha") { base.push(0); vis.push(x.valor); return; }
+      if (x.valor >= 0) { base.push(acc); vis.push(x.valor); acc += x.valor; }
+      else { acc += x.valor; base.push(acc); vis.push(-x.valor); }
+    });
+    var cores = c.map(function (x) {
+      return x.tipo === "entra" ? C.menta : (x.tipo === "sai" ? C.coral : C.ambar);
+    });
+
+    /* Cascata na HORIZONTAL de proposito: os rotulos sao frases em
+       portugues ("Lucro perdido por faltar") e os custos valem 3% do lucro
+       bruto. Na vertical, os nomes se cortavam e os cinco valores no topo
+       se empilhavam uns sobre os outros. Deitada, cada barra tem sua linha. */
+    N.grafico("g-cascata", {
+      grid: N.grade({ top: 8, right: 88, bottom: 26, left: 4 }),
+      tooltip: N.dica(function (ps) {
+        var i = ps[ps.length - 1].dataIndex, x = c[i];
+        return N.dicaTit(x.etapa) +
+          N.dicaLin(cores[i], x.valor >= 0 ? "entra" : "sai",
+                    "R$ " + N.moeda(Math.abs(x.valor))) +
+          (x.tipo === "sai"
+            ? N.dicaLin(C.tinta4, "sobre o lucro bruto",
+                        N.pct(Math.abs(x.valor) / c[0].valor, 1))
+            : N.dicaLin(C.tinta4, "sobre o lucro bruto",
+                        N.pct(x.valor / c[0].valor, 1)));
+      }),
+      xAxis: N.eixoY({ min: 0, position: "bottom",
+        axisLabel: { fontSize: 10, color: C.tinta4,
+          formatter: function (v) { return N.curto(v); } } }),
+      yAxis: N.eixoX({ type: "category", inverse: true,
+        data: c.map(function (x) { return x.etapa; }),
+        axisLabel: { fontSize: 11, color: C.tinta2, interval: 0,
+          width: 190, overflow: "truncate", hideOverlap: false } }),
+      series: [
+        { name: "base", type: "bar", stack: "c", silent: true, barWidth: "58%",
+          itemStyle: { color: "transparent" }, data: base },
+        { name: "valor", type: "bar", stack: "c", barWidth: "58%",
+          data: vis.map(function (v, i) {
+            return { value: v, itemStyle: { color: N.sombra(cores[i], .9),
+                                            borderRadius: [0, 3, 3, 0] } };
+          }),
+          label: { show: true, position: "right", fontSize: 11, color: C.tinta2,
+            fontFamily: '"JetBrains Mono", monospace', distance: 7,
+            formatter: function (pt) {
+              var x = c[pt.dataIndex];
+              return (x.valor < 0 ? "−" : "") + N.curto(Math.abs(x.valor));
+            } } }
+      ]
+    });
+
+    var t = D.total;
+    id("c-taxa").textContent = N.pct(t.hurdle, 0);
+    id("c-pedido").textContent = "R$ " + N.moeda(t.custo_por_pedido);
+    id("c-pedidos").textContent = N.num(t.pedidos_ano, 0);
+    id("c-ruptura").textContent = "R$ " + N.curto(t.custo_ruptura);
+    id("c-nota").innerHTML =
+      "De cada R$ 100 de lucro bruto, <b>R$ " +
+      N.num(100 * (t.custo_manter + t.custo_pedir + t.custo_ruptura) / t.lucro_bruto, 2) +
+      "</b> ficam pelo caminho e <b>R$ " +
+      N.num(100 * t.lucro_liquido / t.lucro_bruto, 2) + "</b> chegam ao fim. " +
+      "O maior vazamento é <b>" + maiorVazamento() + "</b>.";
+  }
+  function maiorVazamento() {
+    var t = D.total;
+    var v = [["manter estoque parado", t.custo_manter],
+             ["colocar pedidos", t.custo_pedir],
+             ["deixar faltar", t.custo_ruptura]];
+    v.sort(function (a, b) { return b[1] - a[1]; });
+    return v[0][0] + " (R$ " + N.curto(v[0][1]) + " ao ano)";
+  }
+
+  /* ================================================== real marginal */
+  function marginal() {
+    var m = D.marginal, t = D.total;
+    var dentro = m.filter(function (x) { return x.dentro_do_teto; });
+    var ultima = dentro.length ? dentro[dentro.length - 1] : m[0];
+
+    N.grafico("g-marginal", {
+      grid: N.grade({ top: 58, right: 62, bottom: 40, left: 4 }),
+      tooltip: N.dica(function (ps) {
+        var x = m[ps[0].dataIndex];
+        return N.dicaTit("Os reais entre R$ " + N.curto(x.de) + " e R$ " + N.curto(x.ate)) +
+          N.dicaLin(C.menta, "margem por real aplicado nesta faixa",
+                    "R$ " + N.num(x.margem_por_real, 3)) +
+          N.dicaLin(C.coral, "risco cortado por real aplicado",
+                    "R$ " + N.num(x.risco_cortado_por_real, 3)) +
+          N.dicaLin(C.ceu, "retorno acumulado até aqui",
+                    "R$ " + N.num(x.retorno_acumulado, 3) + " por real") +
+          N.dicaLin(C.tinta4, "margem acumulada", "R$ " + N.moeda(x.margem_acumulada)) +
+          N.dicaLin(x.dentro_do_teto ? C.menta : C.tinta4, "situação",
+                    x.dentro_do_teto ? "dentro do caixa do ciclo" : "acima do caixa");
+      }),
+      xAxis: N.eixoX({ data: m.map(function (x) { return x.ate; }),
+        name: "caixa aplicado na compra (acumulado)", nameLocation: "middle", nameGap: 30,
+        axisLabel: { fontSize: 10, color: C.tinta4,
+          fontFamily: '"JetBrains Mono", monospace',
+          formatter: function (v) { return "R$ " + N.curto(v); } } }),
+      yAxis: [
+        N.eixoY({ axisLabel: { color: "#2C7A5C", fontSize: 10,
+          formatter: function (v) { return "R$ " + N.num(v, 2); } } }),
+        N.eixoY({ position: "right", splitLine: { show: false }, min: 0,
+          axisLabel: { color: "#2E6E96", fontSize: 10,
+            formatter: function (v) { return N.num(v, 2); } } })
+      ],
+      series: [
+        N.serieBarra("Margem por real aplicado na faixa",
+          m.map(function (x) {
+            return { value: x.margem_por_real,
+                     itemStyle: { color: x.dentro_do_teto ? N.sombra(C.menta, .9)
+                                                          : N.sombra(C.tinta4, .8),
+                                  borderRadius: [2, 2, 0, 0] } };
+          }), C.menta, { barWidth: "70%",
+            /* Nao ha linha de "custo de capital" aqui de proposito: estas
+               barras sao retorno POR CICLO DE COMPRA, e a taxa de
+               carregamento e ANUAL. Comparar as duas misturaria escalas de
+               tempo e inflaria o piso em uma ordem de grandeza. A referencia
+               honesta e a media da propria compra. */
+            markLine: { silent: true, symbol: "none", data: [
+              N.marcaY(t.retorno_ciclo, C.tinta3,
+                       "média da compra · R$ " + N.num(t.retorno_ciclo, 2) + " por real",
+                       { label: { position: "insideStartTop" } })
+            ].concat(N.marcasX(
+              [{ x: N.categoriaMaisProxima(m.map(function (x) { return x.ate; }),
+                                           t.teto_ciclo),
+                 cor: C.ambar, ativo: true,
+                 texto: "o caixa do ciclo acaba aqui · R$ " + N.curto(t.teto_ciclo) }],
+              { faixa: m.length, alturas: [8] })) } }),
+        N.serieLinha("Retorno acumulado (R$ por real)",
+          m.map(function (x) { return x.retorno_acumulado; }), C.ceu,
+          { yAxisIndex: 1, smooth: 0.15, lineStyle: { width: 2 } })
+      ],
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18,
+        icon: "roundRect", textStyle: { color: C.tinta3, fontSize: 11 },
+        data: ["Margem por real aplicado na faixa", "Retorno acumulado (R$ por real)"] }
+    });
+
+    id("m-nota").innerHTML =
+      "A primeira faixa de caixa devolve <b>R$ " + N.num(m[0].margem_por_real, 2) +
+      "</b> de margem por real. A última faixa dentro do caixa do ciclo já devolve " +
+      "<b>R$ " + N.num(ultima.margem_por_real, 2) + "</b> — e a última da fila inteira, " +
+      "<b>R$ " + N.num(m[m.length - 1].margem_por_real, 2) + "</b>. " +
+      "É esse decaimento que responde à pergunta de quanto comprar: o caixa para onde " +
+      "o próximo real deixa de valer o risco, não onde a lista acaba. " +
+      "<span class=\"t4\">Todos os valores são por ciclo de compra — o dinheiro é " +
+      "aplicado agora e volta dentro do período de proteção, não em um ano.</span>";
+  }
+
+  /* ================================================== quadrantes */
+  var filtroQ = null;
+  function quadrantes() {
+    var qs = D.quadrantes.slice().sort(function (a, b) {
+      return ORDEM_Q.indexOf(a.quadrante) - ORDEM_Q.indexOf(b.quadrante);
+    });
+    id("quads").innerHTML = qs.map(function (q) {
+      var cor = QCOR[q.quadrante] || C.tinta3;
+      return '<div class="quad" data-q="' + N.esc(q.quadrante) + '" ' +
+        'style="border-top-color:' + cor + '">' +
+        '<div class="nm">' + N.esc(q.quadrante) + ' <span class="pequeno t4">· ' +
+        N.num(q.skus) + " produtos</span></div>" +
+        '<div class="ex">' + (QEXPL[q.quadrante] || "") + "</div>" +
+        '<div class="nums">' +
+        '<div><div class="r">capital</div><div class="v">R$ ' + N.curto(q.capital) +
+        '</div><div class="r" style="margin-top:2px;color:' + cor + '">' +
+        N.pct(q.parte_capital, 0) + " do total</div></div>" +
+        '<div><div class="r">retorno</div><div class="v" style="color:' + cor + '">' +
+        N.pct(q.retorno, 0) + "</div>" +
+        '<div class="r" style="margin-top:2px">R$ ' + N.curto(q.lucro_liquido) +
+        "/ano</div></div>" +
+        "</div></div>";
+    }).join("");
+
+    document.querySelectorAll(".quad").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var q = el.dataset.q;
+        filtroQ = filtroQ === q ? null : q;
+        document.querySelectorAll(".quad").forEach(function (o) {
+          o.classList.toggle("on", o.dataset.q === filtroQ);
+        });
+        motor.aplicar();
+      });
+    });
+  }
+
+  /* ================================================== mapa capital x retorno */
+  function mapa() {
+    var it = D.itens.filter(function (r) { return r.capital_imobilizado > 0; });
+    var t = D.total;
+    var grupos = {};
+    it.forEach(function (r) {
+      (grupos[r.quadrante] = grupos[r.quadrante] || []).push(r);
+    });
+    var maxLucro = Math.max.apply(null, it.map(function (r) {
+      return Math.abs(r.lucro_liquido_ano) || 0;
+    })) || 1;
+
+    var series = ORDEM_Q.filter(function (q) { return grupos[q]; }).map(function (q) {
+      var cor = QCOR[q] || C.tinta3;
+      return {
+        name: q, type: "scatter",
+        itemStyle: { color: N.area(cor, 0.62), borderColor: cor, borderWidth: 1 },
+        emphasis: { itemStyle: { color: cor } },
+        symbolSize: function (v) {
+          return 7 + 26 * Math.sqrt(Math.abs(v[2]) / maxLucro);
+        },
+        data: grupos[q].map(function (r) {
+          return { value: [r.capital_imobilizado, r.retorno_capital,
+                           r.lucro_liquido_ano], sku: r.sku, r: r };
+        })
+      };
+    });
+
+    N.grafico("g-mapa", {
+      grid: N.grade({ top: 62, right: 22, bottom: 44, left: 4 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 16,
+        icon: "circle", textStyle: { color: C.tinta3, fontSize: 11 } },
+      tooltip: N.dica(function (ps) {
+        var r = ps[0].data.r;
+        return N.dicaTit(r.item) +
+          N.dicaLin(QCOR[r.quadrante], "grupo", r.quadrante) +
+          N.dicaLin(C.ambar, "capital preso", "R$ " + N.moeda(r.capital_imobilizado)) +
+          N.dicaLin(C.menta, "lucro líquido por ano", "R$ " + N.moeda(r.lucro_liquido_ano)) +
+          N.dicaLin(C.ceu, "retorno sobre o capital", N.pct(r.retorno_capital, 0)) +
+          N.dicaLin(C.violeta, "lucro por peça", "R$ " + N.moeda(r.lucro_por_peca, 2)) +
+          N.dicaLin(C.tinta4, "giro por ano", N.num(r.giro_ano, 1) + "×") +
+          N.dicaLin(C.coral, "margem em risco", "R$ " + N.moeda(r.margem_em_risco));
+      }),
+      xAxis: N.eixoY({ type: "log", logBase: 10,
+        name: "capital preso no produto (escala log)", nameLocation: "middle", nameGap: 32,
+        splitLine: { show: false },
+        axisLabel: { color: C.tinta4, fontSize: 10,
+          formatter: function (v) { return "R$ " + N.curto(v); } } }),
+      yAxis: N.eixoY({ name: "retorno sobre o capital, por ano",
+        nameLocation: "middle", nameGap: 46,
+        axisLabel: { color: C.tinta4, fontSize: 10,
+          formatter: function (v) { return Math.round(v * 100) + "%"; } } }),
+      series: series.concat([{
+        type: "scatter", data: [], silent: true, name: "cortes",
+        markLine: { silent: true, symbol: "none", data: [
+          N.marcaY(t.corte_retorno, C.tinta3,
+                   "retorno mediano · " + N.pct(t.corte_retorno, 0)),
+          { xAxis: t.corte_capital,
+            lineStyle: { color: C.tinta3, width: 1, type: [4, 4] },
+            label: { color: C.tinta3, fontSize: 10, rotate: 0, position: "insideEndTop",
+              align: "left", distance: [6, 30],
+              formatter: "capital mediano · R$ " + N.curto(t.corte_capital),
+              backgroundColor: "rgba(9,12,16,.86)", padding: [3, 6], borderRadius: 3 } }
+        ] }
+      }])
+    });
+
+    var motor_ = D.quadrantes.filter(function (q) {
+      return q.quadrante === "Dinheiro preso";
+    })[0];
+    id("mapa-nota").innerHTML = motor_
+      ? "As duas linhas cinzas são as medianas da própria carteira, e é o que divide os " +
+        "quatro grupos. O canto que interessa mais é o de baixo à direita: <b>" +
+        N.num(motor_.skus) + " produtos</b> que prendem <b>R$ " + N.curto(motor_.capital) +
+        "</b> (" + N.pct(motor_.parte_capital, 0) + " do capital) rendendo <b>" +
+        N.pct(motor_.retorno, 0) + "</b> — abaixo da mediana da carteira. " +
+        "Cada real liberado dali rende mais em qualquer produto acima da linha."
+      : "As duas linhas cinzas são as medianas da carteira e dividem os quatro grupos.";
+  }
+
+  /* ================================================== tabela */
+  var motor = null;
+  /* o custo de carregar da carteira inteira sobre o lucro bruto: o piso
+     para dizer que um item vaza mais do que a media */
+  var RAZAO_CARTEIRA = 0;
+  var VISTAS = {
+    lucro:   { col: 8,  dir: "desc", ok: function () { return true; } },
+    retorno: { col: 9,  dir: "desc", ok: function () { return true; } },
+    preso:   { col: 2,  dir: "desc", ok: function () { return true; } },
+    /* o corte de 15% nao e arbitrario por preguica: e o percentil 90 da
+       carteira. Usar a media (5,7%) trazia 110 dos 142 itens - uma lista
+       que nao aponta nada. */
+    perde:   { col: 7,  dir: "desc",
+               ok: function (r) {
+                 if (r.lucro_liquido_ano <= 0) return true;
+                 var z = r.lucro_bruto_ano > 0
+                   ? r.custo_total_carregar / r.lucro_bruto_ano : 1;
+                 return z > 0.15;
+               } },
+    risco:   { col: 12, dir: "desc",
+               ok: function (r) { return r.margem_em_risco > 0; } }
+  };
+  var LEGENDA = {
+    lucro: "Todos os produtos, do que mais devolve lucro líquido por ano para o que " +
+           "menos devolve. É a lista de quem sustenta o resultado.",
+    retorno: "Ordenado pelo retorno sobre o capital que cada produto prende. " +
+             "Um produto pequeno pode render mais por real que um grande.",
+    preso: "Ordenado pelo capital parado. Os primeiros da lista concentram o dinheiro — " +
+           "é onde uma decisão de estoque move mais caixa.",
+    perde: "Só os produtos em que mais de 15% do lucro bruto vira custo de manter, " +
+           "pedir ou faltar (a carteira inteira perde 5,7%). Aqui o dinheiro vaza.",
+    risco: "Ordenado pela margem que deve ir embora por falta antes da reposição chegar. " +
+           "Não é perda contabilizada: é venda que não vai acontecer."
+  };
+  var vista = "lucro";
+
+  function tabela() {
+    var t = D.total;
+    RAZAO_CARTEIRA = (t.custo_manter + t.custo_pedir + t.custo_ruptura) / t.lucro_bruto;
+    var corpo = document.querySelector("#tb-ret tbody");
+    corpo.innerHTML = D.itens.map(function (r, i) {
+      var neg = r.lucro_liquido_ano <= 0;
+      var fraco = r.retorno_capital < D.total.hurdle;
+      /* quanto do lucro bruto do item some em manter, pedir e faltar */
+      var razao = r.lucro_bruto_ano > 0
+        ? r.custo_total_carregar / r.lucro_bruto_ano : 1;
+      var vaza = razao > RAZAO_CARTEIRA;
+      return '<tr class="clicavel" data-sku="' + N.esc(r.sku) +
+        '" data-q="' + N.esc(r.quadrante) + '" data-i="' + i + '">' +
+        "<td>" + N.pontoProduto(r.sku, 10) + "</td>" +
+        '<td class="nome forte">' + N.esc(r.item) +
+          '<div class="pequeno t4">' + N.esc(r.familia) + " · " +
+          N.esc(r.quadrante) + "</div></td>" +
+        '<td class="n" data-v="' + r.capital_imobilizado + '">' +
+          '<span class="pre">R$</span>' + N.moeda(r.capital_imobilizado) + "</td>" +
+        '<td class="n" data-v="' + r.lucro_por_peca + '">' +
+          '<span class="pre">R$</span>' + N.moeda(r.lucro_por_peca, 2) + "</td>" +
+        '<td class="n fraco" data-v="' + r.demanda_anual + '">' +
+          N.num(r.demanda_anual, 0) + "</td>" +
+        '<td class="n" data-v="' + r.lucro_bruto_ano + '">' +
+          '<span class="pre">R$</span>' + N.moeda(r.lucro_bruto_ano) + "</td>" +
+        '<td class="n c-cr" data-v="' + r.custo_total_carregar + '">' +
+          '<span class="pre">R$</span>' + N.moeda(r.custo_total_carregar) + "</td>" +
+        '<td class="n ' + (vaza ? "c-am" : "fraco") + '" data-v="' + razao + '">' +
+          N.pct(razao, 1) + "</td>" +
+        '<td class="n forte ' + (neg ? "c-cr" : "c-mt") + '" data-v="' +
+          r.lucro_liquido_ano + '"><span class="pre">R$</span>' +
+          N.moeda(r.lucro_liquido_ano) + "</td>" +
+        '<td class="n ' + (neg ? "c-cr" : (fraco ? "c-am" : "")) + '" data-v="' +
+          r.retorno_capital + '">' + N.pct(r.retorno_capital, 0) + "</td>" +
+        '<td class="n fraco" data-v="' +
+          (r.payback_dias === null ? 1e9 : r.payback_dias) + '">' +
+          (r.payback_dias === null ? "nunca"
+            : N.num(r.payback_dias, 0) + '<span class="suf">dias</span>') + "</td>" +
+        '<td class="n fraco" data-v="' + r.giro_ano + '">' + N.num(r.giro_ano, 1) +
+          '<span class="suf">x</span></td>' +
+        '<td class="n c-am" data-v="' + r.margem_em_risco + '">' +
+          '<span class="pre">R$</span>' + N.moeda(r.margem_em_risco) + "</td>" +
+        "</tr>";
+    }).join("");
+
+    id("legenda-vista").textContent = LEGENDA[vista];
+    motor = N.tabela("#tb-ret", {
+      busca: "#q", conta: "#conta",
+      col: VISTAS[vista].col, dir: VISTAS[vista].dir,
+      filtro: function (tr) {
+        var r = D.itens[parseInt(tr.dataset.i, 10)];
+        if (filtroQ && tr.dataset.q !== filtroQ) return false;
+        return VISTAS[vista].ok(r);
+      },
+      aoFiltrar: function (vis) {
+        var v = document.getElementById("vazio");
+        if (v) v.hidden = vis.length > 0;
+      }
+    });
+  }
+
+  document.body.addEventListener("click", function (e) {
+    var tr = e.target.closest("#tb-ret tr[data-sku]");
+    if (tr) abrirItem(tr.dataset.sku);
+  });
+
+  document.querySelectorAll("#setas button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll("#setas button").forEach(function (o) {
+        o.classList.toggle("on", o === b);
+      });
+      vista = b.dataset.v;
+      id("legenda-vista").textContent = LEGENDA[vista];
+      if (!motor) return;
+      /* N.tabela nao expoe ordenar: mexo no estado e reaplico */
+      motor.estado.col = VISTAS[vista].col;
+      motor.estado.dir = VISTAS[vista].dir;
+      motor.aplicar();
+    });
+  });
+  id("limpar").addEventListener("click", function () {
+    filtroQ = null;
+    document.querySelectorAll(".quad").forEach(function (o) { o.classList.remove("on"); });
+    id("q").value = "";
+    if (motor) motor.aplicar();
+  });
+
+  /* ================================================== carregar */
+  ["g-cascata", "g-marginal", "g-mapa"].forEach(N.espera);
+  N.buscar("/api/retorno").then(function (d) {
+    D = d;
+    abertura();
+    cascata();
+    marginal();
+    quadrantes();
+    mapa();
+    tabela();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,5 +1,163 @@
--- Linhas de venda. Atencao: pecas_vendidas e o que SAIU, nao o que o mercado
--- queria. A diferenca entre as duas coisas e tratada em int_demanda_diaria.
+{#
+  Linhas de venda de TODAS as lojas do grupo. Atencao: pecas_vendidas e o que
+  SAIU, nao o que o mercado queria - a diferenca e tratada em
+  int_demanda_diaria.
+
+  ---------------------------------------------------------------------------
+  POR QUE A FONTE MUDOU (e o maior erro corrigido no projeto)
+
+  Antes este modelo lia `raw_vendas_ecommerce`: so a empresa 33. Mas o estoque
+  diario e de UMA posicao - idempresa 26, idlocalestoque 124, o centro de
+  distribuicao -, e essa posicao abastece as 33 lojas do grupo. Dimensionar a
+  prateleira do CD contra a demanda de um canal era comparar duas entidades
+  diferentes.
+
+  Medido nos 1.190 SKUs que tem estoque, em 3 anos:
+
+    baixa de estoque DISPONIVEL                    584.158 pecas
+    venda do e-commerce (a fonte antiga)            91.821 pecas    17%
+    venda de todas as lojas (esta fonte)           672.225 pecas   115%
+
+  E no par SKU-dia, quanto da baixa de disponivel cada fonte explica no mesmo
+  dia: e-commerce 8,3%, todas as lojas 85,8%. O modelo estimava demanda com um
+  oitavo do sinal.
+
+  O arquivo de e-commerce e SUBCONJUNTO deste (64.331 dos 64.433 pedidos dele
+  estao aqui), entao ele saiu do caminho de demanda - somar os dois contaria a
+  mesma venda duas vezes.
+
+  ---------------------------------------------------------------------------
+  A CHAVE
+
+  (IDORCAMENTO, NUMSEQUENCIA) nao serve: 790.364 linhas para 720.882 pares. A
+  mesma linha de credito aparece repetida em datas diferentes. A chave usa
+  empresa, pedido, sequencia, produto e data; o que ainda repetir depois disso
+  e duplicidade de verdade, e a tela de qualidade dos dados a mostra.
+
+  ---------------------------------------------------------------------------
+  O LUCRO
+
+  O campo mais importante - o lucro da linha - NAO vem pronto. O ERP traz
+  PERCMARGEMCONTRIBUICAO, negativo em 68% das linhas (mediana -7,5%) mesmo em
+  produto vendido com folga sobre o custo: o aquecedor Rinnai 21L sai a
+  R$ 2.623 custando R$ 1.700 (+35% de margem) e o campo diz -9,7%. Aquele
+  percentual carrega custo alocado, e nao serve para decidir compra.
+
+  O motor precisa de outra pergunta: se esta peca vender, quanto dinheiro entra
+  a mais? Isso e venda liquida menos o custo medio do dia da venda.
+#}
+
+{% if var('base', 'sintetica') == 'real' %}
+
+with custo_dia as (
+    -- o custo que estava nos livros no dia da venda, nao o de hoje
+    select cast(idsubproduto as varchar) as sku,
+           cast(dtmovimento as date)     as data,
+           cast(valcustomedio as double) as custo
+    from {{ source('raw', 'raw_estoque_diario_erp') }}
+    where valcustomedio > 0
+),
+
+custo_medio as (
+    -- reserva para as linhas cujo dia nao tem custo lancado
+    select sku, median(custo) as custo
+    from custo_dia group by 1
+),
+
+v as (
+    select
+        -- empresa + pedido + sequencia + produto + data. Menos que isso
+        -- repete: a mesma linha de credito aparece em varias datas.
+        cast(IDEMPRESA as varchar) || '|' ||
+            coalesce(cast(cast(IDORCAMENTO as double) as varchar), 's') || '|' ||
+            cast(NUMSEQUENCIA as varchar) || '|' ||
+            cast(IDSUBPRODUTO as varchar) || '|' ||
+            cast(cast(DATA as date) as varchar)      as chave,
+        coalesce(cast(cast(IDORCAMENTO as double) as varchar),
+                 '(sem pedido)')                     as pedido,
+        cast(DATAHORA as timestamp)           as data_hora_venda,
+        cast(DATA as date)                    as data,
+        cast(IDSUBPRODUTO as varchar)         as sku,
+        cast(QTDPRODUTO as double)            as pecas_vendidas,
+        cast(VALOR_VENDA as double)           as receita_bruta,
+        cast(VALORLIQUIDOVENDA as double)     as receita_liquida,
+        cast(VALFRETE_VENDA as double)        as valor_do_frete,
+        cast(VALOR_DEV as double)             as valor_dev,
+        cast(VALOR_CAN as double)             as valor_can,
+        cast(MARCA as varchar)                as canal_marca,
+        -- a loja que vendeu. Com uma fonte de um canal so isto era a
+        -- constante 'E-commerce'; agora e a dimensao mais util da base.
+        cast(IDEMPRESA as varchar)            as loja_id,
+        cast(NOMEFANTASIA as varchar)         as loja,
+        -- de que posicao de estoque a peca saiu. O campo morre em 2025-07:
+        -- preenchido antes, 100% vazio depois. Nao serve para filtrar o
+        -- periodo inteiro, e por isso a demanda nao o usa - fica exposto para
+        -- a tela de qualidade poder mostrar isso.
+        cast(LOCALRETESTOQUE as varchar)      as local_estoque,
+        -- NORMAL, ENCOMENDA, IMEDIATO, AGUARDANDO. Medido: NORMAL sozinho
+        -- explica 85,8% da baixa de disponivel e o total tambem 85,8% - os
+        -- outros tipos somam peca sem somar explicacao. Ficam no sinal de
+        -- demanda de proposito: encomenda e cliente que quis e nao achou na
+        -- prateleira, que e demanda real e nao ruido.
+        cast(TIPOENTREGA as varchar)          as tipo_entrega,
+        cast(MOTIVODEVCAN as varchar)         as motivo_dev_can,
+        cast(DESCRDEPARTAMENTO as varchar)    as departamento,
+        cast(DESCRCIDADE as varchar)          as cidade,
+        cast(UF as varchar)                   as uf,
+        cast(IDCLIFOR as varchar)             as cliente_id,
+        cast(NOMEVENDEDOR as varchar)         as vendedor
+    from {{ source('raw', 'raw_vendas_todas') }}
+)
+
+select
+    row_number() over (order by v.data, v.chave)      as id_linha,
+    v.pedido,
+    v.data_hora_venda,
+    v.data,
+    v.sku,
+    v.pecas_vendidas,
+    case when v.pecas_vendidas <> 0
+         then v.receita_liquida / v.pecas_vendidas else 0.0 end as valor_da_peca,
+    case when v.pecas_vendidas <> 0
+         then v.receita_bruta / v.pecas_vendidas else 0.0 end   as preco_tabela_unit,
+    0.0                                               as desconto_pct,
+    v.receita_bruta,
+    v.receita_liquida,
+    coalesce(cd.custo, cm.custo, 0.0)                 as custo_unitario,
+    v.pecas_vendidas * coalesce(cd.custo, cm.custo, 0.0) as cmv,
+    v.valor_do_frete,
+    0.0                                               as frete_cobrado_cliente,
+    0.0                                               as impostos_sobre_venda,
+    -- o lucro que interessa a decisao de compra: o que entra a mais se a peca
+    -- vender. Devolucao e cancelamento ja estao descontados na venda liquida.
+    v.receita_liquida - v.pecas_vendidas * coalesce(cd.custo, cm.custo, 0.0) as lucro,
+    v.receita_liquida                                 as total,
+    coalesce(v.loja, 'Loja ' || v.loja_id)            as canal,
+    v.loja_id,
+    coalesce(v.loja, 'Loja ' || v.loja_id)            as loja,
+    v.local_estoque,
+    coalesce(v.tipo_entrega, 'NAO INFORMADO')         as tipo_entrega,
+    v.motivo_dev_can,
+    v.departamento,
+    v.cidade,
+    coalesce(v.tipo_entrega, 'NAO INFORMADO')         as tipo_cliente,
+    v.cliente_id,
+    v.uf,
+    v.vendedor                                        as regiao,
+    coalesce(v.tipo_entrega, 'NORMAL')                as modalidade_frete,
+    0.0                                               as peso_total_kg
+from v
+left join custo_dia  cd on cd.sku = v.sku and cd.data = v.data
+left join custo_medio cm on cm.sku = v.sku
+-- a linha de devolucao vem com quantidade negativa (22.960 linhas, -72.020
+-- pecas no extrato completo, com MOTIVODEVCAN preenchido). Ela pertence ao
+-- financeiro, nao ao sinal de demanda: manter aqui inverteria o sinal do dia e
+-- o modelo leria "o mercado devolveu" como "o mercado nao quis". A tela de
+-- qualidade dos dados mostra quanto ficou de fora por esta regra.
+where v.pecas_vendidas > 0
+
+{% else %}
+
 select
     cast(id_linha as bigint)              as id_linha,
     cast(pedido as varchar)               as pedido,
@@ -27,3 +185,5 @@ select
     cast(modalidade_frete as varchar)     as modalidade_frete,
     cast(peso_total_kg as double)         as peso_total_kg
 from {{ source('raw', 'raw_vendas') }}
+
+{% endif %}

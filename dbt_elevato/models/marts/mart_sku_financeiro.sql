@@ -12,6 +12,13 @@ with v as (
         sum(impostos_sobre_venda) as impostos,
         sum(lucro)                as lucro
     from {{ ref('stg_vendas') }}
+    -- O extrato de venda vai mais longe que o retrato de estoque (ate
+    -- 2026-09-08 contra 2026-09-04). A grade diaria do modelo termina no
+    -- ultimo dia de estoque, entao somar a venda dos dias sobrantes poria peca
+    -- no numerador sem por dia no denominador. O corte tambem e o que faz o
+    -- espelho com data de backtest em modelo.py reproduzir este mart - a
+    -- igualdade que scripts/revisao.py cobra.
+    where data <= (select max(data) from {{ ref('stg_estoque_diario') }})
     group by sku
 )
 select
@@ -21,8 +28,15 @@ select
     c.unidade,
     c.origem,
     c.custo_unitario,
+    c.custo_ultimo_lancado,
+    c.custo_mediano,
     c.preco_tabela,
     c.lead_time_dias,
+    -- desvio do prazo de entrega. Zero na base sintetica (prazo fixo);
+    -- no extrato real a mediana e 13,2 dias sobre um prazo mediano de 18,
+    -- e e o motor que decide o que fazer com isso.
+    c.lead_time_desvio_dias,
+    c.lead_time_pedidos,
     c.lote_minimo_compra,
     coalesce(v.pecas_vendidas, 0)  as pecas_vendidas,
     coalesce(v.linhas_de_venda, 0) as linhas_de_venda,

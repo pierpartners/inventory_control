@@ -40,7 +40,12 @@ def refazer(r) -> dict:
     """A conta feita do zero, so com os insumos gravados na propria linha."""
     H = r.lead_time_dias + r.periodo_revisao_dias
     mu = r.demanda_dia_corrigida * H
-    sd = r.desvio_dia * np.sqrt(H)
+    # Dois termos na variancia do horizonte: a demanda que varia ao longo de H,
+    # e o proprio H, que varia porque o fornecedor atrasa. Com desvio de prazo
+    # zero - o caso da base sintetica - recai em sigma_dia x raiz(H).
+    sd_prazo = float(getattr(r, "desvio_prazo_dias", 0.0) or 0.0)
+    sd = np.sqrt(H * r.desvio_dia ** 2
+                 + r.demanda_dia_corrigida ** 2 * sd_prazo ** 2)
     var = sd ** 2
 
     if var <= mu * 1.05:

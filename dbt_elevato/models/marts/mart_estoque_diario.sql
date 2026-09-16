@@ -4,6 +4,7 @@ select
     data,
     saldo_inicial,
     saldo_final,
+    disponivel_final,
     pecas_vendidas,
     estado_estoque,
     dia_utilizavel,

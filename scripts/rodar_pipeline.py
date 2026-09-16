@@ -29,16 +29,53 @@ from backend.warehouse import DuckDBWarehouse, carregar_env  # noqa: E402
 from backend import modelo  # noqa: E402
 
 
-def carregar_fontes(wh) -> None:
-    fonte = RAIZ / "data" / "fonte"
-    print("  - carregando CSVs de", fonte)
-    n1 = wh.carregar_csv(fonte / "catalogo.csv", "raw_catalogo")
-    n2 = wh.carregar_csv(fonte / "vendas.csv", "raw_vendas")
-    n3 = wh.carregar_csv(fonte / "estoque_diario.csv", "raw_estoque_diario")
-    print(f"    raw_catalogo={n1}  raw_vendas={n2}  raw_estoque_diario={n3}")
+# O extrato real do ERP e a base sintetica de simulacao tem FORMATOS
+# diferentes, nao so dados diferentes. A traducao acontece no staging do dbt,
+# selecionada pela var `base`; aqui so se decide qual pasta existe e se
+# carregam os arquivos dela.
+FONTES = {
+    "real": ("fonte_verdadeira", [
+        ("produtos.csv", "raw_produtos"),
+        # TODAS as lojas. O arquivo de e-commerce continua carregado porque a
+        # tela de qualidade compara as duas fontes, mas ele NAO alimenta mais
+        # a demanda: 64.331 dos 64.433 pedidos dele estao dentro deste, e somar
+        # os dois contaria a mesma venda duas vezes.
+        ("vendas_todas_3anos.csv", "raw_vendas_todas"),
+        ("vendas_ecommerce_3anos.csv", "raw_vendas_ecommerce"),
+        ("estoque_diario_3anos.csv", "raw_estoque_diario_erp"),
+        ("compras_3anos.csv", "raw_compras"),
+        ("ciclo_pagamento_fornecedor.csv", "raw_ciclo_pagamento"),
+    ]),
+    "sintetica": ("fonte", [
+        ("catalogo.csv", "raw_catalogo"),
+        ("vendas.csv", "raw_vendas"),
+        ("estoque_diario.csv", "raw_estoque_diario"),
+    ]),
+}
 
 
-def rodar_dbt() -> None:
+def base_disponivel() -> str:
+    """Prefere o extrato real quando a pasta dele existe."""
+    forcada = os.environ.get("BASE")
+    if forcada in FONTES:
+        return forcada
+    for nome, (pasta, arquivos) in FONTES.items():
+        alvo = RAIZ / "data" / pasta
+        if alvo.exists() and all((alvo / a).exists() for a, _ in arquivos):
+            return nome
+    return "sintetica"
+
+
+def carregar_fontes(wh, base: str) -> None:
+    pasta, arquivos = FONTES[base]
+    fonte = RAIZ / "data" / pasta
+    print(f"  - base `{base}`, carregando de {fonte}")
+    for arquivo, tabela in arquivos:
+        n = wh.carregar_csv(fonte / arquivo, tabela)
+        print(f"    {tabela:26} {n:>9,} linhas")
+
+
+def rodar_dbt(base: str) -> None:
     dbt_dir = RAIZ / "dbt_elevato"
     env = os.environ.copy()
     env["DBT_PROFILES_DIR"] = str(dbt_dir)
@@ -47,8 +84,8 @@ def rodar_dbt() -> None:
     # o resto da aplicacao (que roda com cwd=app/).
     env["DUCKDB_PATH"] = "../data/elevato.duckdb"
     print("  - dbt build em", dbt_dir)
-    r = subprocess.run(["dbt", "build"], cwd=dbt_dir, env=env,
-                       capture_output=True, text=True)
+    r = subprocess.run(["dbt", "build", "--vars", f"base: {base}"],
+                       cwd=dbt_dir, env=env, capture_output=True, text=True)
     print(r.stdout[-4000:])
     if r.returncode != 0:
         print(r.stderr[-4000:])
@@ -65,16 +102,17 @@ def main() -> None:
     caminho = os.environ.get("DUCKDB_PATH", "./data/elevato.duckdb")
     wh = DuckDBWarehouse(caminho)
 
+    base = base_disponivel()
     t0 = time.time()
     if not args.pular_carga:
         print("[1/4] carregando fontes...")
-        carregar_fontes(wh)
+        carregar_fontes(wh, base)
     else:
         print("[1/4] carga pulada")
 
     if not args.pular_dbt:
         print("[2/4] rodando dbt...")
-        rodar_dbt()
+        rodar_dbt(base)
     else:
         print("[2/4] dbt pulado")
 

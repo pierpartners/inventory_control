@@ -33,7 +33,8 @@ O `dbt build` só é necessário quando os CSVs de origem mudam.
 |---|---|
 | **Painel** | O que decidir hoje: quanto liberar de compra, o que está furando agora, onde o capital está e onde está vazando, e a comparação entre a política atual e as duas ótimas. |
 | **Plano de compra** | A fila operacional, alocada **peça a peça**: a corrida das unidades (100 / 500 / 2.000 / todas as do ciclo, um quadrado por peça, clicável), em que peça cada produto entra, onde o caixa acaba, e a comparação contra a reposição ao estoque ideal. Exporta CSV. |
-| **Critério de parada** | A fronteira risco × caixa e os quatro critérios que decidem até onde comprar — pelo caixa, por retorno mínimo, por chance mínima da peça, ou **por risco assumido** (você declara o risco que aceita e a plataforma devolve o caixa necessário). A prévia de cada critério roda o motor de verdade. |
+| **Critério de parada** | A fronteira risco × caixa e os quatro critérios que decidem até onde comprar — pelo caixa, por retorno mínimo, por chance mínima da peça, ou **por risco assumido** (você declara o risco que aceita e a plataforma devolve o caixa necessário). Podem ser **combinados**: a compra para na primeira regra que fecha a porta, e a tela mostra qual delas está amarrando. A prévia roda o motor de verdade a cada tecla digitada. |
+| **Retorno do dinheiro** | Quanto volta por real aplicado, do total ao item: retorno sobre o capital em estoque, GMROI, payback, a cascata do lucro bruto até o líquido (por onde ele escapa), o retorno **marginal** de cada faixa de caixa (onde o próximo real deixa de pagar) e o mapa capital × retorno em quatro grupos — motor de lucro, joia pequena, dinheiro preso, cauda longa. |
 | **Itens** | O catálogo com o resultado do modelo item a item, com filtros (família, ABC, regime, risco) e agregados que recalculam conforme a seleção. Clicar em qualquer linha abre o dossiê do item. |
 | **Conferência** | A fila inteira, **uma linha por peça candidata**, com todos os valores intermediários — μ, σ, F(k−1), P, M, L, ganho, custo, V, nota, caixa acumulado e o motivo da decisão. Clicar numa linha mostra a conta refeita passo a passo. Exporta o CSV completo (todas as colunas, todas as linhas) para conferir no Excel. |
 | **Metodologia** | Cinco perguntas em linguagem simples, com **os números de um produto de verdade** (escolhido no seletor). Cada fórmula aparece como uma sequência de caixas — nome em português, valor do produto e o símbolo usado —, mais um glossário de todos os símbolos e letras gregas. Feita para quem não conhece o modelo. |
@@ -167,7 +168,11 @@ fila inteira.
 **Onde parar de comprar**
 
 5. **Critério de parada.** Os quatro critérios operam na mesma fila ordenada — um critério
-   não é um motor diferente, é só *onde a fila é cortada*:
+   não é um motor diferente, é só *onde a fila é cortada*. Vários podem estar ligados ao
+   mesmo tempo (`criterio_parada = "caixa,chance"`): a peça precisa passar por todos, então
+   **o corte acontece na primeira regra que fecha a porta**. `res_criterios` traz uma linha
+   por regra isolada mais a linha `combinado`, e a coluna `manda` diz qual das ligadas está
+   realmente amarrando — afrouxar as outras não move nada:
 
    | Critério | Entrada | Saída |
    |---|---|---|
@@ -181,13 +186,32 @@ fila inteira.
    exata — `E[max(0, D − posição)] = Σ P(D ≥ k)` — então comprar a peça *k* reduz a falta
    esperada em exatamente `P(D ≥ k)`, e a curva de risco é uma soma acumulada, sem aproximação.
 
+**Medir o retorno do dinheiro**
+
+6. **Retorno sobre o capital.** O denominador é sempre capital *imobilizado* (estoque médio ao
+   custo), nunca faturamento — margem sobre venda mede preço, retorno sobre capital mede o
+   negócio. Daí saem `retorno_capital = lucro_líquido_ano / capital`, o `GMROI` (margem bruta
+   por real de estoque), o payback em dias e a divisão da carteira em quatro grupos pelas
+   **medianas da própria carteira** (usar a taxa de carregamento como piso não separa nada
+   quando o retorno passa de 400% ao ano).
+7. **Retorno marginal por faixa de caixa.** A inclinação da fronteira, em faixas: quanto de
+   margem o próximo real compra. Os valores são **por ciclo de compra**, não anuais — por isso
+   a tela não desenha o custo de capital anual como piso: comparar as duas coisas misturaria
+   escalas de tempo.
+
 **Camada de política (referência, não decide a compra)**
 
-5. **EOQ, ponto de pedido e estoque de segurança** continuam sendo calculados por item: servem
+8. **EOQ, ponto de pedido e estoque de segurança** continuam sendo calculados por item: servem
    de alarme ("olhe este item") e de referência de nível ideal. O nível de serviço sai da
    economia do próprio item (`1 − lote·h / (D·Cu)`), não de uma meta arbitrária.
-6. **Preço-sombra do capital (λ).** Soma um prêmio de escassez ao custo de manter e sobe λ até o
+9. **Preço-sombra do capital (λ).** Soma um prêmio de escassez ao custo de manter e sobe λ até o
    estoque ideal total caber no teto — o corte sai de onde menos paga, não proporcionalmente.
+10. **Pedidos por ano ≠ janelas de risco por ano.** As duas contagens já foram a mesma
+    variável, e isso cobrava um pedido a cada revisão nos itens de giro baixo — 43 pedidos/ano
+    onde o lote mínimo do fornecedor só permite 1,6. Inflava o custo de pedir em R$ 162 mil/ano
+    e jogava 13 itens para lucro negativo. Hoje `pedidos_por_ano = min(D/Q, revisões com
+    demanda)` e `janelas_de_risco_ano` é a contagem de exposição; `scripts/revisao.py` tem
+    quatro verificações só para essa separação.
 
 > **Por que não repor até o estoque ideal?** Porque encher item por item até o nível ideal gasta
 > o caixa em poucos produtos e compra muitas peças cuja chance de vender no horizonte já é

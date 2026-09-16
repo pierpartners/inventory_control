@@ -61,9 +61,27 @@ class DuckDBWarehouse(Warehouse):
         self.caminho = str((RAIZ / caminho).resolve()) if not os.path.isabs(caminho) else caminho
         Path(self.caminho).parent.mkdir(parents=True, exist_ok=True)
 
-    def _con(self):
+    def _con(self, escrita: bool = False):
+        """Conexao com o arquivo. Leitura NAO pede exclusividade.
+
+        O DuckDB da acesso exclusivo a quem abre para escrita. Como toda
+        consulta abria assim, bastava um segundo processo tocar o banco - o
+        pipeline rodando, um script de conferencia, uma segunda instancia do
+        servidor - para a aplicacao inteira devolver 500. Ler em modo
+        somente-leitura deixa varios processos conviverem.
+
+        O modo leitura exige que o arquivo exista; na primeira execucao, antes
+        do pipeline, ele ainda nao existe - dai o recuo para escrita.
+        """
         import duckdb
-        return duckdb.connect(self.caminho)
+        if escrita or not Path(self.caminho).exists():
+            return duckdb.connect(self.caminho)
+        try:
+            return duckdb.connect(self.caminho, read_only=True)
+        except Exception:  # noqa: BLE001
+            # arquivo travado por um escritor: tenta o modo normal, que ao
+            # menos produz a mensagem de erro original em vez de uma nova
+            return duckdb.connect(self.caminho)
 
     def query(self, sql: str) -> pd.DataFrame:
         with self._con() as con:
@@ -74,14 +92,14 @@ class DuckDBWarehouse(Warehouse):
             return con.execute(sql, params).fetch_df()
 
     def gravar(self, df: pd.DataFrame, tabela: str) -> None:
-        with self._con() as con:
+        with self._con(escrita=True) as con:
             con.register("_tmp_df", df)
             con.execute(f'create or replace table "{tabela}" as select * from _tmp_df')
             con.unregister("_tmp_df")
 
     def carregar_csv(self, caminho, tabela: str) -> int:
         caminho_p = Path(caminho)
-        with self._con() as con:
+        with self._con(escrita=True) as con:
             con.execute(
                 f'create or replace table "{tabela}" as '
                 f"select * from read_csv_auto('{caminho_p.as_posix()}', header=true)"

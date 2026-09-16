@@ -13,3 +13,6 @@ python-dotenv>=1.0
 # dbt-bigquery>=1.7
 # google-cloud-bigquery>=3.17
 # pandas-gbq>=0.20
+
+# consulta ad-hoc aos DWs Postgres (scripts/consultar_dw.py)
+psycopg[binary]>=3.1

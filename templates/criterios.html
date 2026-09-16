@@ -6,30 +6,46 @@
 
 {% block cabeca %}
 <style>
+  /* ---- faixa do corte em uso -------------------------------------- */
+  .corte { display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
+  @media (max-width: 900px) { .corte { grid-template-columns: 1fr; } }
+  .fichas { display: flex; flex-wrap: wrap; gap: 7px; }
+  .ficha {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+    border-radius: 20px; border: 1px solid var(--linha-2); background: var(--fundo-2);
+    font-size: 11.5px; color: var(--tinta-3); white-space: nowrap;
+  }
+  .ficha i { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; }
+  .ficha.manda { border-color: var(--ambar-2); color: var(--tinta); font-weight: 600; }
+  .ficha .qt { font-family: var(--mono); font-size: 10.5px; color: var(--tinta-4); }
+
+  /* ---- cartoes de criterio ---------------------------------------- */
   .cartoes { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
   @media (max-width: 1080px) { .cartoes { grid-template-columns: 1fr; } }
   .crit {
     border: 1px solid var(--linha-2); border-radius: 9px; background: var(--painel);
-    padding: 0; transition: border-color .15s, background .15s; position: relative;
+    transition: border-color .15s, background .15s; position: relative;
+    display: flex; flex-direction: column;
   }
-  .crit.on { border-color: var(--ambar-2); background: rgba(242,169,59,.04); }
+  .crit.on { border-color: var(--ambar-2); background: rgba(242,169,59,.045); }
   .crit .cab {
-    display: flex; align-items: flex-start; gap: 11px;
+    display: flex; align-items: flex-start; gap: 11px; cursor: pointer;
     padding: 14px 16px 12px; border-bottom: 1px solid var(--linha-2);
   }
-  .crit .radio { flex: 0 0 16px; margin-top: 2px; }
-  .crit .tt { font-size: 14px; font-weight: 600; color: var(--tinta); }
+  .crit .cx { flex: 0 0 15px; margin-top: 2px; accent-color: var(--ambar); }
+  .crit .tt { font-size: 14px; font-weight: 600; color: var(--tinta); display: block; }
   .crit.on .tt { color: var(--ambar); }
-  .crit .pq { font-size: 12px; color: var(--tinta-2); font-style: italic; margin-top: 2px; }
-  .crit .co { padding: 13px 16px 15px; }
-  .crit .ds { font-size: 11.5px; color: var(--tinta-3); line-height: 1.6; margin-bottom: 13px; }
-  .crit .ent { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
-  .crit .ent input[type=number] { flex: 0 0 140px; text-align: right; }
+  .crit .pq { font-size: 11.5px; color: var(--tinta-3); font-style: italic; }
+  .crit .co { padding: 13px 16px 15px; display: flex; flex-direction: column; flex: 1; }
+  .crit .ds { font-size: 11.5px; color: var(--tinta-3); line-height: 1.6; margin-bottom: 14px; }
+  .crit .acao { font-size: 12.5px; color: var(--tinta-2); margin-bottom: 7px; font-weight: 500; }
+  .crit .ent { display: flex; align-items: center; gap: 9px; }
+  .crit .ent input[type=number] { flex: 0 0 148px; text-align: right; }
   .crit .ent .un { font-family: var(--mono); font-size: 10.5px; color: var(--tinta-4); }
   .crit .ent .btn { margin-left: auto; }
   .crit .previa {
     display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px;
-    margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--linha-2);
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--linha-2);
   }
   .crit .previa div { min-width: 0; }
   .crit .previa .r {
@@ -40,6 +56,7 @@
     font-family: var(--mono); font-size: 15px; color: var(--tinta);
     letter-spacing: -.03em; margin-top: 3px; white-space: nowrap;
   }
+  .crit.off .previa .v, .crit.off .ent input { opacity: .45; }
   .crit .aviso { font-size: 11px; color: var(--coral); margin-top: 9px; }
   .selo-ativo {
     position: absolute; top: -8px; right: 12px; padding: 2px 8px; border-radius: 4px;
@@ -54,28 +71,42 @@
 {% if msg %}<div class="msg msg-ok">{{ msg }}</div>{% endif %}
 {% if erro %}<div class="msg msg-er">{{ erro }}</div>{% endif %}
 
-<!-- ============================================ o ponto de partida -->
+<!-- ============================================ o resultado do conjunto -->
 <div class="gr gr-4 secao">
-  <div class="painel metrica cr">
-    <div class="rotulo">Margem em risco se nada for comprado</div>
-    <div class="valor md"><span class="pre">R$</span>{{ base.risco_inicial|n }}</div>
-    <div class="nota">é a origem da curva: <b>{{ base.falta_inicial|n(0) }} peças</b>
-      de falta esperada no horizonte</div>
-  </div>
-  <div class="painel metrica" id="m-caixa">
-    <div class="rotulo">Compra no critério escolhido</div>
+  <div class="painel metrica">
+    <div class="rotulo">Compra no critério em uso</div>
     <div class="valor md"><span class="pre">R$</span><span id="v-caixa">–</span></div>
     <div class="nota"><b id="v-pecas">–</b> peças de <b id="v-itens">–</b> produtos</div>
   </div>
   <div class="painel metrica mt">
-    <div class="rotulo">Margem esperada</div>
+    <div class="rotulo">Margem esperada de volta</div>
     <div class="valor md"><span class="pre">R$</span><span id="v-margem">–</span></div>
-    <div class="nota">ganho da compra, já líquido de encalhe</div>
+    <div class="nota">margem de <b id="v-mult">–</b> por real aplicado, já líquida de encalhe</div>
   </div>
   <div class="painel metrica am">
-    <div class="rotulo">Risco que sobra</div>
+    <div class="rotulo">Risco que sobra na mesa</div>
     <div class="valor md"><span class="pre">R$</span><span id="v-risco">–</span></div>
     <div class="nota">queda de <b id="v-queda">–</b> sobre o ponto de partida</div>
+  </div>
+  <div class="painel metrica cr">
+    <div class="rotulo">Se nada for comprado</div>
+    <div class="valor md"><span class="pre">R$</span>{{ base.risco_inicial|n }}</div>
+    <div class="nota">a origem da curva: <b>{{ base.falta_inicial|n(0) }} peças</b>
+      de falta esperada no horizonte</div>
+  </div>
+</div>
+
+<!-- ============================================ quem corta primeiro -->
+<div class="secao">
+  <div class="painel">
+    <div class="painel-int corte">
+      <div>
+        <div class="pequeno t4 mb10" style="letter-spacing:.1em;text-transform:uppercase;font-weight:700">
+          Regras ligadas — a compra para na primeira que fechar a porta</div>
+        <div class="fichas" id="fichas"></div>
+      </div>
+      <div class="nota-lat" style="max-width:380px;margin:0" id="explica-manda"></div>
+    </div>
   </div>
 </div>
 
@@ -83,28 +114,29 @@
 <div class="secao">
   <div class="secao-cab">
     <h2>A fronteira</h2>
-    <span class="dica">a mesma fila, cortada em cada ponto: quanto mais caixa, mais margem
+    <span class="dica">a mesma fila cortada em cada ponto: quanto mais caixa, mais margem
       capturada e menos risco na mesa — com retorno decrescente</span>
   </div>
   <div class="painel">
     <div class="painel-int">
       <div id="g-fronteira" class="gfx gg"></div>
       <div class="nota-lat aviso mt14">
-        Um critério de parada não é um motor diferente — é só <b>onde a fila é cortada</b>.
-        Por isso os quatro aparecem como pontos sobre a mesma curva, e trocar de critério
-        não recalcula nada do modelo: muda o corte.
+        Um critério de parada não é outro motor — é só <b>onde a fila é cortada</b>.
+        Por isso todos aparecem como marcas sobre a mesma curva: trocar de critério
+        não recalcula o modelo, muda o ponto de corte. A linha cheia é o corte em uso;
+        as tracejadas são onde cada regra ligada cortaria sozinha.
       </div>
     </div>
   </div>
 </div>
 
-<!-- ============================================ os quatro critérios -->
+<!-- ============================================ as regras -->
 <form method="post" action="/criterios" id="frm">
 <div class="secao">
   <div class="secao-cab">
-    <h2>Os quatro critérios</h2>
-    <span class="dica">mexa no valor para ver a prévia — ela roda o motor de verdade,
-      então é o número exato que sairá ao aplicar</span>
+    <h2>As regras</h2>
+    <span class="dica">marque quantas quiser e mexa nos valores — a prévia roda o motor
+      de verdade, então é o número exato que sairá ao aplicar</span>
     <div class="dir">
       <button class="btn btn-am" type="submit">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
@@ -115,11 +147,11 @@
 
   <div class="cartoes">
     {% for c in meta %}
-    <div class="crit {{ 'on' if p.criterio_parada == c.chave }}" data-crit="{{ c.chave }}">
-      {% if p.criterio_parada == c.chave %}<span class="selo-ativo">em uso</span>{% endif %}
+    <div class="crit {{ 'on' if c.chave in ativos else 'off' }}" data-crit="{{ c.chave }}">
+      {% if c.chave in ativos %}<span class="selo-ativo">ligada</span>{% endif %}
       <label class="cab">
-        <input class="radio" type="radio" name="criterio_parada" value="{{ c.chave }}"
-               {{ 'checked' if p.criterio_parada == c.chave }}>
+        <input class="cx" type="checkbox" name="criterio_parada" value="{{ c.chave }}"
+               {{ 'checked' if c.chave in ativos }}>
         <span>
           <span class="tt">{{ c.rotulo }}</span>
           <span class="pq">“{{ c.pergunta }}”</span>
@@ -127,15 +159,16 @@
       </label>
       <div class="co">
         <div class="ds">{{ c.descricao }}</div>
+        <div class="acao">{{ c.acao }}</div>
         <div class="ent">
           <input type="number" step="any" min="0" name="{{ c.campo }}"
-                 data-crit="{{ c.chave }}" data-tipo="{{ c.tipo }}"
+                 data-crit="{{ c.chave }}" data-campo="{{ c.campo }}" data-tipo="{{ c.tipo }}"
                  value="{{ (p[c.campo] * 100)|round(4) if c.tipo == 'pct' else p[c.campo] }}">
           <span class="un">{{ c.unidade }}</span>
           <button class="btn btn-p sugerir" type="button" data-crit="{{ c.chave }}">
             usar sugestão</button>
         </div>
-        <div class="pequeno t4" id="sug-{{ c.chave }}"></div>
+        <div class="pequeno t4 mt6" id="sug-{{ c.chave }}"></div>
         <div class="previa" id="prev-{{ c.chave }}"></div>
         <div class="aviso" id="alerta-{{ c.chave }}"></div>
       </div>
@@ -145,6 +178,32 @@
 </div>
 </form>
 
+<!-- ============================================ comparativo -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Cada regra sozinha, e o conjunto</h2>
+    <span class="dica">a mesma fila cortada de quatro jeitos — a última linha é o que
+      a plataforma vai usar de fato</span>
+  </div>
+  <div class="painel">
+    <div class="painel-int" style="padding:0">
+      <table class="tb" id="tb-comp">
+        <thead><tr>
+          <th class="nao-ord">Regra</th>
+          <th class="nao-ord">Valor</th>
+          <th class="n nao-ord">Compra</th>
+          <th class="n nao-ord">Peças</th>
+          <th class="n nao-ord">Produtos</th>
+          <th class="n nao-ord">Margem de volta</th>
+          <th class="n nao-ord">Por real aplicado</th>
+          <th class="n nao-ord">Risco que sobra</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block rodape %}
@@ -152,21 +211,26 @@
 (function () {
   var C = N.COR;
   var BASE = {{ base|tojson }};
-  var ATUAL = {{ p.criterio_parada|tojson }};
+  var META = {{ meta|tojson }};
   var CORES = { caixa: C.ambar, retorno: C.ceu, chance: C.violeta, risco: C.menta };
-  var FR = null;
-  var PONTOS = {};
+  var ORDEM = ["caixa", "retorno", "chance", "risco"];
+  var ROTULO = {};
+  META.forEach(function (m) { ROTULO[m.chave] = m.rotulo; });
+
+  var FR = null;          /* a fronteira inteira */
+  var SOLO = {};          /* onde cada regra cortaria sozinha */
+  var COMB = null;        /* onde o conjunto marcado corta */
 
   function id(x) { return document.getElementById(x); }
 
   /* ------------------------------------------------------------------
-     A prévia roda o motor de verdade, no servidor.
-     Tentei ler o corte direto da fronteira — funciona para `caixa` e
-     `retorno`, porque as duas grandezas são monótonas ao longo da fila,
-     mas dá número errado para `chance`: a chance de vender NÃO é monótona
-     entre itens diferentes, então esse critério é um filtro, não um corte
-     de prefixo. Melhor uma chamada de 50 ms do que uma conta plausível
-     e errada no critério mais delicado.
+     Toda previa roda o motor de verdade, no servidor.
+     Tentei ler o corte direto da fronteira - funciona para `caixa` e
+     `retorno`, porque as duas grandezas sao monotonas ao longo da fila,
+     mas da numero errado para `chance`: a chance de vender NAO e monotona
+     entre itens diferentes, entao esse critorio e um filtro, nao um corte
+     de prefixo. Melhor uma chamada de 50 ms do que uma conta plausivel
+     e errada no critorio mais delicado.
      ------------------------------------------------------------------ */
   var CACHE = {};
 
@@ -176,30 +240,54 @@
     if (crit === "chance") return 0.5;
     return BASE.risco_inicial * 0.5;           /* metade do risco de hoje */
   }
-
+  function campoDe(crit) {
+    return document.querySelector('input[data-crit="' + crit + '"]');
+  }
   function valorDoCampo(crit) {
-    var el = document.querySelector('input[data-crit="' + crit + '"]');
+    var el = campoDe(crit);
     var v = parseFloat(String(el.value).replace(",", "."));
     if (!isFinite(v)) v = 0;
     return el.dataset.tipo === "pct" ? v / 100 : v;
   }
-
   function fmtValor(crit, v) {
-    if (crit === "chance") return N.pct(v, 0);
+    if (crit === "chance") return N.pct(v, 1);
     if (crit === "retorno") return N.num(v, 6);
     return "R$ " + N.moeda(v);
   }
-
-  function ativo() {
-    var r = document.querySelector('input[name=criterio_parada]:checked');
-    return r ? r.value : ATUAL;
+  function ativos() {
+    return ORDEM.filter(function (c) {
+      var cx = document.querySelector('.crit[data-crit="' + c + '"] .cx');
+      return cx && cx.checked;
+    });
+  }
+  /* a regra que amarra: a que, sozinha, corta mais baixo em caixa */
+  function manda() {
+    var a = ativos().filter(function (c) { return SOLO[c]; });
+    if (!a.length) return null;
+    return a.reduce(function (m, c) {
+      return SOLO[c].caixa < SOLO[m].caixa ? c : m;
+    }, a[0]);
   }
 
-  function pintarPonto(crit, pt) {
+  function consulta(lista) {
+    var q = "ativos=" + lista.join(",");
+    META.forEach(function (m) { q += "&" + m.campo + "=" + valorDoCampo(m.chave); });
+    return q;
+  }
+  function buscar(lista) {
+    var q = consulta(lista);
+    if (CACHE[q]) return Promise.resolve(CACHE[q]);
+    return fetch("/api/criterios/previa?" + q)
+      .then(function (r) { return r.json(); })
+      .then(function (d) { CACHE[q] = d; return d; });
+  }
+
+  /* ---------------------------------------------------- cartoes */
+  function pintarCartao(crit) {
+    var pt = SOLO[crit];
     if (!pt) return;
-    PONTOS[crit] = pt;
     id("prev-" + crit).innerHTML = [
-      ["compra", "R$ " + N.curto(pt.caixa)],
+      ["sozinha compraria", "R$ " + N.curto(pt.caixa)],
       ["peças", N.num(pt.pecas)],
       ["produtos", N.num(pt.itens)],
       ["risco que sobra", "R$ " + N.curto(pt.margem_em_risco)]
@@ -209,8 +297,8 @@
 
     var v = valorDoCampo(crit), aviso = "";
     if (pt.estoura_caixa) {
-      aviso = "Precisa de R$ " + N.curto(pt.caixa) + " — acima do caixa do ciclo (R$ " +
-        N.curto(BASE.teto_ciclo) + "). É esse o número para levar à discussão de verba.";
+      aviso = "Sozinha pediria R$ " + N.curto(pt.caixa) + ", acima do caixa do ciclo (R$ " +
+        N.curto(BASE.teto_ciclo) + "). Ligue também o critério de caixa para segurar.";
     } else if (crit === "retorno" && v > 0 && v < BASE.custo_capital_dia) {
       aviso = "Abaixo do custo de capital (" + N.num(BASE.custo_capital_dia, 6) +
         "): peças nessa faixa destroem valor.";
@@ -220,58 +308,99 @@
     id("sug-" + crit).innerHTML = "sugestão: <b class='mono'>" +
       fmtValor(crit, sugestao(crit)) + "</b>" +
       (crit === "retorno" ? " — o custo de capital da empresa" :
-       crit === "chance" ? " — não comprar peça que provavelmente encalha" :
-       crit === "risco" ? " — metade do risco atual" : " — o caixa configurado");
-
-    if (crit === ativo()) {
-      id("v-caixa").textContent = N.moeda(pt.caixa);
-      id("v-pecas").textContent = N.num(pt.pecas);
-      id("v-itens").textContent = N.num(pt.itens);
-      id("v-margem").textContent = N.moeda(pt.margem);
-      id("v-risco").textContent = N.moeda(pt.margem_em_risco);
-      id("v-queda").textContent = N.pct(1 - pt.margem_em_risco / BASE.risco_inicial, 0);
-    }
-    if (FR) desenhar(PONTOS);
+       crit === "chance" ? " — metade encalha, metade vende" :
+       crit === "risco" ? " — metade do risco de hoje" : " — o caixa configurado");
   }
 
-  var tempos = {};
-  function pedirPrevia(crit, imediato) {
-    var v = valorDoCampo(crit);
-    var chave = crit + ":" + v;
-    if (CACHE[chave]) { pintarPonto(crit, CACHE[chave]); return; }
-    clearTimeout(tempos[crit]);
-    tempos[crit] = setTimeout(function () {
-      fetch("/api/criterios/previa?criterio=" + crit + "&valor=" + v)
-        .then(function (r) { return r.json(); })
-        .then(function (pt) { CACHE[chave] = pt; pintarPonto(crit, pt); })
-        .catch(function () {});
-    }, imediato ? 0 : 260);
+  /* ---------------------------------------------------- topo + fichas */
+  function pintarTopo() {
+    if (!COMB) return;
+    id("v-caixa").textContent = N.moeda(COMB.caixa);
+    id("v-pecas").textContent = N.num(COMB.pecas);
+    id("v-itens").textContent = N.num(COMB.itens);
+    id("v-margem").textContent = N.moeda(COMB.margem);
+    id("v-mult").textContent = COMB.caixa > 0
+      ? "R$ " + N.num(COMB.margem / COMB.caixa, 2) : "–";
+    id("v-risco").textContent = N.moeda(COMB.margem_em_risco);
+    id("v-queda").textContent = N.pct(1 - COMB.margem_em_risco / BASE.risco_inicial, 0);
+
+    var a = ativos(), md = manda();
+    id("fichas").innerHTML = a.map(function (c) {
+      var pt = SOLO[c];
+      return '<span class="ficha' + (c === md ? " manda" : "") + '">' +
+        '<i style="background:' + CORES[c] + '"></i>' + N.esc(ROTULO[c]) +
+        '<span class="qt">' + (pt ? "R$ " + N.curto(pt.caixa) : "…") + "</span>" +
+        (c === md ? '<span class="qt" style="color:var(--ambar)">corta primeiro</span>' : "") +
+        "</span>";
+    }).join("");
+
+    id("explica-manda").innerHTML = md
+      ? (a.length > 1
+          ? "Das " + a.length + " regras ligadas, quem corta primeiro é <b>" +
+            N.esc(ROTULO[md]) + "</b>. Afrouxar qualquer outra não muda nada enquanto " +
+            "esta estiver amarrando."
+          : "Só uma regra ligada: <b>" + N.esc(ROTULO[md]) + "</b>. Marque outra para " +
+            "que a compra pare também por ela.")
+      : "Marque ao menos uma regra.";
   }
 
-  function pintarTudo(imediato) {
-    ["caixa", "retorno", "chance", "risco"].forEach(function (c) {
-      pedirPrevia(c, imediato);
+  /* ---------------------------------------------------- comparativo */
+  function celula(pt) {
+    var mult = pt.caixa > 0 ? pt.margem / pt.caixa : 0;
+    return '<td class="n mono">R$ ' + N.moeda(pt.caixa) + "</td>" +
+      '<td class="n mono">' + N.num(pt.pecas) + "</td>" +
+      '<td class="n mono">' + N.num(pt.itens) + "</td>" +
+      '<td class="n mono mt">R$ ' + N.moeda(pt.margem) + "</td>" +
+      '<td class="n mono">R$ ' + N.num(mult, 2) + "</td>" +
+      '<td class="n mono am">R$ ' + N.moeda(pt.margem_em_risco) + "</td>";
+  }
+  function pintarTabela() {
+    var a = ativos(), md = manda(), html = "";
+    ORDEM.forEach(function (c) {
+      var pt = SOLO[c];
+      if (!pt) return;
+      var lig = a.indexOf(c) >= 0;
+      html += '<tr style="opacity:' + (lig ? 1 : .5) + '">' +
+        '<td><span style="display:inline-flex;align-items:center;gap:7px">' +
+        '<i style="width:8px;height:8px;border-radius:2px;background:' + CORES[c] +
+        (lig ? "" : ";opacity:.3") + '"></i>' + N.esc(ROTULO[c]) +
+        (c === md ? ' <span class="pequeno am">corta primeiro</span>' : "") +
+        "</span></td>" +
+        '<td class="mono t3">' + fmtValor(c, valorDoCampo(c)) + "</td>" +
+        celula(pt) + "</tr>";
     });
+    if (COMB) {
+      html += '<tr data-fixo style="background:rgba(242,169,59,.06)">' +
+        '<td><b>' + (a.length > 1 ? "Conjunto — corta na primeira" : "Corte em uso") +
+        "</b></td>" +
+        '<td class="mono t3">' + a.length + (a.length > 1 ? " regras" : " regra") + "</td>" +
+        celula(COMB) + "</tr>";
+    }
+    document.querySelector("#tb-comp tbody").innerHTML = html;
   }
 
   /* ---------------------------------------------------- a fronteira */
-  function desenhar(pontos) {
-    var marcas = [];
-    Object.keys(pontos).forEach(function (c) {
-      var pt = pontos[c];
-      if (!pt) return;
-      marcas.push({
-        xAxis: pt.caixa,
-        lineStyle: { color: CORES[c], width: c === ATUAL ? 2 : 1,
-                     type: c === ATUAL ? "solid" : [4, 4] },
-        label: { color: CORES[c], fontSize: 10.5, rotate: 0, distance: 5,
-                 position: "insideEndTop",
-                 formatter: (c === ATUAL ? "▸ " : "") + c }
+  function desenhar() {
+    if (!FR) return;
+    var faixa = FR[FR.length - 1].caixa;
+    var a = ativos();
+    /* marca solo que cai praticamente no corte do conjunto e redundante */
+    var itens = ORDEM.filter(function (c) {
+        return SOLO[c] && a.indexOf(c) >= 0 &&
+          !(COMB && Math.abs(SOLO[c].caixa - COMB.caixa) < 0.005 * faixa);
+      }).map(function (c) {
+        return { x: SOLO[c].caixa, cor: CORES[c], texto: "só " + c };
       });
-    });
+    if (COMB) itens.push({ x: COMB.caixa, cor: C.ambar, ativo: true, texto: "corte em uso" });
+    /* uma faixa por marca: escalonadas na vertical nao se sobrepoem nunca,
+       e o topo da grade cresce so o necessario para caberem */
+    var marcas = N.marcasX(itens, { faixa: faixa, tolerancia: 0.008,
+                                    alturas: [8, 30, 52, 74, 96] });
+    var topo = 36 + 22 * marcas.length;
 
     N.grafico("g-fronteira", {
-      grid: N.grade({ top: 34, right: 68, bottom: 36, left: 4 }),
+      /* o topo tem de caber os quatro rotulos escalonados sem invadir a curva */
+      grid: N.grade({ top: topo, right: 74, bottom: 40, left: 6 }),
       legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 18, icon: "roundRect",
         textStyle: { color: C.tinta3, fontSize: 11 } },
       tooltip: N.dica(function (ps) {
@@ -283,8 +412,7 @@
           N.dicaLin(C.violeta, "chance da última peça", N.pct(r.p_vender, 0)) +
           N.dicaLin(C.tinta4, "retorno da última peça", N.num(r.nota, 6));
       }),
-      xAxis: N.eixoX({ boundaryGap: false, type: "value",
-        min: 0, max: FR[FR.length - 1].caixa,
+      xAxis: N.eixoX({ boundaryGap: false, type: "value", min: 0, max: faixa,
         name: "caixa aplicado na compra", nameLocation: "middle", nameGap: 30,
         nameTextStyle: { color: C.tinta4, fontSize: 10 },
         axisLabel: { color: C.tinta4, fontSize: 10,
@@ -300,44 +428,58 @@
             formatter: function (v) { return N.curto(v); } } })
       ],
       series: [
-        { name: "Margem esperada capturada", type: "line",
-          data: FR.map(function (r) { return [r.caixa, r.margem]; }),
-          symbol: "none", smooth: 0.15, lineStyle: { color: C.menta, width: 2.2 },
-          areaStyle: { color: N.area(C.menta, 0.18) },
-          markLine: { silent: true, symbol: "none", data: marcas } },
-        { name: "Margem ainda em risco", type: "line", yAxisIndex: 1,
-          data: FR.map(function (r) { return [r.caixa, r.margem_em_risco]; }),
-          symbol: "none", smooth: 0.15, lineStyle: { color: C.coral, width: 2.2 } }
+        N.serieLinha("Margem esperada capturada (eixo esquerdo)",
+          FR.map(function (r) { return [r.caixa, r.margem]; }), C.menta,
+          { area: 0.18, lineStyle: { width: 2.2 }, smooth: 0.15 }),
+        Object.assign(N.serieLinha("Margem ainda em risco (eixo direito)",
+          FR.map(function (r) { return [r.caixa, r.margem_em_risco]; }), C.coral,
+          { lineStyle: { width: 2.2 }, smooth: 0.15 }),
+          { yAxisIndex: 1, markLine: { silent: true, symbol: "none", data: marcas } })
       ]
     });
   }
 
+  function repintar() { pintarTopo(); pintarTabela(); desenhar(); }
+
+  /* ---------------------------------------------------- carregamento */
+  var pendente = null;
+  function recarregar(atraso) {
+    clearTimeout(pendente);
+    pendente = setTimeout(function () {
+      var a = ativos();
+      var alvos = ORDEM.map(function (c) {
+        return buscar([c]).then(function (d) { SOLO[c] = d; pintarCartao(c); });
+      });
+      alvos.push(buscar(a.length ? a : ["caixa"]).then(function (d) { COMB = d; }));
+      Promise.all(alvos).then(repintar).catch(function () {});
+    }, atraso === 0 ? 0 : 300);
+  }
+
   /* ---------------------------------------------------- eventos */
-  document.querySelectorAll('input[data-crit]').forEach(function (el) {
-    el.addEventListener("input", function () { pedirPrevia(el.dataset.crit); });
+  document.querySelectorAll("input[data-crit]").forEach(function (el) {
+    el.addEventListener("input", function () { recarregar(); });
   });
   document.querySelectorAll(".sugerir").forEach(function (b) {
     b.addEventListener("click", function () {
-      var c = b.dataset.crit;
-      var el = document.querySelector('input[data-crit="' + c + '"]');
-      var v = sugestao(c);
+      var c = b.dataset.crit, el = campoDe(c), v = sugestao(c);
       el.value = el.dataset.tipo === "pct" ? (v * 100).toFixed(2) : v;
-      pedirPrevia(c, true);
+      recarregar(0);
     });
   });
-  document.querySelectorAll('input[name=criterio_parada]').forEach(function (r) {
-    r.addEventListener("change", function () {
-      document.querySelectorAll(".crit").forEach(function (c) {
-        c.classList.toggle("on", c.dataset.crit === r.value);
-      });
-      if (PONTOS[r.value]) pintarPonto(r.value, PONTOS[r.value]);
-      else pedirPrevia(r.value, true);
+  document.querySelectorAll(".crit .cx").forEach(function (cx) {
+    cx.addEventListener("change", function () {
+      var cartao = cx.closest(".crit");
+      /* ao menos uma regra tem de ficar ligada: sem nenhuma nao existe compra */
+      if (!cx.checked && !ativos().length) cx.checked = true;
+      cartao.classList.toggle("on", cx.checked);
+      cartao.classList.toggle("off", !cx.checked);
+      recarregar(0);
     });
   });
 
   N.buscar("/api/criterios").then(function (d) {
     FR = d.fronteira;
-    pintarTudo(true);
+    recarregar(0);
   });
 })();
 </script>

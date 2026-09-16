@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block titulo %}Acompanhamento de vendas{% endblock %}
+{% block cabecalho %}Acompanhamento de vendas{% endblock %}
+{% block subcabecalho %}venda por canal e estoque disponível + reservado, dia a dia — só para conferência{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block cabeca %}
+<style>
+  .busca-item { position: relative; width: 380px; }
+  .busca-item input { width: 100%; }
+  .busca-lista { position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    max-height: 320px; overflow: auto; background: var(--painel); border: 1px
+    solid var(--linha); border-radius: 9px; box-shadow: 0 10px 28px rgba(0,0,0,.35);
+    z-index: 40; display: none; }
+  .busca-lista.aberta { display: block; }
+  .busca-lista .op { padding: 8px 12px; cursor: pointer; font-size: 12.5px;
+    display: flex; justify-content: space-between; gap: 10px; }
+  .busca-lista .op:hover, .busca-lista .op.foco { background: var(--painel-2); }
+  .busca-lista .op b { color: var(--tinta); font-weight: 500; }
+  .busca-lista .op span { color: var(--tinta-4); font-family: var(--mono); font-size: 11px; }
+  .busca-lista .vazio { padding: 12px; color: var(--tinta-4); font-size: 12px; }
+
+  #tb-ranking tbody tr.on td { background: var(--ambar-lav); }
+  #tb-ranking td.n[data-v] { font-family: var(--mono); }
+
+  .detalhe-dias { display: none; }
+  .detalhe-dias.aberto { display: block; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<div class="secao">
+  <div class="painel">
+    <div class="painel-cab">
+      <h2 id="titulo-item">Escolha um produto</h2>
+      <span class="dica" id="sub-item">venda por canal (barra) e estoque disponível + reservado (linha) — arraste a barra
+        de baixo ou role o mouse sobre o gráfico para dar zoom</span>
+      <div class="dir">
+        <div class="busca-item">
+          <input type="search" id="busca" placeholder="Buscar produto por nome ou SKU…" autocomplete="off">
+          <div class="busca-lista" id="lista-busca"></div>
+        </div>
+      </div>
+    </div>
+    <div class="painel-int">
+      <div id="g-acompanhamento" class="gfx" style="height:480px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Produtos com mais dias em que estoque, venda e reserva não batem</h2>
+    <span class="dica" id="dica-ranking"><b id="conta">–</b> produtos ·
+      clique numa linha para abrir o produto no gráfico e ver os dias exatos</span>
+    <div class="dir filtros">
+      <div class="busca">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="q-ranking" placeholder="Buscar…" style="width:210px">
+      </div>
+    </div>
+  </div>
+  <div class="painel"><div class="painel-int rente">
+    <div class="rolo rolo-alto">
+      <table class="tb" id="tb-ranking">
+        <thead><tr>
+          <th class="nao-ord" data-ajuda="Nome do produto, com o SKU embaixo. Clique na linha para abrir o produto no gráfico acima.">Produto</th>
+          <th data-ajuda="Classificação ABC × XYZ do item.">Classe</th>
+          <th class="n" data-ajuda="Quantos dias do histórico têm retrato de estoque para este item.">Dias no histórico</th>
+          <th class="n" data-ajuda="Dias em que a queda do estoque disponível não bate com a venda registrada naquele dia (tolerância de 0,5 peça).">Dias não OK</th>
+          <th class="n" data-ajuda="Dias não OK dividido pelos dias no histórico.">% não OK</th>
+          <th class="n" data-ajuda="Soma da diferença (em peças) entre a queda de disponível e a venda, somando só os dias não OK.">Peças não explicadas</th>
+          <th data-ajuda="A data mais recente em que este item teve um dia não OK.">Último dia não OK</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div></div>
+</div>
+
+<div class="secao detalhe-dias" id="bloco-detalhe">
+  <div class="secao-cab">
+    <h2>Os dias não OK de <span id="detalhe-nome">–</span></h2>
+    <span class="dica">estoque, venda e reserva, dia a dia — a conta crua por trás do número da lista acima</span>
+  </div>
+  <div class="painel"><div class="painel-int rente">
+    <div class="rolo rolo-medio">
+      <table class="tb" id="tb-detalhe">
+        <thead><tr>
+          <th class="nao-ord">Data</th>
+          <th class="n nao-ord" data-ajuda="Estoque físico no fim do dia.">Físico</th>
+          <th class="n nao-ord" data-ajuda="Estoque disponível no fim do dia (físico menos reserva).">Disponível</th>
+          <th class="n nao-ord" data-ajuda="Peças vendidas naquele dia, todos os canais.">Vendas</th>
+          <th class="n nao-ord" data-ajuda="Físico menos disponível: quanto estava reservado no fim do dia.">Reserva</th>
+          <th class="n nao-ord" data-ajuda="Variação do estoque físico contra o dia anterior.">Δ estoque</th>
+          <th class="n nao-ord" data-ajuda="Variação da reserva contra o dia anterior.">Δ reserva</th>
+          <th class="n nao-ord" data-ajuda="Quanto o disponível caiu no dia, comparado ao dia anterior (nunca negativo).">Queda disponível</th>
+          <th class="n nao-ord" data-ajuda="Queda de disponível menos vendas do dia. Fora de ±0,5 peça, o dia é marcado como não OK.">Diferença</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div></div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script>
+(function () {
+  var id = function (x) { return document.getElementById(x); };
+  var ITENS = [];
+  var RANKING = [];
+  var SKU_ATUAL = null;
+
+  /* ------------------------------------------------------- busca de item */
+  function montarBusca() {
+    var campo = id("busca"), lista = id("lista-busca"), foco = -1;
+
+    function opcoes(q) {
+      q = q.toLowerCase();
+      return ITENS.filter(function (r) {
+        return r.item.toLowerCase().indexOf(q) >= 0 || r.sku.indexOf(q) >= 0;
+      }).slice(0, 30);
+    }
+    function desenhar(q) {
+      var op = q ? opcoes(q) : ITENS.slice(0, 30);
+      foco = -1;
+      lista.innerHTML = op.length
+        ? op.map(function (r) {
+            return '<div class="op" data-sku="' + N.esc(r.sku) + '"><b>' +
+              N.esc(r.item) + '</b><span>' + N.esc(r.sku) + '</span></div>';
+          }).join("")
+        : '<div class="vazio">nenhum produto encontrado</div>';
+      lista.classList.add("aberta");
+    }
+    campo.addEventListener("focus", function () { desenhar(campo.value); });
+    campo.addEventListener("input", function () { desenhar(campo.value); });
+    campo.addEventListener("keydown", function (e) {
+      var ops = Array.prototype.slice.call(lista.querySelectorAll(".op"));
+      if (!ops.length) return;
+      if (e.key === "ArrowDown") { foco = Math.min(foco + 1, ops.length - 1); }
+      else if (e.key === "ArrowUp") { foco = Math.max(foco - 1, 0); }
+      else if (e.key === "Enter") { if (ops[foco]) ops[foco].click(); return; }
+      else return;
+      e.preventDefault();
+      ops.forEach(function (o, i) { o.classList.toggle("foco", i === foco); });
+      if (ops[foco]) ops[foco].scrollIntoView({ block: "nearest" });
+    });
+    lista.addEventListener("click", function (e) {
+      var op = e.target.closest(".op[data-sku]");
+      if (!op) return;
+      campo.value = "";
+      lista.classList.remove("aberta");
+      carregarItem(op.dataset.sku);
+    });
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest(".busca-item")) lista.classList.remove("aberta");
+    });
+  }
+
+  /* ------------------------------------------------------- o grafico */
+  function carregarItem(sku) {
+    SKU_ATUAL = sku;
+    var meta = ITENS.filter(function (r) { return r.sku === sku; })[0];
+    id("titulo-item").innerHTML = meta
+      ? N.esc(meta.item) + '<span class="pequeno t4 mono" style="margin-left:10px">' +
+        N.esc(sku) + "</span>"
+      : "SKU " + N.esc(sku);
+    N.espera("g-acompanhamento");
+    N.buscar("/api/acompanhamento/serie?sku=" + encodeURIComponent(sku)).then(function (d) {
+      pintarGrafico(d);
+    }).catch(function (e) {
+      id("g-acompanhamento").innerHTML =
+        '<div class="msg msg-er">não deu para carregar este item: ' + N.esc(e.message) + "</div>";
+    });
+    marcarLinhaAtiva(sku);
+    carregarDetalhe(sku, meta ? meta.item : sku);
+  }
+
+  function pintarGrafico(d) {
+    var C = N.COR;
+    var n = d.dias.length;
+    // por padrao mostra os ultimos ~120 dias; a barra de baixo (ou o mouse)
+    // abre o resto - do mesmo jeito que um grafico de tempo do PowerBI
+    var inicioPct = n > 130 ? 100 * (1 - 120 / n) : 0;
+    N.grafico("g-acompanhamento", {
+      grid: N.grade({ left: 8, right: 8, top: 34, bottom: 74 }),
+      legend: { top: 0, textStyle: { color: C.tinta2, fontSize: 11 } },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      xAxis: N.eixoX({ data: d.dias }),
+      yAxis: [
+        N.eixoY({ name: "vendas (peças)", position: "left" }),
+        N.eixoY({ name: "estoque (peças)", position: "right",
+                 splitLine: { show: false } }),
+      ],
+      dataZoom: [
+        { type: "inside", start: inicioPct, end: 100 },
+        { type: "slider", start: inicioPct, end: 100, bottom: 8, height: 22,
+          borderColor: C.linha, fillerColor: N.sombra(C.ambar, .12),
+          handleStyle: { color: C.painel3, borderColor: C.tinta4 },
+          textStyle: { color: C.tinta3, fontSize: 10 },
+          dataBackground: {
+            lineStyle: { color: C.tinta4 },
+            areaStyle: { color: N.sombra(C.tinta4, .18) } } },
+      ],
+      series: [
+        N.serieBarra("E-commerce", d.ecommerce, C.ceu, { stack: "vendas", yAxisIndex: 0, barMaxWidth: 14 }),
+        N.serieBarra("Lojas", d.lojas, C.ambar, { stack: "vendas", yAxisIndex: 0, barMaxWidth: 14 }),
+        N.serieLinha("Disponível", d.disponivel, C.menta, { stack: "estoque", yAxisIndex: 1, area: .22 }),
+        N.serieLinha("Reservado", d.reservado, C.violeta, { stack: "estoque", yAxisIndex: 1, area: .22 }),
+      ],
+    });
+  }
+
+  /* ------------------------------------------------------- o ranking */
+  function pintarRanking() {
+    id("conta").textContent = RANKING.length;
+    document.querySelector("#tb-ranking tbody").innerHTML = RANKING.map(function (r, i) {
+      return '<tr data-sku="' + N.esc(r.sku) + '" data-i="' + i + '" class="clicavel">' +
+        '<td><b>' + N.esc(r.item) + '</b><div class="pequeno t4">' + N.esc(r.sku) +
+        (r.familia ? " · " + N.esc(r.familia) : "") + "</div></td>" +
+        "<td>" + N.seloClasse(r.classificacao) + "</td>" +
+        '<td class="n" data-v="' + r.dias_historico + '">' + N.num(r.dias_historico) + "</td>" +
+        '<td class="n forte ' + (r.dias_nao_ok > 0 ? "c-cr" : "") + '" data-v="' +
+          r.dias_nao_ok + '">' + N.num(r.dias_nao_ok) + "</td>" +
+        '<td class="n" data-v="' + r.pct_dias_nao_ok + '">' + N.pct(r.pct_dias_nao_ok, 0) + "</td>" +
+        '<td class="n" data-v="' + r.pecas_nao_explicadas + '">' + N.num(r.pecas_nao_explicadas, 0) + "</td>" +
+        "<td>" + (r.ultimo_dia_nao_ok ? N.data(r.ultimo_dia_nao_ok) : '<span class="t4">–</span>') +
+        "</td></tr>";
+    }).join("");
+    N.tabela("#tb-ranking", {
+      busca: "#q-ranking", conta: "#conta", col: 3, dir: "desc",
+    });
+  }
+
+  function marcarLinhaAtiva(sku) {
+    document.querySelectorAll("#tb-ranking tbody tr").forEach(function (tr) {
+      tr.classList.toggle("on", tr.dataset.sku === sku);
+    });
+  }
+
+  document.body.addEventListener("click", function (e) {
+    var tr = e.target.closest("#tb-ranking tr[data-sku]");
+    if (tr) carregarItem(tr.dataset.sku);
+  });
+
+  /* ------------------------------------------------------- o detalhe */
+  function carregarDetalhe(sku, nome) {
+    id("detalhe-nome").textContent = nome;
+    id("bloco-detalhe").classList.add("aberto");
+    var corpo = document.querySelector("#tb-detalhe tbody");
+    corpo.innerHTML = '<tr><td colspan="9" class="t4" style="padding:14px">carregando…</td></tr>';
+    N.buscar("/api/acompanhamento/item/" + encodeURIComponent(sku) + "?so_nao_ok=true&limite=200")
+      .then(function (d) {
+        corpo.innerHTML = d.linhas.length ? d.linhas.map(function (r) {
+          return "<tr>" +
+            "<td>" + N.data(r.data) + "</td>" +
+            '<td class="n">' + N.num(r.fisico, 1) + "</td>" +
+            '<td class="n">' + N.num(r.disponivel, 1) + "</td>" +
+            '<td class="n">' + N.num(r.vendas, 1) + "</td>" +
+            '<td class="n">' + N.num(r.reserva, 1) + "</td>" +
+            '<td class="n">' + N.num(r.delta_estoque, 1) + "</td>" +
+            '<td class="n">' + N.num(r.delta_reserva, 1) + "</td>" +
+            '<td class="n">' + N.num(r.queda_disponivel, 1) + "</td>" +
+            '<td class="n forte c-cr">' + N.num(r.diferenca, 1) + "</td></tr>";
+        }).join("") : '<tr><td colspan="9" class="t4" style="padding:14px">' +
+          "este item não tem dia fora da tolerância</td></tr>";
+      });
+  }
+
+  /* ------------------------------------------------------- arranque */
+  Promise.all([
+    N.buscar("/api/itens/lista"),
+    N.buscar("/api/acompanhamento/ranking"),
+  ]).then(function (r) {
+    ITENS = r[0].itens;
+    RANKING = r[1].itens;
+    montarBusca();
+    pintarRanking();
+    if (RANKING.length) carregarItem(RANKING[0].sku);
+  }).catch(function (e) {
+    id("g-acompanhamento").innerHTML =
+      '<div class="msg msg-er">não deu para carregar a página: ' + N.esc(e.message) + "</div>";
+  });
+})();
+</script>
+{% endblock %}

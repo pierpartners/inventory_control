@@ -78,9 +78,16 @@
           <th>Item</th>
           <th>Classe</th>
           <th>Regime</th>
+          <th class="n">Custo/peça</th>
+          <th class="n">Preço/peça</th>
+          <th class="n">Lucro/peça</th>
+          <th class="n">Margem</th>
+          <th class="n">Vendidas</th>
+          <th class="n">Comprar</th>
           <th class="n">Demanda/dia</th>
           <th class="n">CV</th>
           <th class="n">Posição vs ponto de pedido</th>
+          <th class="n">Prazo</th>
           <th class="n">Lote</th>
           <th class="n">Segurança</th>
           <th class="n">Nível de serviço</th>
@@ -104,11 +111,20 @@
               <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
             <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
             <td class="fraco pequeno">{{ 'Unid. marginal' if 'marginal' in r.regime else 'EOQ + normal' }}</td>
+            <td class="n" data-v="{{ r.custo_unitario }}"><span class="pre">R$</span>{{ r.custo_unitario|n(2) }}</td>
+            <td class="n" data-v="{{ r.preco_por_peca }}"><span class="pre">R$</span>{{ r.preco_por_peca|n(2) }}</td>
+            <td class="n {{ 'c-mt' if r.lucro_por_peca > 0 else 'c-cr' }}" data-v="{{ r.lucro_por_peca }}"><span class="pre">R$</span>{{ r.lucro_por_peca|n(2) }}</td>
+            <td class="n {{ 'c-cr' if (r.margem_por_peca_pct or 0) <= 0 }}" data-v="{{ r.margem_por_peca_pct or 0 }}">{{ r.margem_por_peca_pct|pct(1) }}</td>
+            <td class="n fraco" data-v="{{ r.pecas_vendidas or 0 }}">{{ r.pecas_vendidas|n }}</td>
+            <td class="n {{ 'forte' if (r.quantidade_a_comprar or 0) > 0 }}" data-v="{{ r.quantidade_a_comprar or 0 }}">{% if (r.quantidade_a_comprar or 0) > 0 %}{{ r.quantidade_a_comprar|n }}<span class="suf">un</span>{% else %}<span class="t4">–</span>{% endif %}</td>
             <td class="n">{{ r.demanda_media_dia|n(2) }}</td>
             <td class="n fraco">{{ r.cv_diario|n(2) }}</td>
             <td class="n" data-v="{{ ((r.posicao_estoque or 0) / (r.ponto_de_pedido or 1))|round(4) }}"
                 data-pos="{{ r.posicao_estoque or 0 }}" data-r="{{ r.ponto_de_pedido }}"
                 data-max="{{ r.estoque_maximo }}"></td>
+            <td class="n {{ 'c-am' if r.lead_time_dias > 90 }}" data-v="{{ r.lead_time_dias }}"
+                title="desvio {{ r.lead_time_desvio_dias|n(1) }} dias · {{ r.lead_time_pedidos|n }} pedidos">
+              {{ r.lead_time_dias|n }}<span class="suf">d</span>{% if r.lead_time_pedidos < 3 %} <span class="t4" title="prazo estimado com menos de 3 pedidos">?</span>{% endif %}</td>
             <td class="n">{{ r.lote_compra|n }}</td>
             <td class="n fraco">{{ r.estoque_seguranca|n }}</td>
             <td class="n" data-v="{{ r.nivel_servico }}">{{ r.nivel_servico|pct(1) }}</td>

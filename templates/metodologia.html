@@ -156,6 +156,10 @@
       </div>
       <div class="painel-int">
         <div id="g-dist" class="gfx m"></div>
+        <div class="legenda mt10">
+          <span><i style="background:#8B72E8"></i>chance de a demanda ser exatamente essa</span>
+          <span><i style="background:#F2A93B"></i>demanda média do período</span>
+        </div>
         <div class="gr gr-3 mt18" id="percentis"></div>
       </div>
     </div>
@@ -550,7 +554,8 @@
               label: { show: false }, data: [{ yAxis: 0 }] } },
           { name: "chance", type: "line", yAxisIndex: 1,
             data: esc.map(function (r) { return r.p_vender; }),
-            symbol: "none", smooth: 0.2, lineStyle: { color: C.violeta, width: 1.8 } }
+            symbol: "none", smooth: 0.2, itemStyle: { color: C.violeta },
+            lineStyle: { color: C.violeta, width: 1.8 } }
         ]
       });
       var ultimaBoa = corte > 0 ? esc[corte - 1].unidade : 0;
@@ -606,7 +611,22 @@
       ["V", "vê", "o que a peça vale: ganho provável menos perda provável",
        primeira ? "R$ " + N.moeda(primeira.valor, 2) : "–"],
       ["λ", "lambda", "quanto o dinheiro está &quot;caro&quot; por dentro, quando o estoque total " +
-       "precisa caber num teto", "{{ '%.3f'|format(exec.lam) }}"]
+       "precisa caber num teto", "{{ '%.3f'|format(exec.lam) }}"],
+      ["nota", "", "retorno da peça: o que ela vale dividido pelo dinheiro que prende " +
+       "e pelos dias que prende — é por esta conta que a fila é ordenada",
+       primeira ? N.num(primeira.nota * 1000, 2) + " por mil reais/dia" : "–"],
+      ["giro", "", "quantas vezes por ano o estoque médio do produto se renova " +
+       "(demanda do ano ÷ estoque médio)", N.num(m.giro_ano, 1) + "× por ano"],
+      ["capital", "", "dinheiro parado neste produto: estoque médio × custo da peça",
+       "R$ " + N.moeda(m.capital_imobilizado)],
+      ["retorno s/ capital", "", "lucro líquido de um ano dividido pelo capital que o " +
+       "produto prende — é a taxa que ele paga ao dono do dinheiro",
+       m.capital_imobilizado > 0
+         ? N.pct(m.lucro_liquido_ano / m.capital_imobilizado, 0) + " por ano" : "–"],
+      ["GMROI", "gê-em-ro-i", "margem bruta de um ano por real de estoque ao custo. " +
+       "Acima de R$ 1 o estoque devolve mais do que vale; abaixo, não se paga",
+       m.capital_imobilizado > 0
+         ? "R$ " + N.num(m.lucro_bruto_ano / m.capital_imobilizado, 2) + " por real" : "–"]
     ];
     id("tb-glossario").innerHTML = g.map(function (r) {
       return "<tr><td class=\"sim\">" + r[0] + "</td>" +

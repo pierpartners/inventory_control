@@ -264,17 +264,12 @@ def fila_pagina(wh: Warehouse, sku: str = "", motivo: str = "", busca: str = "",
 _fila_previa: dict = {}
 
 
-def previa_criterio(wh: Warehouse, p: Parametros, criterio: str, valor: float) -> dict:
-    """Onde a fila seria cortada por um criterio, com um valor hipotetico.
+def _fila_para_previa(wh: Warehouse) -> tuple:
+    """Carrega a fila e o ponto de partida uma vez e guarda em memoria.
 
-    Roda o motor de verdade em vez de interpolar a fronteira. Nao e capricho:
-    `caixa` e `retorno` sao cortes de prefixo (as duas grandezas sao monotonas
-    ao longo da fila) e poderiam ser lidos na curva - mas `chance` e um FILTRO,
-    porque a chance de vender nao e monotona entre itens diferentes. Ler a
-    fronteira daria um numero errado justamente no criterio mais delicado.
+    A previa da tela e chamada a cada tecla digitada. Ler 37 mil linhas do
+    warehouse toda vez seria o gargalo; o motor em si roda em ~40 ms.
     """
-    from .modelo import caminhar, regra_de_parada
-
     if "fila" not in _fila_previa:
         _fila_previa["fila"] = wh.query(
             f"select posicao_fila, sku, bloco, quantidade, custo, valor_esperado, "
@@ -283,30 +278,200 @@ def previa_criterio(wh: Warehouse, p: Parametros, criterio: str, valor: float) -
         base = wh.query(f"select risco_inicial, falta_inicial from {ref('res_criterios')} limit 1")
         _fila_previa["risco"] = float(base.risco_inicial.iloc[0])
         _fila_previa["falta"] = float(base.falta_inicial.iloc[0])
+    return _fila_previa["fila"], _fila_previa["risco"], _fila_previa["falta"]
 
-    fila = _fila_previa["fila"]
-    campo = {c[0]: c[2] for c in CRITERIOS}.get(criterio)
-    if campo is None:
-        return {}
-    hipotese = replace(p, **{campo: float(valor)}, criterio_parada=criterio)
 
-    r = caminhar(fila, regra_de_parada(hipotese, criterio),
-                 _fila_previa["risco"], _fila_previa["falta"])
+def simular_criterios(wh: Warehouse, p: Parametros, ativos: str,
+                      valores: dict | None = None) -> dict:
+    """Corta a fila com um conjunto de criterios e valores hipoteticos.
+
+    Roda o motor de verdade em vez de interpolar a fronteira. Nao e capricho:
+    `caixa` e `retorno` sao cortes de prefixo (as duas grandezas sao monotonas
+    ao longo da fila) e poderiam ser lidos na curva - mas `chance` e um FILTRO,
+    porque a chance de vender nao e monotona entre itens diferentes. Ler a
+    fronteira daria um numero errado justamente no criterio mais delicado.
+
+    Com mais de um criterio ligado a peca precisa passar por todos: o corte
+    cai onde o primeiro deles fecha a porta.
+    """
+    from .modelo import caminhar, criterios_ativos, regra_de_parada
+
+    fila, risco0, falta0 = _fila_para_previa(wh)
+    campos = {c[0]: c[2] for c in CRITERIOS}
+    limpos = {}
+    for chave, campo in campos.items():
+        v = (valores or {}).get(campo)
+        if v is not None:
+            try:
+                limpos[campo] = float(v)
+            except (TypeError, ValueError):
+                pass
+    hipotese = replace(p, **limpos, criterio_parada=ativos or p.criterio_parada)
+
+    regra = regra_de_parada(hipotese)
+    r = caminhar(fila, regra, risco0, falta0)
     ok = r["comprar"]
     n = int(ok.sum())
+    caixa = float(fila.custo.to_numpy()[ok].sum()) if n else 0.0
     return {
-        "criterio": criterio, "valor": float(valor),
+        "ativos": regra["criterios"],
+        "valores": {k: float(getattr(hipotese, v)) for k, v in campos.items()},
+        "posicao_corte": int(np.max(np.where(ok)[0]) + 1) if n else 0,
         "blocos": n,
         "pecas": int(fila.quantidade.to_numpy()[ok].sum()) if n else 0,
         "itens": int(pd.unique(fila.sku.to_numpy()[ok]).size) if n else 0,
-        "caixa": float(fila.custo.to_numpy()[ok].sum()) if n else 0.0,
+        "caixa": caixa,
         "margem": float(fila.valor_esperado.to_numpy()[ok].sum()) if n else 0.0,
         "margem_em_risco": float(r["margem_em_risco_restante"][-1]),
         "falta": float(r["falta_restante"][-1]),
-        "risco_inicial": _fila_previa["risco"],
+        "risco_inicial": risco0,
         "teto_ciclo": float(p.teto_compra_ciclo),
-        "estoura_caixa": bool(n and fila.custo.to_numpy()[ok].sum()
-                              > p.teto_compra_ciclo + 1e-6),
+        "estoura_caixa": bool(caixa > p.teto_compra_ciclo + 1e-6),
+    }
+
+
+def conferencia_item(wh: Warehouse, sku: str, limite: int = 400) -> dict:
+    """O dado cru de um item: venda a venda, compra a compra, custo a custo.
+
+    Nao passa por nenhuma coluna do modelo. E a trilha que permite conferir a
+    mao de onde saiu cada numero da decisao - e foi assim que se descobriu que
+    o custo de seis itens vinha do reset do ERP em dia de estoque zero.
+    """
+    seguro = str(sku).replace("'", "''")
+    cab = wh.query(f"""
+        select sku, item, familia, unidade, origem, custo_unitario,
+               custo_ultimo_lancado, custo_mediano, preco_tabela,
+               lead_time_dias, lead_time_desvio_dias, lead_time_pedidos,
+               lote_minimo_compra
+        from {ref('stg_catalogo')} where sku = '{seguro}'""")
+    if cab.empty:
+        return {}
+
+    vendas = wh.query(f"""
+        select data, pedido, pecas_vendidas, valor_da_peca, receita_bruta,
+               receita_liquida, custo_unitario, cmv, lucro, valor_do_frete,
+               canal, tipo_cliente, uf, regiao as vendedor, cliente_id
+        from {ref('stg_vendas')} where sku = '{seguro}'
+        order by data desc limit {int(limite)}""")
+
+    # o pedido de compra como o ERP registra, com prazo combinado e realizado
+    compras = wh.query(f"""
+        with c as (
+            select cast(dtmovimento as date) as "data", idpedido, fornecedor,
+                   cast(qtdsolicitada as double) solicitado,
+                   cast(qtdatendida as double)   atendido,
+                   cast(valunitario as double)   valor_unitario,
+                   cast(valtotliquido as double) valor_total,
+                   cast(diasprevisaoentrega as double) prazo_previsto,
+                   descrformapagamento pagamento, compradoroficial comprador
+            from {ref('raw_compras')}
+            where cast(idsubproduto as varchar) = '{seguro}'),
+        k as (
+            select idpedido,
+                   min(cast(dt_entrada_estoque as date)) entrou_em,
+                   min(cast(dias_entrega_realizado as double)) prazo_realizado,
+                   min(cast(prazo_titulo_dias as double)) prazo_pagamento
+            from {ref('raw_ciclo_pagamento')}
+            where cast(idsubproduto as varchar) = '{seguro}'
+            group by 1)
+        select c.*, k.entrou_em, k.prazo_realizado, k.prazo_pagamento
+        from c left join k on k.idpedido = c.idpedido
+        order by c.data desc limit {int(limite)}""")
+
+    # o que de fato ENTROU no estoque: a subida do saldo de um dia para o outro.
+    # Fecha com o estoque por construcao, ao contrario da tabela de compras -
+    # que salta 18x em marco de 2026 sem o estoque acusar.
+    entradas = wh.query(f"""
+        with e as (
+            select data, saldo_final, custo_unitario,
+                   lag(saldo_final) over (order by data) ant
+            from (select d.data, d.saldo_final, c.custo_unitario
+                  from {ref('mart_estoque_diario')} d
+                  join {ref('stg_catalogo')} c on c.sku = d.sku
+                  where d.sku = '{seguro}'))
+        select "data", (saldo_final - ant) as pecas,
+               (saldo_final - ant) * custo_unitario as valor
+        from e where ant is not null and saldo_final - ant > 0
+        order by data desc limit {int(limite)}""")
+
+    # so os dias em que o custo MUDOU, e se havia estoque naquele dia: e a
+    # coluna que denuncia o reset do ERP
+    custos = wh.query(f"""
+        with c as (
+            select cast(dtmovimento as date) as "data",
+                   cast(valcustomedio as double) as custo,
+                   cast(qtdatualestoque as double) as estoque,
+                   lag(cast(valcustomedio as double))
+                       over (order by dtmovimento) ant
+            from {ref('raw_estoque_diario_erp')}
+            where cast(idsubproduto as varchar) = '{seguro}')
+        select "data", custo, estoque
+        from c where ant is null or abs(custo - ant) > 0.005
+        order by data desc limit 120""")
+
+    # os totais vem do historico INTEIRO, nao das linhas exibidas. Trinta
+    # itens passam do limite de 400 linhas de venda (o maior tem 2.241), e
+    # somar so o que a tela mostra seria escrever "vendeu no total" embaixo de
+    # uma soma parcial - o erro que esta tela existe para pegar.
+    tv = wh.query(f"""
+        select count(*) linhas, coalesce(sum(pecas_vendidas),0) pecas,
+               coalesce(sum(receita_liquida),0) receita,
+               coalesce(sum(cmv),0) cmv, coalesce(sum(lucro),0) lucro,
+               min(data) primeira, max(data) ultima
+        from {ref('stg_vendas')} where sku = '{seguro}'""").iloc[0]
+    tc = wh.query(f"""
+        select count(*) pedidos,
+               coalesce(sum(cast(qtdsolicitada as double)),0) solicitado,
+               coalesce(sum(cast(qtdatendida as double)),0) atendido,
+               coalesce(sum(cast(valtotliquido as double)),0) valor
+        from {ref('raw_compras')}
+        where cast(idsubproduto as varchar) = '{seguro}'""").iloc[0]
+    te = wh.query(f"""
+        with e as (
+            select d.saldo_final, c.custo_unitario,
+                   lag(d.saldo_final) over (order by d.data) ant
+            from {ref('mart_estoque_diario')} d
+            join {ref('stg_catalogo')} c on c.sku = d.sku
+            where d.sku = '{seguro}')
+        select count(*) eventos,
+               coalesce(sum(saldo_final - ant),0) pecas,
+               coalesce(sum((saldo_final - ant) * custo_unitario),0) valor
+        from e where ant is not null and saldo_final - ant > 0""").iloc[0]
+
+    pecas = float(tv.pecas) or 0.0
+    tot = {
+        "vendas_linhas": int(tv.linhas),
+        "vendas_pecas": pecas,
+        "vendas_receita": float(tv.receita),
+        "vendas_cmv": float(tv.cmv),
+        "vendas_lucro": float(tv.lucro),
+        "preco_medio": float(tv.receita) / pecas if pecas else 0.0,
+        "custo_medio_vendido": float(tv.cmv) / pecas if pecas else 0.0,
+        "lucro_medio": float(tv.lucro) / pecas if pecas else 0.0,
+        "primeira_venda": str(tv.primeira)[:10] if tv.primeira is not None else None,
+        "ultima_venda": str(tv.ultima)[:10] if tv.ultima is not None else None,
+        "compras_pedidos": int(tc.pedidos),
+        "compras_solicitado": float(tc.solicitado),
+        "compras_atendido": float(tc.atendido),
+        "compras_valor": float(tc.valor),
+        "entradas_eventos": int(te.eventos),
+        "entradas_pecas": float(te.pecas),
+        "entradas_valor": float(te.valor),
+    }
+    return {
+        "cabecalho": linha(cab.iloc[0]),
+        "totais": tot,
+        "vendas": registros(vendas),
+        "compras": registros(compras),
+        "entradas": registros(entradas),
+        "custos": registros(custos),
+        # quantas linhas a tela mostra de quantas existem, por tabela
+        "mostrados": {
+            "vendas": [int(len(vendas)), int(tv.linhas)],
+            "compras": [int(len(compras)), int(tc.pedidos)],
+            "entradas": [int(len(entradas)), int(te.eventos)],
+        },
+        "limite": int(limite),
     }
 
 
@@ -763,3 +928,197 @@ def cobertura_familias(wh: Warehouse) -> list[dict]:
     ).reset_index()
     g["retorno"] = np.where(g.capital > 0, g.lucro_ano / g.capital, 0)
     return registros(g.sort_values("capital", ascending=False))
+
+
+# ======================================================================
+# O RETORNO DO DINHEIRO
+# ======================================================================
+# Todas as contas desta secao respondem a mesma pergunta em escalas
+# diferentes: quanto volta por real aplicado. O denominador e sempre
+# capital *imobilizado* (estoque medio ao custo), nunca faturamento -
+# margem sobre venda mede preco, retorno sobre capital mede o negocio.
+
+def _quadrante(capital: np.ndarray, retorno: np.ndarray,
+               corte_capital: float, corte_retorno: float) -> np.ndarray:
+    """Classifica cada item pelo par (capital preso, retorno sobre ele).
+
+    Os dois cortes sao as medianas da propria carteira, nao numeros de fora.
+    Tentei usar a taxa de carregamento como piso do retorno e os quatro
+    quadrantes viraram dois: nesta carteira o retorno sobre capital passa de
+    400% ao ano, e um piso de 25% nao separa nada. Mediana separa.
+    """
+    return np.select(
+        [retorno <= 0,
+         (capital >= corte_capital) & (retorno >= corte_retorno),
+         (capital < corte_capital) & (retorno >= corte_retorno),
+         (capital >= corte_capital)],
+        ["Destrói valor", "Motor de lucro", "Joia pequena", "Dinheiro preso"],
+        default="Cauda longa")
+
+
+def _retorno_marginal(fr: pd.DataFrame, teto: float, faixas: int = 40) -> list[dict]:
+    """Quanto de margem o proximo real compra, em faixas de caixa.
+
+    A fronteira e cumulativa: dela sai a inclinacao, que e o numero que
+    interessa a quem decide. Uma faixa que devolve R$ 0,15 por real nao
+    esta perdendo dinheiro - esta rendendo menos que a anterior, e e esse
+    decaimento que diz onde parar.
+    """
+    if fr.empty:
+        return []
+    fim = float(fr.caixa.iloc[-1])
+    if fim <= 0:
+        return []
+    bordas = np.linspace(0.0, fim, faixas + 1)
+    caixa = fr.caixa.to_numpy(float)
+    margem = fr.margem.to_numpy(float)
+    risco = fr.margem_em_risco.to_numpy(float)
+    linhas = []
+    for i in range(faixas):
+        a, b = float(bordas[i]), float(bordas[i + 1])
+        ma, mb = np.interp([a, b], caixa, margem)
+        ra, rb = np.interp([a, b], caixa, risco)
+        gasto = b - a
+        if gasto <= 0:
+            continue
+        linhas.append({
+            "de": a, "ate": b, "meio": (a + b) / 2,
+            "margem_por_real": float((mb - ma) / gasto),
+            "risco_cortado_por_real": float((ra - rb) / gasto),
+            "margem_acumulada": float(mb),
+            "retorno_acumulado": float(mb / b) if b > 0 else 0.0,
+            "dentro_do_teto": bool(b <= teto + 1e-6),
+        })
+    return linhas
+
+
+def retorno_do_capital(wh: Warehouse, p: Parametros) -> dict:
+    """A conta de retorno sobre o capital, do total ao item.
+
+    Tres olhares que precisam fechar entre si:
+
+    1. o estoque que existe hoje - quanto de lucro por ano ele devolve
+       sobre o capital que carrega;
+    2. a compra deste ciclo - quanto de margem volta por real aplicado
+       agora, e onde o proximo real deixa de se pagar;
+    3. o item - quem sustenta o retorno, quem trava capital sem devolver
+       e quem destroi valor.
+    """
+    # o plano ja traz o modelo inteiro mais a decisao de compra do ciclo
+    df = plano_df(wh).copy()
+
+    cap = df.capital_imobilizado.to_numpy(float)
+    bruto = df.lucro_bruto_ano.to_numpy(float)
+    liq = df.lucro_liquido_ano.to_numpy(float)
+    manter = df.custo_manter_ano.to_numpy(float)
+    pedir = df.custo_pedir_ano.to_numpy(float)
+    ruptura = df.custo_ruptura_ano.to_numpy(float)
+
+    seguro = np.where(cap > 0, cap, np.nan)
+    df["retorno_capital"] = np.nan_to_num(liq / seguro)
+    df["gmroi"] = np.nan_to_num(bruto / seguro)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        df["payback_dias"] = np.where(liq > 0, cap / (liq / 365.0), np.inf)
+    df["custo_total_carregar"] = manter + pedir + ruptura
+
+    # hurdle = o piso absoluto (carregar uma peca um ano custa isso);
+    # os cortes do quadrante = as medianas da carteira
+    hurdle = float(p.taxa_manutencao_ano)
+    ret = df.retorno_capital.to_numpy(float)
+    corte_capital = float(np.median(cap[cap > 0])) if (cap > 0).any() else 0.0
+    corte_retorno = float(np.median(ret[ret > 0])) if (ret > 0).any() else 0.0
+    df["quadrante"] = _quadrante(cap, ret, corte_capital, corte_retorno)
+
+    # exposicao de hoje: pecas que devem faltar antes da reposicao chegar,
+    # valorizadas pela margem que cada uma levaria embora
+    df["falta_ciclo"] = falta_esperada_no_ciclo(df)
+    df["margem_em_risco"] = df.falta_ciclo * df.lucro_por_peca
+
+    ciclo = df.valor_da_compra.fillna(0).to_numpy(float)
+    ganho = df.margem_esperada.fillna(0).to_numpy(float)
+    df["retorno_ciclo"] = np.divide(ganho, ciclo, out=np.zeros_like(ganho),
+                                    where=ciclo > 0)
+
+    # ---- a cascata: de onde o lucro vem e por onde escapa
+    cascata = [
+        {"etapa": "Lucro bruto do estoque", "valor": float(bruto.sum()), "tipo": "entra"},
+        {"etapa": "Custo de manter parado", "valor": -float(manter.sum()), "tipo": "sai"},
+        {"etapa": "Custo de pedir", "valor": -float(pedir.sum()), "tipo": "sai"},
+        {"etapa": "Lucro perdido por faltar", "valor": -float(ruptura.sum()), "tipo": "sai"},
+        {"etapa": "Lucro líquido", "valor": float(liq.sum()), "tipo": "fecha"},
+    ]
+
+    # ---- o retorno marginal do proximo real: onde o dinheiro para de pagar
+    fr = wh.query(f"select posicao_fila, caixa, margem, margem_em_risco, pecas, "
+                  f"nota, p_vender from {ref('res_fronteira')} order by caixa")
+    marginal = _retorno_marginal(fr, float(p.teto_compra_ciclo))
+
+    ct = float(cap.sum())
+    total = {
+        "capital": ct,
+        "lucro_bruto": float(bruto.sum()),
+        "custo_manter": float(manter.sum()),
+        "custo_pedir": float(pedir.sum()),
+        "custo_ruptura": float(ruptura.sum()),
+        "lucro_liquido": float(liq.sum()),
+        "retorno_capital": float(liq.sum() / ct) if ct else 0.0,
+        "gmroi": float(bruto.sum() / ct) if ct else 0.0,
+        "payback_dias": (float(ct / (liq.sum() / 365.0)) if liq.sum() > 0 else None),
+        "hurdle": hurdle,
+        "custo_por_pedido": float(p.custo_por_pedido),
+        "pedidos_ano": float(df.pedidos_por_ano.sum()),
+        "teto_ciclo": float(p.teto_compra_ciclo),
+        "corte_capital": corte_capital,
+        "corte_retorno": corte_retorno,
+        "giro_medio": float(np.average(df.giro_ano.to_numpy(float),
+                                       weights=np.where(cap > 0, cap, 1e-9))),
+        "margem_em_risco": float(df.margem_em_risco.sum()),
+        "compra_ciclo": float(ciclo.sum()),
+        "margem_ciclo": float(ganho.sum()),
+        "retorno_ciclo": float(ganho.sum() / ciclo.sum()) if ciclo.sum() else 0.0,
+        "itens_na_compra": int((ciclo > 0).sum()),
+        "skus": int(len(df)),
+        "destroem_valor": int((ret <= 0).sum()),
+        "capital_destruidor": float(cap[ret <= 0].sum()),
+        "custo_destruidor": float(df.custo_total_carregar.to_numpy(float)[ret <= 0].sum()),
+        "abaixo_do_hurdle": int(((ret > 0) & (ret < hurdle)).sum()),
+        "capital_abaixo_hurdle": float(cap[(ret > 0) & (ret < hurdle)].sum()),
+    }
+    # quanto do lucro liquido vem dos 20% de capital mais produtivo
+    ordem = df.sort_values("retorno_capital", ascending=False)
+    corte20 = ordem.capital_imobilizado.cumsum() <= ct * 0.2
+    total["capital_dos_20pct"] = float(ordem.capital_imobilizado[corte20].sum())
+    total["lucro_dos_20pct"] = float(ordem.lucro_liquido_ano[corte20].sum())
+    total["parte_dos_20pct"] = (total["lucro_dos_20pct"] / total["lucro_liquido"]
+                               if total["lucro_liquido"] else 0.0)
+
+    # ---- por quadrante, para a leitura de carteira
+    q = df.groupby("quadrante").agg(
+        skus=("sku", "count"), capital=("capital_imobilizado", "sum"),
+        lucro_liquido=("lucro_liquido_ano", "sum"),
+        lucro_bruto=("lucro_bruto_ano", "sum"),
+        custo=("custo_total_carregar", "sum"),
+        risco=("margem_em_risco", "sum"),
+    ).reset_index()
+    q["retorno"] = np.where(q.capital > 0, q.lucro_liquido / q.capital, 0.0)
+    q["parte_capital"] = q.capital / ct if ct else 0.0
+
+    cols = ["sku", "item", "familia", "classificacao", "curva_abc", "regime",
+            "capital_imobilizado", "estoque_medio", "custo_unitario",
+            "lucro_por_peca", "margem_pct", "pecas_vendidas", "demanda_anual",
+            "lucro_bruto_ano", "custo_manter_ano", "custo_pedir_ano",
+            "custo_ruptura_ano", "custo_total_carregar", "lucro_liquido_ano",
+            "retorno_capital", "gmroi", "payback_dias", "giro_ano",
+            "cobertura_dias", "quadrante", "margem_em_risco", "falta_ciclo",
+            "quantidade_a_comprar", "valor_da_compra", "margem_esperada",
+            "retorno_ciclo", "lucro_perdido_ruptura"]
+    cols = [c for c in cols if c in df.columns]
+    itens = df[cols].replace([np.inf, -np.inf], np.nan)
+
+    return {
+        "total": total,
+        "cascata": cascata,
+        "marginal": marginal,
+        "quadrantes": registros(q.sort_values("capital", ascending=False)),
+        "itens": registros(itens.sort_values("lucro_liquido_ano", ascending=False)),
+    }

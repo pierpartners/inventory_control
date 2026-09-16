@@ -23,3 +23,31 @@ sources:
         description: >
           Posicao de estoque por SKU e por dia. E a tabela que permite separar
           "ninguem quis" de "nao tinha para vender". Sem ela o modelo nao funciona.
+
+      # ---- extrato real do ERP da Elevato (var base=real) ----
+      # Cinco tabelas, tres anos. Nao seguem o contrato da base sintetica: o
+      # catalogo nao tem custo nem prazo, a venda nao tem lucro e o estoque nao
+      # tem saldo de abertura. Os modelos de staging fazem essa traducao.
+      - name: raw_produtos
+        description: Cadastro do ERP - 162 mil itens, hierarquia e fabricante.
+      - name: raw_vendas_todas
+        description: >
+          Linha de venda de TODAS as lojas do grupo, 3 anos. Substitui
+          raw_vendas_ecommerce como fonte de demanda: o estoque diario e do CD
+          (empresa 26, local 124) e o e-commerce consome so 17% da baixa dele.
+      - name: raw_vendas_ecommerce
+        description: >
+          Venda do e-commerce (empresa 33), tres anos. Traz margem de
+          contribuicao com custo alocado, que NAO serve para decidir compra;
+          o lucro incremental e reconstruido em stg_vendas.
+      - name: raw_estoque_diario_erp
+        description: >
+          Retrato diario por empresa, local e subproduto. Fonte do custo medio
+          e da posicao disponivel (fisico menos reserva).
+      - name: raw_compras
+        description: Pedidos de compra - origem do lote minimo praticado.
+      - name: raw_ciclo_pagamento
+        description: >
+          Pedido a pagamento, com prazo de entrega combinado e realizado. E a
+          unica fonte de prazo REAL e da sua variabilidade, que o modelo antes
+          nao tinha como medir.

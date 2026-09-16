@@ -245,7 +245,7 @@
     var pA = (nA / it.length) * 100, pB = ((nA + nB) / it.length) * 100;
 
     N.grafico("g-abc", {
-      grid: N.grade({ top: 24, right: 20, bottom: 4 }),
+      grid: N.grade({ top: 62, right: 20, bottom: 4 }),
       tooltip: N.dica(function (ps) {
         var p = ps[0];
         var i = Math.max(0, Math.round((p.value[0] / 100) * it.length) - 1);
@@ -266,15 +266,13 @@
         type: "line", data: pts, smooth: 0.12, symbol: "none",
         lineStyle: { color: C.ambar, width: 2.2 },
         areaStyle: { color: N.area(C.ambar, 0.3) },
-        markLine: {
-          silent: true, symbol: "none",
-          label: { color: C.tinta3, fontSize: 10, rotate: 0, position: "end",
-            distance: [0, 8], formatter: function (p) { return p.name; } },
-          lineStyle: { color: C.tinta4, type: [3, 4], width: 1 },
-          data: [
-            { xAxis: pA, name: "A · " + nA + " itens" },
-            { xAxis: pB, name: "B · " + nB + " itens" }
-          ]
+        /* os cortes A e B podem cair perto: escalonados na vertical, nunca
+           se sobrepoem (e se colarem no mesmo pixel, viram um rotulo so) */
+        markLine: { silent: true, symbol: "none",
+          data: N.marcasX([
+            { x: pA, cor: C.tinta3, texto: "A · " + nA + " itens" },
+            { x: pB, cor: C.tinta4, texto: "B · " + nB + " itens" }
+          ], { faixa: 100, tolerancia: 0.02, alturas: [8, 30] })
         }
       }]
     });
@@ -381,14 +379,16 @@
       series: [
         { name: "Peças em estoque (escala própria)", type: "line", yAxisIndex: 2,
           data: dias.map(function (r) { return r.pecas_em_estoque; }),
-          smooth: 0.2, symbol: "none", lineStyle: { color: C.ceu, width: 1.5, opacity: .8 },
+          smooth: 0.2, symbol: "none", itemStyle: { color: C.ceu },
+          lineStyle: { color: C.ceu, width: 1.5, opacity: .8 },
           areaStyle: { color: N.area(C.ceu, 0.16) }, z: 1 },
         { name: "Peças vendidas", type: "bar", data: dias.map(function (r) { return r.pecas; }),
           itemStyle: { color: N.sombra(C.ambar, 0.7), borderRadius: [2, 2, 0, 0] },
           barWidth: "62%", z: 2 },
         { name: "% do catálogo sem estoque", type: "line", yAxisIndex: 1,
           data: dias.map(function (r) { return r.pct_skus_sem_estoque * 100; }),
-          smooth: 0.25, symbol: "none", lineStyle: { color: C.coral, width: 2 }, z: 3 }
+          smooth: 0.25, symbol: "none", itemStyle: { color: C.coral },
+          lineStyle: { color: C.coral, width: 2 }, z: 3 }
       ]
     });
   });

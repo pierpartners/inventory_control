@@ -33,7 +33,23 @@ class Parametros:
     limiar_giro_baixo: float = 20.0
     perda_encalhe: float = 0.04
     fator_desvio_horizonte: float = 1.00
+    # Dias de historico DIARIO usados para estimar a taxa de demanda. Nao e o
+    # tamanho do banco: e a memoria do modelo.
+    #
+    # 365 nao e chute. Medido no backtest em tres datas, o erro medio absoluto
+    # da previsao por janela:
+    #     tudo (1.097d)  47%      120d  47%
+    #     365d           33%  <--   90d  50%
+    #     180d           49%       30d  64%
+    # Janela curta parece melhor numa data e pessima em outra: em 07/01/2026 a
+    # de 90 dias SUPERESTIMA 112%, porque os 90 dias anteriores pegaram o pico
+    # de dezembro. O que a inversao mostra e que falta sazonalidade ao modelo,
+    # nao janela mais curta - e um ciclo anual e a escolha honesta enquanto
+    # sazonalidade nao for modelada.
+    janela_estimacao_dias: int = 365
     # --- critério de parada da compra (ver CRITERIOS abaixo) ---
+    # lista separada por virgula: varios criterios valem ao mesmo tempo e
+    # a compra e cortada pelo primeiro que chegar
     criterio_parada: str = "caixa"
     retorno_minimo_dia: float = 0.0      # 0 = desligado
     chance_minima_peca: float = 0.0      # 0 = desligado
@@ -90,6 +106,13 @@ CAMPOS = [
     ("nivel_servico_max", "Nível de serviço máximo", "%", "pct", 0.9, 0.9999,
      "Teto do nível de serviço. Acima disso o estoque de segurança dispara sem ganho "
      "real de atendimento.", "Limites"),
+    ("janela_estimacao_dias", "Janela de estimação da demanda", "dias", "int", 14, 1095,
+     "Quantos dias de histórico diário o modelo usa para estimar quanto cada item "
+     "vende por dia. É a memória do modelo, e não o tamanho do banco: janela longa "
+     "dilui crescimento recente, janela curta vira ruído. A economia da peça (custo "
+     "e margem) continua vindo do histórico inteiro, porque não é taxa.",
+     "Demanda"),
+
     ("fator_desvio_horizonte", "Ajuste do desvio no horizonte", "×", "float", 0.4, 1.5,
      "O modelo calcula o desvio da demanda no horizonte como desvio diário × raiz(H), "
      "o que supõe que um dia não influencia o outro. Se a demanda tem reversão à média, "
@@ -136,7 +159,8 @@ CHAVES = [
      "arredondar, mostrando a alocação teoricamente ideal."),
 ]
 
-GRUPOS = ["Operação", "Economia", "Limites", "Restrições", "Classificação"]
+GRUPOS = ["Operação", "Demanda", "Economia", "Limites", "Restrições",
+          "Classificação"]
 
 
 # ----------------------------------------------------------------------
@@ -150,26 +174,30 @@ GRUPOS = ["Operação", "Economia", "Limites", "Restrições", "Classificação"
 # (chave, rotulo, campo do parametro, unidade, tipo, o que responde)
 # ----------------------------------------------------------------------
 CRITERIOS = [
+    # chave, rotulo, campo, unidade, tipo, descricao, pergunta, acao
+    # `acao` e a frase que fica colada no campo de digitar: tem de ser lida
+    # como uma ordem de compra, nao como um conceito.
     ("caixa", "Pelo caixa do ciclo", "teto_compra_ciclo", "R$", "float",
-     "Compra descendo a fila até o dinheiro acabar. O risco com que você "
-     "termina é consequência — não é escolhido.",
-     "Tenho este dinheiro. Onde ele rende mais?"),
+     "Desce a fila comprando até o dinheiro acabar. O risco com que você "
+     "termina é consequência, não escolha.",
+     "Tenho este dinheiro — onde ele rende mais?",
+     "Comprar até gastar, no máximo:"),
 
     ("retorno", "Por retorno mínimo", "retorno_minimo_dia", "por R$/dia", "float",
-     "Compra enquanto a peça render mais que este piso por real por dia. O piso "
-     "natural é o custo de capital da empresa: abaixo dele, a peça destrói valor. "
-     "O caixa do ciclo continua valendo como limite físico.",
-     "Quero só o que rende acima do meu custo de capital."),
+     "Corta a fila onde a peça deixa de render este piso por real por dia. "
+     "Abaixo do custo de capital da empresa, a peça destrói valor.",
+     "Quanto cada real tem de render por dia para valer a compra?",
+     "Comprar apenas peças que rendam acima de:"),
 
     ("chance", "Por chance mínima da peça", "chance_minima_peca", "%", "pct",
-     "Não compra peça com menos que esta chance de vender dentro do horizonte. "
-     "É o freio de encalhe: controla quanta prateleira parada você aceita, "
-     "independente de quanto a peça renda.",
-     "Não quero comprar peça que provavelmente vai encalhar."),
+     "Freio de encalhe: peça com chance de venda abaixo do piso não entra, "
+     "por mais que ela renda.",
+     "Qual a chance mínima de venda que eu aceito?",
+     "Comprar apenas peças com chance de venda acima de:"),
 
     ("risco", "Por risco assumido", "teto_margem_em_risco", "R$", "float",
-     "Você declara quanta margem aceita deixar em risco no ciclo, e a plataforma "
-     "devolve o caixa necessário para chegar lá. Inverte entrada e saída: o risco "
-     "passa a ser a decisão, e o dinheiro, a consequência.",
-     "Aceito perder no máximo isto. Quanto preciso comprar?"),
+     "Você declara o risco e a plataforma devolve o caixa necessário. "
+     "Inverte entrada e saída: o dinheiro passa a ser a resposta.",
+     "Quanta margem aceito deixar em risco neste ciclo?",
+     "Comprar até a margem em risco cair abaixo de:"),
 ]
