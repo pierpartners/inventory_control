@@ -517,7 +517,7 @@ def entradas_na_compra(wh: Warehouse) -> list[dict]:
 def diario_sku(wh: Warehouse, sku: str) -> pd.DataFrame:
     seguro = sku.replace("'", "''")
     return wh.query(
-        f"select data, saldo_inicial, saldo_final, pecas_vendidas, estado_estoque "
+        f"select data, saldo_inicial, saldo_final, disponivel_final, pecas_vendidas, estado_estoque "
         f"from {ref('mart_estoque_diario')} where sku = '{seguro}' order by data")
 
 
@@ -896,6 +896,7 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
             "data": str(r.data)[:10],
             "saldo_inicial": limpo(r.saldo_inicial),
             "saldo_final": limpo(r.saldo_final),
+            "disponivel_final": limpo(r.disponivel_final),
             "vendido": limpo(r.pecas_vendidas),
             "estado": r.estado_estoque,
             "imputado": float(imput[i]) if censurado[i] else None,
@@ -1041,11 +1042,10 @@ def projecao_item(wh: Warehouse, m: pd.Series, pl, p: Parametros, dia: pd.DataFr
     a recompra (proxima revisao, `periodo_revisao_dias`), o recebimento de
     uma compra feita hoje (lead time) e o fim do periodo de protecao.
 
-    A projecao parte da posicao DISPONIVEL (sem a reserva), que e a que o
-    modelo usa - por isso pode comecar abaixo do saldo fisico do historico.
-    Atencao: o modelo decide a compra com em_transito = 0, ou seja, sem
-    contar os pedidos em aberto; aqui eles entram para mostrar o estoque que
-    de fato vai existir, e a diferenca e informacao, nao contradicao.
+    A projecao parte do estoque FISICO do ultimo dia (`estoque_fisico` do
+    plano), a mesma posicao que o modelo usa, e por isso emenda na linha do
+    historico sem salto. O em transito que a posicao inclui entra aqui como
+    chegada na data prevista, nao no ponto de partida.
     """
     if dia.empty:
         return {}

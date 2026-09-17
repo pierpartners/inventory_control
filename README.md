@@ -66,11 +66,15 @@ Toda madrugada o ERP fecha o estoque do dia anterior e grava, por SKU: `saldo_in
 - **Disponível** — saldo positivo o dia inteiro. Dado limpo.
 
 Essa distinção é a base da correção de censura feita em Python. A posição de estoque usada no
-plano de compra é o **disponível** do último dia carregado (`disponivel_final`, físico menos
-reserva) **mais o em trânsito**: pedidos ao fornecedor ainda sem entrada no CD, com no máximo
+plano de compra é o **estoque físico** do último dia carregado (`saldo_final`) **mais o em
+trânsito**: pedidos ao fornecedor ainda sem entrada no CD, com no máximo
 180 dias e previsão de chegada dentro do período de proteção do item (previsão vencida conta
 como chegando agora). O que chega depois do horizonte fica fora, porque não serve a demanda
-que a compra de hoje precisa cobrir. Não há um "estoque atual" separado.
+que a compra de hoje precisa cobrir. Não há um "estoque atual" separado. A reserva do ERP
+(`disponivel_final` = físico menos reserva) **não** é descontada da posição: ela é a fila de
+pedidos que vai faturar pela mesma venda que alimenta a demanda, e descontá-la contaria o
+mesmo pedido duas vezes (no último ano houve venda em 2,0% dos dias com disponível zero e
+físico positivo, contra 0,1% dos dias com físico zero).
 
 > Para funcionar com dados reais, o ponto crítico é o ERP manter o **histórico diário** de
 > estoque (não só o saldo de hoje). É dele que vem a correção.

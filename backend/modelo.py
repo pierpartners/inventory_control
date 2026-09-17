@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from . import ajustes
 from .config import Parametros
 from .warehouse import Warehouse, ref
 
@@ -1065,7 +1066,7 @@ def em_transito_por_sku(wh: Warehouse, hoje, protecao: pd.Series,
     """Pecas pedidas ao fornecedor que ainda nao entraram no CD e que chegam
     dentro do periodo de protecao de cada item.
 
-    Entram na posicao de estoque (posicao = disponivel + em transito) porque
+    Entram na posicao de estoque (posicao = fisico + em transito) porque
     uma peca que chega antes do fim do horizonte protege a demanda do
     horizonte tanto quanto uma na prateleira - e sem ela o modelo mandaria
     comprar de novo o que ja esta comprado. O que chega DEPOIS do horizonte
@@ -1195,8 +1196,9 @@ def ler_base(wh: Warehouse, ate: str | None = None,
     peca e economia unitaria, nao taxa, e com 90 dias a margem da maioria do
     catalogo sairia zero.
 
-    `disponivel_final` e a posicao que decide a compra (liquida de reserva);
-    `saldo_final` e o estoque fisico, que diz se o dia tem sinal de demanda.
+    `saldo_final` (estoque fisico) e ao mesmo tempo o sinal de demanda do dia
+    e a posicao que decide a compra; `disponivel_final` (liquido de reserva)
+    segue na leitura so para diagnostico - ver `executar()` para o porque.
     """
     colunas = ("sku, data, pecas_vendidas, pecas_ecommerce, pecas_lojas, estado_estoque, "
                "saldo_final, disponivel_final")
@@ -1324,6 +1326,10 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
 
     est = estatistica_demanda(diario, p)
     b = fin.merge(est, on="sku", how="left").fillna({"demanda_media_dia": 0.0})
+    # correcoes manuais por item (tela de outliers): prazo, custo, demanda.
+    # Entram AQUI, antes de qualquer derivacao, para que periodo de protecao,
+    # variancia, margem, nota e politica saiam todos do valor corrigido.
+    b = ajustes.aplicar(b)
 
     b["periodo_protecao_dias"] = b.lead_time_dias + p.periodo_revisao_dias
     b["mu_periodo"] = b.demanda_media_dia * b.periodo_protecao_dias
@@ -1373,10 +1379,16 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
     irrestrito = modelar(b, p, 0.0)
 
     ultimo = diario.data.max()
-    # a posicao que entra na decisao e a DISPONIVEL, nao o estoque fisico: a
-    # peca reservada ja tem dono e nao protege a proxima venda
-    posicoes = (diario[diario.data == ultimo][["sku", "disponivel_final"]]
-                .rename(columns={"disponivel_final": "estoque_fisico"}))
+    # A posicao que entra na decisao e o estoque FISICO, nao o disponivel.
+    # A reserva do ERP e a fila de pedidos que vai faturar: no ultimo ano,
+    # em 499 mil dias-item o disponivel era zero com fisico positivo e houve
+    # venda em 2,0% deles (contra 0,1% com fisico zero) - a mercadoria
+    # reservada sai pela mesma venda que o modelo mede em `saldo_final`.
+    # Descontar a reserva da posicao E consumir a demanda cheia contaria o
+    # mesmo pedido duas vezes: a argamassa 1034796 tinha 2.548 pecas no CD,
+    # 69 disponiveis, vendia 72/dia e o motor mandava comprar 1.177.
+    posicoes = (diario[diario.data == ultimo][["sku", "saldo_final"]]
+                .rename(columns={"saldo_final": "estoque_fisico"}))
     # ... mais o que ja foi pedido e chega dentro do periodo de protecao do
     # item: a peca a caminho protege o horizonte tanto quanto a da prateleira
     transito = em_transito_por_sku(

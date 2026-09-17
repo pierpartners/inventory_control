@@ -8,6 +8,7 @@ Telas:
   /itens        catalogo com o resultado do modelo item a item
   /metodologia  o caminho de um item pelo modelo, com os numeros dele
   /parametros   as premissas economicas e os interruptores metodologicos
+  /outliers     itens com entrada suspeita (venda, prazo, custo) e o ajuste manual por SKU
   /dados        navegacao pelas tabelas do warehouse
 
 Rodar:
@@ -23,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,7 +33,7 @@ from fastapi.templating import Jinja2Templates
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from backend import acompanhamento, analitico, qualidade  # noqa: E402
+from backend import acompanhamento, ajustes, analitico, outliers, qualidade  # noqa: E402
 from backend import modelo as motor  # noqa: E402
 from backend import validacao  # noqa: E402
 from backend.config import (Parametros, CAMPOS, CHAVES,  # noqa: E402
@@ -342,6 +343,12 @@ def plano(request: Request):
 
     comprados = df[df.quantidade_a_comprar > 0].sort_values(
         "margem_esperada", ascending=False)
+    # em que peca do ciclo cada produto entra na compra (ordem da fila
+    # marginal) - antes era uma tabela a parte, agora e uma coluna da fila
+    entradas = pd.DataFrame(analitico.entradas_na_compra(w))
+    if not entradas.empty:
+        comprados = comprados.merge(
+            entradas[["sku", "entra_na_peca", "chance_primeira"]], on="sku", how="left")
     fora = df[(df.quantidade_a_comprar == 0) & (df.unidades_com_retorno > 0)].sort_values(
         "melhor_nota", ascending=False)
     sem_retorno = df[df.unidades_com_retorno == 0]
@@ -378,13 +385,14 @@ def plano(request: Request):
     cols = ["dias_utilizaveis", "historico_insuficiente",
             "sku", "item", "familia", "origem", "classificacao", "curva_abc",
             "posicao_estoque", "quantidade_a_comprar", "ultima_unidade",
+            "demanda_media_dia", "entra_na_peca", "chance_primeira",
             "p_vender_ultima", "custo_unitario", "valor_da_compra",
             "valor_da_compra_ecommerce", "valor_da_compra_lojas",
             "margem_esperada", "retorno_por_real", "melhor_nota",
             "unidades_com_retorno", "periodo_protecao_dias", "mu_periodo",
             "cobertura_dias", "cobertura_apos_dias", "risco_de_faltar",
             "risco_apos_compra", "ponto_de_pedido", "lote_minimo_compra"]
-    cols = [c for c in cols if c in df.columns]
+    cols = [c for c in cols if c in comprados.columns]
     fora_cols = [c for c in ["sku", "item", "familia", "origem", "classificacao", "curva_abc",
                              "posicao_estoque", "unidades_com_retorno", "melhor_nota",
                              "custo_total_disponivel", "valor_total_disponivel",
@@ -995,6 +1003,43 @@ def recalcular():
                              "capital": float(e.capital_total)})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": str(exc)[:300]}, status_code=500)
+
+
+# ======================================================================
+# OUTLIERS - itens cuja entrada merece correcao manual
+# ======================================================================
+@app.get("/outliers")
+def outliers_pagina(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    return tpl.TemplateResponse(request, "outliers.html", contexto(
+        request, "outliers", regras=outliers.REGRAS, campos=ajustes.CAMPOS))
+
+
+@app.get("/api/outliers")
+def api_outliers():
+    return JSONResponse(outliers.painel(wh()))
+
+
+@app.post("/api/outliers/ajuste")
+def api_outliers_ajuste(corpo: dict = Body(...)):
+    """Grava a correcao de UM item. Nao recalcula: o botao de recalcular da
+    tela chama /recalcular depois, para varios ajustes entrarem numa rodada."""
+    sku = str(corpo.get("sku", "")).strip()
+    if not sku:
+        return JSONResponse({"ok": False, "erro": "sku vazio"}, status_code=400)
+    reg = ajustes.salvar(sku, corpo.get("valores") or {}, corpo.get("nota", ""))
+    invalidar_caches()
+    return JSONResponse({"ok": True, "sku": sku, "ajuste": reg,
+                         "pendente": True})
+
+
+@app.delete("/api/outliers/ajuste/{sku}")
+def api_outliers_remover(sku: str):
+    ok = ajustes.remover(sku)
+    invalidar_caches()
+    return JSONResponse({"ok": ok, "sku": sku})
 
 
 # ======================================================================

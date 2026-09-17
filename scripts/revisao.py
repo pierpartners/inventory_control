@@ -150,13 +150,13 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
              f"estoque de um local contra venda de outro canal",
              alerta_em_vez=True)
 
-    # A posicao que decide a compra e o DISPONIVEL do ultimo dia, nao o estoque
-    # fisico: a peca reservada ja tem dono e nao protege a proxima venda. As
-    # duas colunas existem justamente porque confundi-las foi um erro real
-    # desta migracao - `saldo_final` responde "havia mercadoria?" (sinal de
-    # demanda) e `disponivel_final` responde "posso contar com ela?" (compra).
+    # A posicao que decide a compra e o estoque FISICO do ultimo dia, o mesmo
+    # `saldo_final` que da o sinal de demanda. A reserva do ERP e fila de
+    # pedidos que fatura pela venda que o modelo ja mede; descontar a reserva
+    # da posicao e consumir a demanda cheia contaria o mesmo pedido duas vezes
+    # (ver executar() em backend/modelo.py).
     ultimo = dia.data.max()
-    col_pos = "disponivel_final" if "disponivel_final" in dia.columns else "saldo_final"
+    col_pos = "saldo_final"
     pos_real = (dia[dia.data == ultimo][["sku", col_pos]]
                 .set_index("sku")[col_pos])
     pl_i = plano.set_index("sku")
@@ -171,16 +171,24 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
         r.afirma(B, "em transito nao e negativo", bool((transito >= 0).all()),
                  f"{float(transito.sum()):,.0f} pecas a caminho em "
                  f"{int((transito > 0).sum())} itens entram na posicao")
-        r.compara(B, "posicao = disponivel + em transito",
+        r.compara(B, "posicao = fisico + em transito",
                   (pl_i.estoque_fisico.fillna(0) + transito).to_numpy(),
                   pl_i.posicao_estoque.to_numpy(), contexto="soma das duas colunas")
-    if col_pos == "disponivel_final":
-        reservado = float((dia[dia.data == ultimo].saldo_final
-                           - dia[dia.data == ultimo].disponivel_final).sum())
-        r.afirma(B, "a reserva reduz a posicao de compra, e nao o sinal de demanda",
-                 reservado >= 0,
-                 f"{reservado:,.0f} pecas reservadas no ultimo dia ficam fora da "
-                 f"posicao de compra mas continuam contando como prateleira cheia")
+    if "disponivel_final" in dia.columns:
+        u = dia[dia.data == ultimo]
+        reservado = float((u.saldo_final - u.disponivel_final).clip(lower=0).sum())
+        # a reserva fatura: venda em dia de disponivel zero com fisico positivo
+        # tem de ser muito mais frequente do que em dia de fisico zero, senao
+        # a hipotese de contar a reserva na posicao cai
+        dz = dia[(dia.disponivel_final <= 0) & (dia.saldo_final > 0)]
+        fz = dia[dia.saldo_final <= 0]
+        f_dz = float((dz.pecas_vendidas > 0).mean()) if len(dz) else 0.0
+        f_fz = float((fz.pecas_vendidas > 0).mean()) if len(fz) else 0.0
+        r.afirma(B, "a reserva conta na posicao porque ela fatura (venda com disponivel zero)",
+                 len(dz) == 0 or f_dz > 3 * f_fz,
+                 f"{reservado:,.0f} pecas reservadas no ultimo dia; venda em "
+                 f"{f_dz:.1%} dos {len(dz):,} dias com disponivel zero e fisico positivo, "
+                 f"contra {f_fz:.1%} dos dias com fisico zero")
 
     # NaN / infinito: duas colunas tem NaN por definicao (nao se aplicam), e o
     # teste tem de saber disso - senao ou ele grita a cada execucao ou, pior,

@@ -108,6 +108,17 @@ A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
 - `backend/qualidade.py` — data-quality checks (`verificar()`), grouped by `GRUPOS`, each check a
   `_v(...)` dict with grupo/título/nível/valor/achado/ação; feeds the `/qualidade` page and the
   qualidade-alert badge in the nav.
+- `backend/outliers.py` — rule-based outlier detection over `res_sku_modelo`/`res_plano_compra`
+  (erratic sales, single-day spikes, extreme censoring correction, long/uncertain lead time,
+  cost drift, negative margin, disproportionate purchase, short history). Thresholds are
+  catalog-relative percentiles with absolute floors, and only items where the model acts (in
+  the purchase, ROP > 0, or curva A/B) are flagged. Feeds the `/outliers` page.
+- `backend/ajustes.py` — per-SKU manual overrides (`data/ajustes_sku.json`: lead time, its
+  deviation, unit cost, daily demand and its deviation). Applied at a single hook in
+  `modelo.executar()`, right after the financial/demand merge and before any derivation, so
+  every downstream number (including backtests) sees the corrected value; the `ajustes`
+  column in `res_sku_modelo` records which fields were overridden. Saving an adjustment does
+  not recalculate — the page calls `POST /recalcular` afterwards.
 - `backend/acompanhamento.py` — day-by-day per-SKU reconciliation (stock vs. sales vs. reserva)
   for manual conference, independent of the optimization model.
 - `backend/main.py` — FastAPI app; one route pair per page (`GET /pagina` renders the template,

@@ -617,6 +617,18 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
         usadas = float(np.clip(corr - pos0, 0.0, Q))
         sobra_compra = max(Q - usadas, 0.0)
 
+        # O retorno PROJETADO e o numero que ordenou a fila e parou a compra:
+        # soma, peca a peca, de P(vender) x Cu - (1 - P) x perda. O REALIZADO
+        # refaz a mesma conta trocando a probabilidade pelo que aconteceu: as
+        # pecas da compra que a demanda pediu rendem Cu, as que ficaram paradas
+        # custam a perda. Mesma regua nos dois lados - a diferenca entre eles e
+        # so o que a demanda fez de diferente do previsto, nunca definicao.
+        Cu = float(r.custo_falta_unit)
+        perda_un = float(r.custo_manter_no_periodo) + float(r.custo_unitario) * pb.perda_encalhe
+        vendidas_da_compra = float(com["vendeu"] - sem["vendeu"])
+        ret_proj = float(getattr(r, "margem_esperada", 0.0) or 0.0)
+        ret_real = vendidas_da_compra * Cu - sobra_compra * perda_un
+
         linhas.append(dict(
             sku=r.sku, item=r.item, familia=r.familia,
             classificacao=r.classificacao, curva_abc=r.curva_abc,
@@ -682,6 +694,13 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
             falta_evitada=real["faltou"] - com["faltou"],
             # --- o ganho da compra
             margem_do_plano=(com["vendeu"] - sem["vendeu"]) * float(r.lucro_por_peca),
+            # --- projetado x realizado, na regua do proprio modelo
+            margem_unit=Cu,
+            perda_unit=perda_un,
+            vendidas_da_compra=vendidas_da_compra,
+            retorno_projetado=ret_proj,
+            retorno_realizado=ret_real,
+            desvio_retorno=ret_real - ret_proj,
             erro_previsao=float(r.mu_periodo) - corr,
             # a contraprova: o que os ultimos 90 dias diziam, contra a media
             # longa que o modelo usou
@@ -777,6 +796,19 @@ def _resumo(rel: pd.DataFrame, c: pd.DataFrame) -> dict:
         "margem_do_plano": float(c.margem_do_plano.sum()),
         "retorno_por_real": (float(c.margem_do_plano.sum() / c.investimento.sum())
                              if c.investimento.sum() else 0.0),
+        # 6. o modelo entregou o que prometeu? projetado x realizado na mesma
+        # regua (Cu por peca vendida, perda por peca parada)
+        "retorno_projetado": float(c.retorno_projetado.sum()),
+        "retorno_realizado": float(c.retorno_realizado.sum()),
+        "desvio_retorno": float(c.retorno_realizado.sum() - c.retorno_projetado.sum()),
+        "efetividade": (float(c.retorno_realizado.sum() / c.retorno_projetado.sum())
+                        if c.retorno_projetado.sum() > 0 else float("nan")),
+        "retorno_projetado_por_real": (float(c.retorno_projetado.sum() / c.investimento.sum())
+                                       if c.investimento.sum() else 0.0),
+        "retorno_realizado_por_real": (float(c.retorno_realizado.sum() / c.investimento.sum())
+                                       if c.investimento.sum() else 0.0),
+        "itens_acima_do_projetado": int((c.desvio_retorno > 0).sum()),
+        "itens_abaixo_do_projetado": int((c.desvio_retorno < 0).sum()),
         # o erro de previsao, no agregado e ponderado
         "erro_pecas": float(c.erro_previsao.sum()),
         "erro_wape": (float(c.erro_previsao.abs().sum() / c.demanda_real.sum())
@@ -953,6 +985,11 @@ def rodar_intervalo(wh: Warehouse, de: str, ate: str, ajustes: dict | None = Non
             "itens_com_ruptura": int(t.itens_com_ruptura.sum()),
             "pecas_faltando": float(t.pecas_faltando_com_plano.sum()),
             "margem_do_plano": float(t.margem_do_plano.sum()),
+            "retorno_projetado": float(t.retorno_projetado.sum()),
+            "retorno_realizado": float(t.retorno_realizado.sum()),
+            "desvio_retorno": float(t.retorno_realizado.sum() - t.retorno_projetado.sum()),
+            "efetividade": (float(t.retorno_realizado.sum() / t.retorno_projetado.sum())
+                            if t.retorno_projetado.sum() > 0 else None),
             "pct_do_investimento_parado": (
                 float(t.dinheiro_parado.sum() / t.investimento.sum())
                 if t.investimento.sum() else 0.0),

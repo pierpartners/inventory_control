@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+{% block titulo %}Outliers{% endblock %}
+{% block cabecalho %}Outliers{% endblock %}
+{% block subcabecalho %}itens cuja entrada — venda, prazo, custo — foge do padrão do catálogo e merece correção manual antes de o modelo gastar dinheiro com ela{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+
+{% block cabeca %}
+<style>
+  .regras { display: flex; flex-wrap: wrap; gap: 8px; }
+  .regra { display: flex; align-items: center; gap: 9px; padding: 8px 12px 8px 10px;
+    border: 1px solid var(--linha); border-radius: 9px; background: var(--painel-2);
+    cursor: pointer; user-select: none; font-size: 12px; color: var(--tinta-2);
+    transition: border-color .15s, background .15s; }
+  .regra:hover { background: var(--painel-3); }
+  .regra.on { border-color: var(--tinta-3); background: var(--painel-3); color: var(--tinta); }
+  .regra .pt { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+  .regra.cr .pt { background: var(--coral); }
+  .regra.am .pt { background: var(--ambar); }
+  .regra .n { font-family: var(--mono); font-size: 12px; color: var(--tinta); font-weight: 500; }
+  .regra .r { white-space: nowrap; }
+
+  .motivos { display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; }
+  .selo.mini { padding: 1.5px 6px; font-size: 9.5px; }
+
+  .par { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .par .de { color: var(--tinta-4); font-size: 10px; }
+  .par .aj { color: var(--ceu); }
+
+  .ajuste-cab { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px;
+    align-items: start; margin-bottom: 14px; }
+  .ajuste-motivos { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 20px; }
+  .ajuste-motivo { display: grid; grid-template-columns: 10px minmax(0,1fr); gap: 10px;
+    padding: 10px 12px; border: 1px solid var(--linha); border-radius: 8px;
+    background: var(--painel-2); font-size: 12px; line-height: 1.55; color: var(--tinta-2); }
+  .ajuste-motivo .pt { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+  .ajuste-motivo.cr .pt { background: var(--coral); }
+  .ajuste-motivo.am .pt { background: var(--ambar); }
+  .ajuste-motivo b { color: var(--tinta); }
+  .ajuste-motivo .evid { font-family: var(--mono); font-size: 11px; color: var(--tinta-3);
+    margin-top: 3px; }
+  .campo.alvo { background: var(--ambar-lav); margin: 0 -12px; padding-left: 12px;
+    padding-right: 12px; border-radius: 8px; }
+  .campo .atual { font-family: var(--mono); font-size: 11px; color: var(--tinta-3);
+    margin-top: 6px; }
+  .campo .atual b { color: var(--tinta); font-weight: 500; }
+  .campo .ent { flex-direction: column; align-items: stretch; }
+  .campo .ent input { width: 100%; }
+  .campo .ent .un { text-align: right; }
+  .acoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+  .acoes .dir { margin-left: auto; }
+  textarea.nota { width: 100%; min-height: 58px; resize: vertical; font-family: var(--sans);
+    font-size: 12.5px; }
+
+  .pendente { display: none; align-items: center; gap: 14px; }
+  .pendente.on { display: flex; }
+  .pendente .txt { flex: 1; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<!-- ============================================ recalcular pendente -->
+<div class="msg msg-am pendente" id="pendente">
+  <div class="txt"><b id="pend-n">0</b> ajuste(s) gravado(s) e ainda não aplicado(s). O plano na tela
+    é o de antes da correção — recalcule para o modelo reler os itens com os valores corrigidos.</div>
+  <button class="btn btn-am" id="bt-recalcular">Recalcular o modelo</button>
+</div>
+
+<!-- ============================================ placar -->
+<div class="gr gr-5 mb14">
+  <div class="painel metrica">
+    <div class="rotulo">Itens em que o modelo age</div>
+    <div class="valor md" id="m-relevantes">–</div>
+    <div class="nota">na compra, com ponto de pedido ou curva A/B, de <b id="m-total">–</b> no catálogo</div>
+  </div>
+  <div class="painel metrica cr">
+    <div class="rotulo">Sinalizados</div>
+    <div class="valor md" id="m-sinalizados">–</div>
+    <div class="nota">ao menos um motivo — <b id="m-graves">–</b> em vermelho</div>
+  </div>
+  <div class="painel metrica am">
+    <div class="rotulo">Capital em itens sinalizados</div>
+    <div class="valor md"><span class="pre">R$</span><span id="m-capital">–</span></div>
+    <div class="nota">estoque + compra do ciclo apoiados num número suspeito</div>
+  </div>
+  <div class="painel metrica ce">
+    <div class="rotulo">Com ajuste manual</div>
+    <div class="valor md" id="m-ajustados">–</div>
+    <div class="nota">valores corrigidos que o motor já usa</div>
+  </div>
+  <div class="painel metrica">
+    <div class="rotulo">Na seleção</div>
+    <div class="valor md" id="m-selecao">–</div>
+    <div class="nota">linhas visíveis na tabela abaixo</div>
+  </div>
+</div>
+
+<!-- ============================================ regras -->
+<div class="painel mb14">
+  <div class="painel-cab"><h2>Motivos</h2>
+    <span class="dica">clique num motivo para filtrar; os cortes são relativos a este catálogo e aparecem na dica de cada um</span>
+    <div class="dir"><button class="btn btn-p" id="bt-limpar">Limpar filtro</button></div>
+  </div>
+  <div class="painel-int aperto"><div class="regras" id="regras"></div></div>
+</div>
+
+<!-- ============================================ dispersão -->
+<div class="painel mb14">
+  <div class="painel-cab"><h2>Demanda por dia × variabilidade</h2>
+    <span class="dica">cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar</span>
+  </div>
+  <div class="painel-int"><div id="g-nuvem" class="gfx" style="height:340px"></div></div>
+</div>
+
+<!-- ============================================ filtros + tabela -->
+<div class="painel mb14">
+  <div class="painel-int aperto">
+    <div class="filtros">
+      <div class="busca cresce">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" id="q" placeholder="Buscar por nome, SKU ou família…">
+      </div>
+      <select id="f-familia"><option value="">Todas as famílias</option></select>
+      <div class="seg" id="f-grav">
+        <button class="on" data-v="">Todos</button>
+        <button data-v="cr">Só vermelhos</button>
+        <button data-v="aj">Só ajustados</button>
+        <button data-v="compra">Só na compra</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="painel">
+  <div class="painel-int rente">
+    <div class="rolo">
+      <table class="tb" id="tb-out">
+        <thead><tr>
+          <th>Item</th>
+          <th>Classe</th>
+          <th class="nao-ord">Motivos</th>
+          <th class="n">Demanda/dia</th>
+          <th class="n">Sem correção</th>
+          <th class="n">CV</th>
+          <th class="n">Maior dia</th>
+          <th class="n">Prazo</th>
+          <th class="n">Desvio prazo</th>
+          <th class="n">Custo/peça</th>
+          <th class="n">Custo mediano</th>
+          <th class="n">Lucro/peça</th>
+          <th class="n">Comprar</th>
+          <th class="n">Valor compra</th>
+          <th class="n">Capital</th>
+          <th class="nao-ord"></th>
+        </tr></thead>
+        <tbody id="corpo"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script>
+(function () {
+  var C = N.COR;
+  var id = function (x) { return document.getElementById(x); };
+  var D = null, REGRA = {}, CAMPOS = {}, POR_SKU = {};
+  var f = { regra: "", familia: "", grav: "" };
+  var motor = null;
+  var pendentes = 0;
+
+  function carregar() {
+    return N.buscar("/api/outliers", true).then(function (d) {
+      D = d;
+      REGRA = {}; d.regras.forEach(function (r) { REGRA[r.chave] = r; });
+      CAMPOS = d.campos;
+      POR_SKU = {}; d.itens.forEach(function (r) { POR_SKU[r.sku] = r; });
+      placar(); regras(); nuvem(); tabela();
+    });
+  }
+
+  /* ------------------------------------------------------------ placar */
+  function placar() {
+    var graves = 0, cap = 0;
+    D.itens.forEach(function (r) {
+      if (r.gravidade === "cr") graves++;
+      if (r.n_motivos > 0) cap += (r.capital_imobilizado || 0) + (r.valor_da_compra || 0);
+    });
+    id("m-relevantes").textContent = N.num(D.relevantes);
+    id("m-total").textContent = N.num(D.total);
+    id("m-sinalizados").textContent = N.num(D.sinalizados);
+    id("m-graves").textContent = N.num(graves);
+    id("m-capital").textContent = N.curto(cap);
+    id("m-ajustados").textContent = N.num(D.ajustados);
+  }
+
+  /* ------------------------------------------------------------ regras */
+  function limiarTexto(r) {
+    var L = D.limiares;
+    switch (r.chave) {
+      case "cv_alto": return "CV ≥ " + N.num(L.cv_alto, 1) + " com demanda ≥ " + N.num(L.demanda_relevante, 2) + " un/dia";
+      case "pico_unico": return "maior dia ≥ " + Math.round(L.pico_unico * 100) + "% do total vendido na janela, com 3+ dias de venda";
+      case "censura_extrema": return "demanda corrigida ≥ " + Math.round((1 + L.censura_extrema) * 100) + "% da observada";
+      case "prazo_longo": return "prazo ≥ " + N.num(L.prazo_longo, 0) + " dias";
+      case "prazo_incerto": return "menos de " + L.prazo_pedidos_min + " pedidos com prazo longo, ou desvio > média";
+      case "custo_movimento": return "custo de hoje ±" + Math.round(L.custo_movimento * 100) + "% do mediano";
+      case "compra_desproporcional": return "compra > " + L.compra_dias + " dias de demanda, ou ≥ R$ " + N.curto(L.compra_valor);
+      default: return "";
+    }
+  }
+  function regras() {
+    id("regras").innerHTML = D.regras.map(function (r) {
+      return '<div class="regra ' + r.gravidade + (f.regra === r.chave ? " on" : "") +
+        '" data-k="' + r.chave + '" title="' + N.esc(r.explicacao) +
+        (limiarTexto(r) ? "\n\nCorte: " + N.esc(limiarTexto(r)) : "") + '">' +
+        '<span class="pt"></span><span class="r">' + N.esc(r.rotulo) + "</span>" +
+        '<span class="n">' + N.num(r.n) + "</span></div>";
+    }).join("");
+  }
+  id("regras").addEventListener("click", function (e) {
+    var el = e.target.closest(".regra"); if (!el) return;
+    f.regra = f.regra === el.dataset.k ? "" : el.dataset.k;
+    regras(); motor.aplicar();
+  });
+  id("bt-limpar").addEventListener("click", function () {
+    f = { regra: "", familia: "", grav: "" };
+    id("f-familia").value = ""; id("q").value = "";
+    id("f-grav").querySelectorAll("button").forEach(function (b, i) { b.classList.toggle("on", i === 0); });
+    regras(); motor.estado.txt = ""; motor.aplicar();
+  });
+
+  /* ------------------------------------------------------------- nuvem */
+  function nuvem() {
+    var fundo = [], am = [], cr = [];
+    D.nuvem.forEach(function (r) {
+      if (!(r.demanda_media_dia > 0) || !(r.cv_diario >= 0)) return;
+      var p = { value: [r.demanda_media_dia, r.cv_diario], sku: r.sku, item: r.item, lead: r.lead_time_dias };
+      (r.gravidade === "cr" ? cr : r.gravidade === "am" ? am : fundo).push(p);
+    });
+    N.grafico("g-nuvem", {
+      grid: N.grade({ top: 34, right: 22, bottom: 40, left: 4 }),
+      legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 16, icon: "circle",
+        textStyle: { color: C.tinta3, fontSize: 11 } },
+      tooltip: Object.assign(N.dica(function (ps) {
+        var p = Array.isArray(ps) ? ps[0] : ps;
+        var r = POR_SKU[p.data.sku];
+        var h = N.dicaTit(p.data.item) +
+          N.dicaLin(C.ceu, "demanda por dia", N.num(p.data.value[0], 3) + " un") +
+          N.dicaLin(C.ambar, "CV diário", N.num(p.data.value[1], 2)) +
+          N.dicaLin(C.tinta4, "prazo", N.num(p.data.lead, 0) + " dias");
+        if (r) h += N.dicaLin(C.coral, "motivos", r.motivos.map(function (k) { return REGRA[k].rotulo; }).join(", "));
+        return h;
+      }), { trigger: "item" }),
+      xAxis: N.eixoY({ type: "log", logBase: 10, name: "demanda por dia (escala log)",
+        nameLocation: "middle", nameGap: 28, splitLine: { show: false },
+        axisLabel: { color: C.tinta4, fontSize: 10, formatter: function (v) { return N.num(v, v < 1 ? 2 : 0); } } }),
+      yAxis: N.eixoY({ name: "coeficiente de variação diário", nameLocation: "middle", nameGap: 40,
+        axisLabel: { color: C.tinta4, fontSize: 10 } }),
+      series: [
+        { name: "sem motivo", type: "scatter", data: fundo, symbolSize: 5, silent: true,
+          itemStyle: { color: N.sombra(C.tinta4, 0.35) }, large: true },
+        { name: "em amarelo", type: "scatter", data: am, symbolSize: 8,
+          itemStyle: { color: N.sombra(C.ambar, 0.7), borderColor: C.ambar, borderWidth: 1 } },
+        { name: "em vermelho", type: "scatter", data: cr, symbolSize: 9,
+          itemStyle: { color: N.sombra(C.coral, 0.7), borderColor: C.coral, borderWidth: 1 } }
+      ]
+    }).on("click", function (p) { if (p.data && p.data.sku && POR_SKU[p.data.sku]) abrirAjuste(p.data.sku); });
+  }
+
+  /* ------------------------------------------------------------ tabela */
+  function selo(k) {
+    var r = REGRA[k];
+    return '<span class="selo mini selo-' + r.gravidade + '" title="' + N.esc(r.explicacao) + '">' +
+      N.esc(r.rotulo) + "</span>";
+  }
+  function par(atual, ajustado, casas, pre, suf) {
+    var a = atual === null || atual === undefined ? "–" : (pre || "") + N.num(atual, casas) + (suf || "");
+    if (ajustado === undefined || ajustado === null) return '<span class="par">' + a + "</span>";
+    return '<span class="par"><span class="de">' + a + " → </span><span class=\"aj\">" +
+      (pre || "") + N.num(ajustado, casas) + (suf || "") + "</span></span>";
+  }
+  function linha(r) {
+    var aj = r.ajuste || {};
+    return '<tr class="clicavel" data-sku="' + r.sku + '" data-familia="' + N.esc(r.familia || "") +
+      '" data-grav="' + r.gravidade + '" data-aj="' + (r.ajuste ? 1 : 0) +
+      '" data-compra="' + (r.quantidade_a_comprar > 0 ? 1 : 0) +
+      '" data-motivos="' + r.motivos.join(",") + '">' +
+      '<td class="nome forte">' + N.esc(r.item) + '<div class="pequeno t4">' + r.sku + " · " + N.esc(r.familia || "") + "</div></td>" +
+      '<td><span class="classe classe-' + r.curva_abc + '">' + (r.classificacao || "") + "</span></td>" +
+      '<td><div class="motivos">' + r.motivos.map(selo).join("") +
+        (r.ajuste ? '<span class="selo mini selo-ce liso" title="' + N.esc(aj.nota || "") + '">ajustado ' + (aj.em || "") + "</span>" : "") +
+      "</div></td>" +
+      '<td class="n" data-v="' + (r.demanda_media_dia || 0) + '">' + par(r.demanda_media_dia, aj.demanda_media_dia, 3) + "</td>" +
+      '<td class="n fraco" data-v="' + (r.demanda_media_dia_ingenua || 0) + '">' + N.num(r.demanda_media_dia_ingenua, 3) + "</td>" +
+      '<td class="n" data-v="' + (r.cv_diario || 0) + '">' + N.num(r.cv_diario, 2) + "</td>" +
+      '<td class="n fraco" data-v="' + (r.demanda_max_dia || 0) + '">' + N.num(r.demanda_max_dia, 0) +
+        '<span class="suf">un</span> <span class="t4 pequeno">em ' + N.num(r.dias_com_venda, 0) + "d c/ venda</span></td>" +
+      '<td class="n" data-v="' + (r.lead_time_dias || 0) + '">' + par(r.lead_time_dias, aj.lead_time_dias, 0, "", "d") +
+        ' <span class="t4 pequeno" title="pedidos usados na medida">' + N.num(r.lead_time_pedidos, 0) + " ped.</span></td>" +
+      '<td class="n fraco" data-v="' + (r.lead_time_desvio_dias || 0) + '">' + par(r.lead_time_desvio_dias, aj.lead_time_desvio_dias, 1, "", "d") + "</td>" +
+      '<td class="n" data-v="' + (r.custo_unitario || 0) + '">' + par(r.custo_unitario, aj.custo_unitario, 2, "R$ ") + "</td>" +
+      '<td class="n fraco" data-v="' + (r.custo_mediano || 0) + '">R$ ' + N.num(r.custo_mediano, 2) + "</td>" +
+      '<td class="n ' + (r.lucro_por_peca > 0 ? "c-mt" : "c-cr") + '" data-v="' + (r.lucro_por_peca || 0) + '">R$ ' + N.num(r.lucro_por_peca, 2) + "</td>" +
+      '<td class="n" data-v="' + (r.quantidade_a_comprar || 0) + '">' + (r.quantidade_a_comprar > 0 ? N.num(r.quantidade_a_comprar, 0) + '<span class="suf">un</span>' : '<span class="t4">–</span>') + "</td>" +
+      '<td class="n" data-v="' + (r.valor_da_compra || 0) + '">' + (r.valor_da_compra > 0 ? "R$ " + N.curto(r.valor_da_compra) : '<span class="t4">–</span>') + "</td>" +
+      '<td class="n" data-v="' + (r.capital_imobilizado || 0) + '">R$ ' + N.curto(r.capital_imobilizado || 0) + "</td>" +
+      '<td class="n"><button class="btn btn-p" data-ajustar="' + r.sku + '">Ajustar</button></td>' +
+      "</tr>";
+  }
+  function atualizarLinha(sku) {
+    var tr = id("corpo").querySelector('tr[data-sku="' + sku + '"]');
+    if (!tr) return;
+    var tmp = document.createElement("tbody"); tmp.innerHTML = linha(POR_SKU[sku]);
+    var novo = tmp.firstElementChild;
+    Array.prototype.forEach.call(novo.attributes, function (a) { tr.setAttribute(a.name, a.value); });
+    tr.innerHTML = novo.innerHTML;
+    motor.aplicar();
+  }
+  function tabela() {
+    id("corpo").innerHTML = D.itens.map(linha).join("");
+    var fams = {}; D.itens.forEach(function (r) { if (r.familia) fams[r.familia] = 1; });
+    var sel = id("f-familia"); var atual = sel.value;
+    sel.innerHTML = '<option value="">Todas as famílias</option>' + Object.keys(fams).sort().map(function (x) {
+      return '<option value="' + N.esc(x) + '">' + N.esc(x) + "</option>"; }).join("");
+    sel.value = atual;
+    motor = N.tabela("#tb-out", {
+      busca: "#q",
+      filtro: function (tr) {
+        if (f.familia && tr.dataset.familia !== f.familia) return false;
+        if (f.regra && tr.dataset.motivos.split(",").indexOf(f.regra) < 0) return false;
+        if (f.grav === "cr" && tr.dataset.grav !== "cr") return false;
+        if (f.grav === "aj" && tr.dataset.aj !== "1") return false;
+        if (f.grav === "compra" && tr.dataset.compra !== "1") return false;
+        return true;
+      },
+      aoFiltrar: function (vis) { id("m-selecao").textContent = N.num(vis.length); }
+    });
+    motor.aplicar();
+  }
+  id("f-familia").addEventListener("change", function () { f.familia = this.value; motor.aplicar(); });
+  id("f-grav").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    id("f-grav").querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
+    b.classList.add("on"); f.grav = b.dataset.v; motor.aplicar();
+  });
+  id("corpo").addEventListener("click", function (e) {
+    var bt = e.target.closest("[data-ajustar]");
+    if (bt) { abrirAjuste(bt.dataset.ajustar); return; }
+    var tr = e.target.closest("tr[data-sku]");
+    if (tr) abrirAjuste(tr.dataset.sku);
+  });
+
+  /* ----------------------------------------------------------- ajuste */
+  function evidencia(r, k) {
+    switch (k) {
+      case "cv_alto": return "CV " + N.num(r.cv_diario, 2) + " · demanda " + N.num(r.demanda_media_dia, 3) + " un/dia";
+      case "pico_unico": return "maior dia " + N.num(r.demanda_max_dia, 0) + " un de " + N.num(r.demanda_media_dia * r.dias_historico, 0) + " na janela · " + N.num(r.dias_com_venda, 0) + " dias com venda";
+      case "censura_extrema": return "corrigida " + N.num(r.demanda_media_dia, 3) + " vs observada " + N.num(r.demanda_media_dia_ingenua, 3) + " un/dia · " + N.num(r.dias_sem_estoque, 0) + " dias sem estoque de " + N.num(r.dias_historico, 0);
+      case "prazo_longo": return "prazo " + N.num(r.lead_time_dias, 0) + " dias";
+      case "prazo_incerto": return "prazo " + N.num(r.lead_time_dias, 0) + " ± " + N.num(r.lead_time_desvio_dias, 1) + " dias, medido em " + N.num(r.lead_time_pedidos, 0) + " pedido(s)";
+      case "custo_movimento": return "custo hoje R$ " + N.num(r.custo_unitario, 2) + " · mediano R$ " + N.num(r.custo_mediano, 2) + " · último lançado R$ " + N.num(r.custo_ultimo_lancado, 2);
+      case "margem_negativa": return "preço praticado R$ " + N.num(r.preco_liquido_peca, 2) + " · custo R$ " + N.num(r.custo_unitario, 2);
+      case "compra_desproporcional": return "compra " + N.num(r.quantidade_a_comprar, 0) + " un = " + N.num(r.quantidade_a_comprar / Math.max(r.demanda_media_dia, 1e-9), 0) + " dias de demanda · R$ " + N.curto(r.valor_da_compra);
+      case "historico_curto": return N.num(r.dias_utilizaveis, 0) + " dias utilizáveis na janela";
+      default: return "";
+    }
+  }
+  function abrirAjuste(sku) {
+    var r = POR_SKU[sku]; if (!r) return;
+    var aj = r.ajuste || {};
+    var alvos = {}; r.motivos.forEach(function (k) { REGRA[k].campo.split(",").forEach(function (c) { alvos[c] = 1; }); });
+    var h = '<div class="ajuste-cab"><div class="pequeno t4">' + r.sku + " · " + N.esc(r.familia || "") +
+      ' · <span class="classe classe-' + r.curva_abc + '">' + (r.classificacao || "") + "</span></div>" +
+      '<button class="btn btn-p" id="aj-dossie">Abrir dossiê completo</button></div>';
+    h += '<div class="ajuste-motivos">' + (r.motivos.length ? r.motivos.map(function (k) {
+      var g = REGRA[k];
+      return '<div class="ajuste-motivo ' + g.gravidade + '"><span class="pt"></span><div><b>' + N.esc(g.rotulo) +
+        "</b> — " + N.esc(g.explicacao) + '<div class="evid">' + N.esc(evidencia(r, k)) + "</div></div></div>";
+    }).join("") : '<div class="nota-lat">Nenhum motivo ativo — o item aparece por ter ajuste manual gravado.</div>') + "</div>";
+    h += '<div class="rotulo mb8">Valores que o motor vai usar</div><div id="aj-campos">';
+    Object.keys(CAMPOS).forEach(function (k) {
+      var c = CAMPOS[k];
+      var atual = r[k];
+      h += '<div class="campo' + (alvos[k] ? " alvo" : "") + '"><div><div class="t">' + N.esc(c.rotulo) +
+        (alvos[k] ? ' <span class="selo mini selo-am liso">apontado pelos motivos</span>' : "") + "</div>" +
+        '<div class="d">' + N.esc(c.ajuda) + "</div>" +
+        '<div class="atual">estimado pela base: <b>' + (atual === null || atual === undefined ? "–" :
+          (c.unidade === "R$" ? "R$ " + N.num(atual, c.casas) : N.num(atual, c.casas) + " " + c.unidade)) + "</b></div></div>" +
+        '<div class="ent"><input type="number" step="any" min="0" data-campo="' + k + '" placeholder="manter estimado" value="' +
+        (aj[k] !== undefined && aj[k] !== null ? aj[k] : "") + '"><span class="un">' + c.unidade + "</span></div></div>";
+    });
+    h += "</div>";
+    h += '<div class="mt14"><div class="rotulo mb8">Por que</div><textarea class="nota" id="aj-nota" placeholder="ex.: fornecedor trocou em julho; pedido de 130 dias foi importação única">' + N.esc(aj.nota || "") + "</textarea></div>";
+    h += '<div class="acoes"><button class="btn btn-am" id="aj-salvar">Salvar ajuste</button>' +
+      (r.ajuste ? '<button class="btn" id="aj-remover">Remover ajuste</button>' : "") +
+      '<span class="pequeno t4 dir">o ajuste só entra no plano depois de recalcular</span></div>' +
+      '<div id="aj-msg"></div>';
+    var int = N.abrir(N.esc(r.item), "corrigir a entrada deste item", h);
+    int.querySelector("#aj-dossie").addEventListener("click", function () { abrirItem(sku); });
+    int.querySelector("#aj-salvar").addEventListener("click", function () {
+      var valores = {};
+      int.querySelectorAll("input[data-campo]").forEach(function (i) { valores[i.dataset.campo] = i.value; });
+      var bt = this; bt.disabled = true;
+      fetch("/api/outliers/ajuste", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku: sku, valores: valores, nota: int.querySelector("#aj-nota").value }) })
+        .then(function (x) { return x.json(); }).then(function (j) {
+          if (!j.ok) throw new Error(j.erro || "falha");
+          r.ajuste = j.ajuste; marcarPendente();
+          int.querySelector("#aj-msg").innerHTML = '<div class="msg msg-ok mt14">' +
+            (j.ajuste ? "Ajuste gravado. Recalcule para aplicar." : "Nenhum valor informado — ajuste removido.") + "</div>";
+          atualizarLinha(sku);
+        }).catch(function (e) {
+          int.querySelector("#aj-msg").innerHTML = '<div class="msg msg-er mt14">' + N.esc(String(e.message)) + "</div>";
+        }).then(function () { bt.disabled = false; });
+    });
+    var rem = int.querySelector("#aj-remover");
+    if (rem) rem.addEventListener("click", function () {
+      fetch("/api/outliers/ajuste/" + encodeURIComponent(sku), { method: "DELETE" })
+        .then(function (x) { return x.json(); }).then(function () {
+          r.ajuste = null; marcarPendente(); atualizarLinha(sku); N.fechar();
+        });
+    });
+  }
+
+  /* -------------------------------------------------------- recalcular */
+  function marcarPendente() {
+    pendentes++;
+    id("pend-n").textContent = pendentes;
+    id("pendente").classList.add("on");
+  }
+  id("bt-recalcular").addEventListener("click", function () {
+    var bt = this; bt.disabled = true; bt.textContent = "Recalculando…";
+    fetch("/recalcular", { method: "POST" }).then(function (x) { return x.json(); }).then(function (j) {
+      if (!j.ok) throw new Error(j.erro || "falha no recálculo");
+      pendentes = 0; id("pendente").classList.remove("on");
+      return carregar();
+    }).catch(function (e) {
+      id("pendente").insertAdjacentHTML("beforeend", '<div class="msg msg-er">' + N.esc(String(e.message)) + "</div>");
+    }).then(function () { bt.disabled = false; bt.textContent = "Recalcular o modelo"; });
+  });
+
+  N.espera("g-nuvem");
+  carregar();
+})();
+</script>
+{% endblock %}

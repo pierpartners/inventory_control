@@ -243,7 +243,7 @@
       h += bloco("Situação agora", '<div class="gr gr-2" style="gap:0 22px">' +
         "<div>" +
         kv("Posição de estoque", N.num(pos) + " un" + (pl.em_transito > 0
-          ? ' <span class="t4 pequeno">(' + N.num(pl.estoque_fisico) + " disponível + " +
+          ? ' <span class="t4 pequeno">(' + N.num(pl.estoque_fisico) + " no CD + " +
             N.num(pl.em_transito) + " a caminho)</span>" : "")) +
         kv("Ponto de pedido", N.num(m.ponto_de_pedido) + " un", "am") +
         kv("Estoque máximo", N.num(m.estoque_maximo) + " un") +
@@ -316,7 +316,7 @@
         var ab = pr.pedidos_abertos || [];
         var prox = ab.filter(function (a) { return !a.atrasado; })[0];
         var atras = ab.filter(function (a) { return a.atrasado; });
-        notaProj = "Daqui para a frente o gráfico é <b>projeção</b>: a partir da posição disponível de <b>" +
+        notaProj = "Daqui para a frente o gráfico é <b>projeção</b>: a partir do estoque físico de <b>" +
           N.num(pr.posicao_inicial) + " un</b>, consome <b>" + N.num(pr.demanda_dia, 2) +
           " un/dia</b> (" + (m.historico_insuficiente ? "a média simples, histórico insuficiente" : "a demanda corrigida") + "). " +
           (ab.length
@@ -335,7 +335,7 @@
           " <span class='t4'>" + (pr.em_transito_na_posicao > 0
             ? "Das peças a caminho, " + N.num(pr.em_transito_na_posicao) +
               " chegam dentro do período de proteção e já contam na posição que decidiu a compra."
-            : "Nenhuma peça a caminho chega dentro do período de proteção, então a posição que decidiu a compra é só o disponível.") +
+            : "Nenhuma peça a caminho chega dentro do período de proteção, então a posição que decidiu a compra é só o estoque físico.") +
           "</span>";
       }
       h += bloco("Histórico diário" + (fut.length ? " e projeção" : ""),
@@ -601,12 +601,19 @@
       }
 
       var series = [
-        { name: "Saldo", type: "line", data: dias.map(function (x) { return x.saldo_final; }).concat(nulos(nF)),
+        /* o estoque FISICO e a posicao que decide a compra e de onde a projecao
+           parte; o disponivel (fisico menos reserva) fica como referencia, desligado
+           na legenda. Vendas no MESMO eixo do saldo: em eixo proprio a maior barra
+           sempre encostava no topo e 300 pecas pareciam 3 mil. */
+        { name: "Estoque no CD", type: "line", data: dias.map(function (x) { return x.saldo_final; }).concat(nulos(nF)),
           symbol: "none", smooth: 0.15, itemStyle: { color: C.ceu },
           lineStyle: { color: C.ceu, width: 1.5 },
           areaStyle: { color: N.area(C.ceu, 0.18) },
           markLine: { silent: true, symbol: "none", data: marcos } },
-        { name: "Vendas", type: "bar", yAxisIndex: 1,
+        { name: "Disponível (sem reserva)", type: "line", data: dias.map(function (x) { return x.disponivel_final; }).concat(nulos(nF)),
+          symbol: "none", smooth: 0.15, itemStyle: { color: C.tinta4 },
+          lineStyle: { color: C.tinta4, width: 1, type: [2, 3] } },
+        { name: "Vendas", type: "bar",
           data: dias.map(function (x) {
             return { value: x.vendido,
               itemStyle: { color: x.estado === "Sem estoque" ? N.sombra(C.coral, .5)
@@ -624,7 +631,7 @@
           { name: "Saldo projetado", type: "line", data: emenda("saldo"), symbol: "none",
             itemStyle: { color: C.ceu }, lineStyle: { color: C.ceu, width: 1.6, type: [5, 4] },
             markPoint: { data: chegadas, silent: true } },
-          { name: "Venda esperada", type: "bar", yAxisIndex: 1, barWidth: "62%",
+          { name: "Venda esperada", type: "bar", barWidth: "62%",
             data: nulos(nH).concat(fut.map(function (f) { return f.demanda_esperada; })),
             itemStyle: { color: N.sombra(C.violeta, .22) } });
         if (pr.compra_plano > 0) series.push(
@@ -634,17 +641,24 @@
 
       /* abre mostrando os ultimos ~120 dias mais a projecao; o resto fica no zoom */
       var ini0 = Math.max(0, nH - 120), pct0 = 100 * ini0 / eixoDatas.length;
+      /* o eixo precisa alcancar o ponto de pedido, senao a linha dele some quando o
+         estoque anda muito abaixo (o caso tipico de quem esta na fila de compra) */
+      var topoY = Math.max(m.ponto_de_pedido || 0,
+        Math.max.apply(null, dias.map(function (x) { return Math.max(x.saldo_final || 0, x.vendido || 0); })
+          .concat(fut.map(function (f) { return f.saldo_alto || 0; }))));
       N.grafico("gv-hist", {
-        grid: N.grade({ top: nF ? 36 : 26, right: 12, bottom: nF ? 46 : 4, left: 4 }),
+        grid: N.grade({ top: nF ? 54 : 26, right: 12, bottom: nF ? 46 : 4, left: 4 }),
         legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 14, icon: "roundRect",
           textStyle: { color: C.tinta3, fontSize: 10.5 },
+          selected: { "Disponível (sem reserva)": false },
           data: series.map(function (s) { return s.name; }).filter(function (n) { return n !== "faixa-base"; }) },
         tooltip: N.dica(function (ps) {
           var i = ps[0].dataIndex;
           if (i < nH) {
             var x = dias[i];
             return N.dicaTit(N.dataLonga(x.data)) +
-              N.dicaLin(C.ceu, "saldo no fim do dia", N.num(x.saldo_final)) +
+              N.dicaLin(C.ceu, "estoque no CD no fim do dia", N.num(x.saldo_final)) +
+              N.dicaLin(C.tinta4, "disponível (sem reserva)", N.num(x.disponivel_final)) +
               N.dicaLin(C.ambar, "peças vendidas", N.num(x.vendido)) +
               (x.imputado != null ? N.dicaLin(C.menta, "demanda estimada (imputada)",
                 N.num(x.imputado, 1)) : "") +
@@ -666,7 +680,8 @@
         xAxis: N.eixoX({ data: eixoDatas,
           axisLabel: { color: C.tinta4, fontSize: 9.5,
             formatter: function (v) { return N.data(v); } } }),
-        yAxis: [N.eixoY({ min: 0, axisLabel: { color: C.tinta4, fontSize: 9.5,
+        yAxis: [N.eixoY({ min: 0, max: topoY > 0 ? Math.ceil(topoY * 1.08) : undefined,
+          axisLabel: { color: C.tinta4, fontSize: 9.5,
           fontFamily: '"JetBrains Mono", monospace',
           formatter: function (v) { return N.curto(v); } } }),
           N.eixoY({ show: false })],

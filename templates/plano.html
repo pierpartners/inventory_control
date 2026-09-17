@@ -17,6 +17,12 @@
 
 {% block cabeca %}
 <style>
+  /* cabeçalhos em duas linhas e células mais apertadas para a fila caber sem rolagem lateral */
+  #tb-compra { font-size: 12px; }
+  #tb-compra th { white-space: normal; line-height: 1.25; padding: 7px 6px; vertical-align: bottom; letter-spacing: .06em; }
+  #tb-compra td { padding: 6px 6px; }
+  #tb-compra td.nome { min-width: 150px; max-width: 210px; font-size: 11.5px; }
+  #tb-compra td.pequeno { font-size: 11px; }
   .col-loja { display: none; }
   .otica-loja .col-loja { display: table-cell; }
   .otica-loja tr.fora-da-otica { opacity: .38; }
@@ -161,23 +167,6 @@
       <div class="flex entre pequeno t4 mt6">
         <span>1ª peça do ciclo</span><span>última peça comprada</span>
       </div>
-
-      <div class="rolo rolo-medio mt18">
-        <table class="tb" id="tb-entradas">
-          <thead><tr>
-            <th class="nao-ord"></th>
-            <th>Produto</th>
-            <th data-ajuda="Classe ABC×XYZ do item no CD, a que o modelo usa: ABC pela participação no lucro potencial, XYZ pela regularidade da demanda diária.">Classe</th>
-            <th class="n">Entra na peça nº</th>
-            <th class="n">Leva</th>
-            <th class="n">Custo unitário</th>
-            <th class="n">Investimento</th>
-            <th class="n">Chance da 1ª peça</th>
-            <th class="n">Chance da última</th>
-          </tr></thead>
-          <tbody><tr><td colspan="9"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
-        </table>
-      </div>
     </div>
   </div>
 </div>
@@ -263,20 +252,22 @@
       <div class="rolo">
         <table class="tb" id="tb-compra">
           <thead><tr>
-            <th class="nao-ord" data-ajuda="Posição na fila global de compra: a ordem em que esta peça entra, da melhor nota para a pior.">#</th>
+            <th class="nao-ord" data-ajuda="Ordem pela margem esperada da compra do item, da maior para a menor.">#</th>
             <th>Item</th>
             <th>Classe</th>
-            <th class="n">Posição hoje</th>
+            <th class="n" data-ajuda="Em que peça do ciclo o produto entra na compra: as primeiras peças da fila vão todas para o mesmo item, até que mais uma unidade dele renda menos que a primeira de outro.">Entra>Entra na<br>peça nº</th>nbsp;na<br>peça>Entra na<br>peça nº</th>nbsp;nº</th>
+            <th class="n" data-ajuda="Demanda média diária corrigida pela censura (dias sem estoque não contam como venda zero).">Venda<br>média/dia</th>
+            <th class="n">Posição<br>hoje</th>
             <th class="n">Comprar</th>
-            <th class="n col-loja" data-ajuda="Peças e dinheiro desta compra que cabem à empresa escolhida, pela participação dela na demanda do item.">Parcela da empresa</th>
-            <th class="n col-loja" data-ajuda="Participação da empresa na venda deste item na janela de estimação, em peças.">Participação</th>
-            <th class="n">Unidades</th>
-            <th class="n">Chance da última</th>
-            <th class="n">Investimento</th>
-            <th class="n">Margem esperada</th>
-            <th class="n">Retorno/R$</th>
-            <th class="n">Risco antes → depois</th>
-            <th class="n">Cobertura depois</th>
+            <th class="n col-loja" data-ajuda="Peças e dinheiro desta compra que cabem à empresa escolhida, pela participação dela na demanda do item.">Parcela da<br>empresa</th>
+            <th class="n col-loja" data-ajuda="Participação da empresa na venda deste item na janela de estimação, em peças.">Partici-<br>pação</th>
+            <th class="n" data-ajuda="Da primeira à última unidade comprada, contando a partir da posição de hoje.">Unidades<br>de→até</th>
+            <th class="n" data-ajuda="Probabilidade de vender a primeira e a última peça compradas dentro do período de proteção.">Chance<br>1ª→última</th>
+            <th class="n">Investi-<br>mento</th>
+            <th class="n">Margem<br>esperada</th>
+            <th class="n">Retorno<br>por R$</th>
+            <th class="n">Risco<br>antes→depois</th>
+            <th class="n">Cobertura<br>depois</th>
           </tr></thead>
           <tbody>
           {% for r in linhas %}
@@ -286,12 +277,17 @@
                 <span class="selo selo-am" title="Só {{ r.dias_utilizaveis }} dias com estoque na janela: a demanda usada é a média simples, não a corrigida.">histórico insuficiente</span>{% endif %}
                 <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
               <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
+              <td class="n" data-v="{{ r.entra_na_peca or 0 }}">{{ r.entra_na_peca|n if r.entra_na_peca else '–' }}</td>
+              <td class="n" data-v="{{ r.demanda_media_dia }}">{{ r.demanda_media_dia|n(2) }}</td>
               <td class="n fraco">{{ r.posicao_estoque|n }}</td>
               <td class="n forte">{{ r.quantidade_a_comprar|n }}</td>
               <td class="n col-loja parcela" data-v="0"></td>
               <td class="n col-loja participacao" data-v="0"></td>
               <td class="n fraco pequeno">{{ (r.posicao_estoque + 1)|n }} → {{ r.ultima_unidade|n }}</td>
-              <td class="n" data-v="{{ r.p_vender_ultima }}" data-chance="{{ r.p_vender_ultima }}"></td>
+              <td class="n pequeno" data-v="{{ r.p_vender_ultima }}">
+                <span class="c-mt">{{ r.chance_primeira|pct(0) if r.chance_primeira is not none else '–' }}</span>
+                <span class="t4">→</span>
+                <span data-chance="{{ r.p_vender_ultima }}"></span></td>
               <td class="n" data-v="{{ r.valor_da_compra }}"><span class="pre">R$</span>{{ r.valor_da_compra|n }}</td>
               <td class="n c-mt" data-v="{{ r.margem_esperada }}"><span class="pre">R$</span>{{ r.margem_esperada|n }}</td>
               <td class="n" data-v="{{ r.retorno_por_real }}">{{ r.retorno_por_real|pct(0) }}</td>
@@ -377,7 +373,7 @@
   var CATALOGO = {{ resumo.catalogo }};
   var TOTAL_PECAS = {{ resumo.pecas }};
 
-  document.querySelectorAll("td[data-chance]").forEach(function (td) {
+  document.querySelectorAll("[data-chance]").forEach(function (td) {
     var v = +td.dataset.chance;
     var cls = v >= 0.7 ? "selo-mt" : (v >= 0.45 ? "selo-am" : "selo-cr");
     td.innerHTML = '<span class="selo ' + cls + '">' + N.pct(v, 0) + "</span>";
@@ -622,21 +618,6 @@
         N.esc(x.item) + " | entra na peça nº " + N.num(x.entra_na_peca) +
         " | " + N.num(x.pecas) + " peças | R$ " + N.moeda(x.investimento) + '"></div>';
     }).join("");
-
-    document.querySelector("#tb-entradas tbody").innerHTML = e.map(function (x, i) {
-      return '<tr class="clicavel" data-sku="' + N.esc(x.sku) + '">' +
-        "<td>" + N.pontoProduto(x.sku, 10) + "</td>" +
-        '<td class="nome forte">' + N.esc(x.item) +
-          '<div class="pequeno t4">' + N.esc(x.sku) + " · " + N.esc(x.familia) + "</div></td>" +
-        "<td>" + N.seloClasse(x.classificacao) + "</td>" +
-        '<td class="n forte">' + N.num(x.entra_na_peca) + "</td>" +
-        '<td class="n">' + N.num(x.pecas) + '<span class="suf">peças</span></td>' +
-        '<td class="n fraco"><span class="pre">R$</span>' + N.moeda(x.custo_unitario, 2) + "</td>" +
-        '<td class="n"><span class="pre">R$</span>' + N.moeda(x.investimento) + "</td>" +
-        '<td class="n c-mt">' + N.pct(x.chance_primeira, 0) + "</td>" +
-        '<td class="n">' + N.pct(x.chance_ultima, 0) + "</td></tr>";
-    }).join("");
-    N.tabela("#tb-entradas", { col: 3, dir: "asc" });
   });
 
   /* ---------------------------------------------------- fila completa */
@@ -743,14 +724,15 @@
     Array.prototype.forEach.call(tb.tBodies[0].rows, function (tr) {
       if (tr.style.display !== "none") visiveis[tr.dataset.sku] = true;
     });
-    var linhas = [["ordem", "sku", "item", "familia", "marca", "classe", "posicao_hoje", "comprar",
-      "ate_unidade", "chance_ultima_peca", "custo_unitario", "investimento",
+    var linhas = [["ordem", "sku", "item", "familia", "marca", "classe", "entra_na_peca", "venda_media_dia",
+      "posicao_hoje", "comprar", "ate_unidade", "chance_primeira_peca", "chance_ultima_peca", "custo_unitario", "investimento",
       "margem_esperada", "retorno_por_real", "cobertura_depois_dias"].join(";")];
     DADOS.forEach(function (r, i) {
       if (!visiveis[r.sku]) return;
       linhas.push([i + 1, r.sku, '"' + String(r.item).replace(/"/g, '""') + '"',
-        '"' + r.familia + '"', '"' + (r.origem || "") + '"', r.classificacao, r.posicao_estoque, r.quantidade_a_comprar,
-        r.ultima_unidade, (r.p_vender_ultima || 0).toFixed(4),
+        '"' + r.familia + '"', '"' + (r.origem || "") + '"', r.classificacao, r.entra_na_peca || "",
+        (r.demanda_media_dia || 0).toFixed(3), r.posicao_estoque, r.quantidade_a_comprar,
+        r.ultima_unidade, (r.chance_primeira || 0).toFixed(4), (r.p_vender_ultima || 0).toFixed(4),
         (r.custo_unitario || 0).toFixed(2), (r.valor_da_compra || 0).toFixed(2),
         (r.margem_esperada || 0).toFixed(2), (r.retorno_por_real || 0).toFixed(4),
         Math.round(r.cobertura_apos_dias || 0)].join(";"));

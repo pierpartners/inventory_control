@@ -10,10 +10,12 @@
   retrato por dia (qtdatualestoque, qtdreserva, qtddisponivel). A grade e
   reconstruida daqui, e duas escolhas ficam registradas porque mudam decisao:
 
-  1. A posicao e o DISPONIVEL, nao o fisico. A peca reservada ja tem dono e nao
-     protege a proxima venda; conta-la faria o motor deixar de comprar o que
-     precisa. 3.681 linhas vem com disponivel negativo (reserva acima do
-     fisico) e nessas o piso e zero.
+  1. A grade carrega FISICO e DISPONIVEL lado a lado. O motor decide pelo
+     fisico (ver executar() em backend/modelo.py): a reserva e fila de pedidos
+     que fatura pela mesma venda que o modelo mede, e descontar a reserva da
+     posicao contaria o pedido duas vezes. O disponivel fica para diagnostico
+     e para a tela de acompanhamento. 3.681 linhas vem com disponivel negativo
+     (reserva acima do fisico) e nessas o piso e zero.
   2. O saldo de abertura de um dia e o fechamento do dia anterior. Com isso a
      cadeia fecha por construcao e o recebimento de mercadoria aparece como o
      salto entre o fechamento de um dia e a abertura do seguinte - a mesma
@@ -66,9 +68,10 @@ grade as (
         -- jogaria 11% da base fora e inflaria a demanda estimada.
         p.fisico                                         as saldo_final,
         lag(p.fisico) over (partition by p.sku order by p.data) as saldo_ant,
-        -- DISPONIVEL governa a decisao de compra: a peca reservada nao protege
-        -- a proxima venda. As duas colunas seguem juntas de proposito, porque
-        -- responder as duas perguntas com o mesmo numero e o erro facil aqui.
+        -- DISPONIVEL (fisico menos reserva) fica na grade para diagnostico e
+        -- conferencia. Nao decide a compra: a reserva fatura pela venda que o
+        -- modelo ja mede em `fisico` (2,0% dos dias com disponivel zero e
+        -- fisico positivo tem venda, contra 0,1% dos dias com fisico zero).
         p.disponivel                                     as disponivel_final,
         coalesce(v.pecas, 0)                             as pecas_vendidas
     from pos p

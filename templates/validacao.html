@@ -171,10 +171,18 @@
 </div>
 
 <div class="gr gr-23 secao">
-  <div class="painel metrica cr" style="display:flex;flex-direction:column;justify-content:center">
-    <div class="rotulo">Dinheiro parado sem necessidade</div>
-    <div class="valor" style="font-size:44px"><span class="pre">R$</span><span id="r-parado">–</span></div>
-    <div class="nota" id="r-parado-x">–</div>
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="painel metrica cr" style="display:flex;flex-direction:column;justify-content:center;flex:1">
+      <div class="rotulo">Dinheiro parado sem necessidade</div>
+      <div class="valor" style="font-size:44px"><span class="pre">R$</span><span id="r-parado">–</span></div>
+      <div class="nota" id="r-parado-x">–</div>
+    </div>
+    <div class="painel metrica" style="display:flex;flex-direction:column;justify-content:center;flex:1"
+         title="retorno realizado dividido pelo projetado, os dois na régua do modelo: cada peça da compra que vendeu rende a margem capturada (Cu), cada peça que ficou parada custa o carregamento mais o encalhe">
+      <div class="rotulo">Efetividade financeira: o modelo entregou o retorno que projetou?</div>
+      <div class="valor" style="font-size:44px"><span id="r-efet">–</span></div>
+      <div class="nota" id="r-efet-x">–</div>
+    </div>
   </div>
   <div class="painel">
     <div class="painel-cab">
@@ -273,6 +281,9 @@
         <th class="n nao-ord">Sobrou</th>
         <th class="n nao-ord">Dinheiro parado</th>
         <th class="n nao-ord">Itens com ruptura</th>
+        <th class="n nao-ord" title="retorno líquido que o modelo projetou na compra">Proj.</th>
+        <th class="n nao-ord" title="retorno líquido realizado no horizonte, na mesma régua">Realiz.</th>
+        <th class="n nao-ord" title="realizado ÷ projetado">Efetiv.</th>
         <th class="n" title="participação do e-commerce: prevista pelo plano → realizada na venda">e-com prev → real</th>
       </tr></thead>
       <tbody></tbody>
@@ -434,6 +445,7 @@
       mod_itens: 0, mod_pecas: 0, mod_valor: 0, mod_previsto: 0, mod_faltou: 0,
       mod_dias: 0, mod_rup: 0, mod_atendeu: 0, sobra: 0, parado: 0,
       excesso: 0, cheio: 0, margem: 0, erro_abs: 0,
+      proj: 0, realz: 0, acima: 0, abaixo: 0,
       emp_itens: 0, emp_pecas: 0, emp_valor: 0, emp_nota: 0, emp_faltou: 0,
       emp_dias: 0, emp_rup: 0, emp_atendeu: 0, emp_chegou: 0,
       obs_faltou: 0, obs_dias: 0, obs_rup: 0, obs_atendeu: 0,
@@ -446,6 +458,9 @@
       /* --- o modelo */
       if (Q > 0) { g.mod_itens++; g.mod_pecas += Q; g.mod_valor += r.investimento || 0;
         g.mod_previsto += r.previsto || 0; g.margem += r.margem_do_plano || 0;
+        g.proj += r.retorno_projetado || 0; g.realz += r.retorno_realizado || 0;
+        if ((r.desvio_retorno || 0) > 0) g.acima++;
+        if ((r.desvio_retorno || 0) < 0) g.abaixo++;
         g.sobra += r.sobrou_da_compra || 0; g.parado += r.dinheiro_parado || 0;
         if (r.sobrou_da_compra > 0) g.excesso++;
         if (r.sobrou_da_compra <= 0 && !r.houve_ruptura) g.cheio++;
@@ -495,6 +510,8 @@
     });
     g.pct_parado = g.mod_valor ? g.parado / g.mod_valor : 0;
     g.retorno = g.mod_valor ? g.margem / g.mod_valor : 0;
+    g.desvio = g.realz - g.proj;
+    g.efet = g.proj > 0 ? g.realz / g.proj : NaN;
     g.wape = g.demanda ? g.erro_abs / g.demanda : NaN;
     g.gap_c = g.nc ? (g.tr_c / g.nc) / (g.tm_c / g.nc) - 1 : NaN;
     g.gap_n = g.nn ? (g.tr_n / g.nn) / (g.tm_n / g.nn) - 1 : NaN;
@@ -586,6 +603,21 @@
       "horizonte não pediu. A compra devolveu R$ " + N.curto(g.margem) +
       " de margem, R$ " + N.num(g.retorno, 2) + " por real aplicado.";
 
+    /* projetado x realizado, na regua do proprio modelo: a diferenca entre os
+       dois e so o que a demanda fez de diferente do previsto */
+    var rs = function (v) { return (v < 0 ? "−R$ " : "R$ ") + N.curto(Math.abs(v)); };
+    var rs2 = function (v) { return (v < 0 ? "−R$ " : "R$ ") + N.num(Math.abs(v), 2); };
+    var efetEl = id("r-efet");
+    efetEl.textContent = isFinite(g.efet) ? N.pct(g.efet, 0) : "–";
+    efetEl.className = isFinite(g.efet) ? (g.efet >= 0.8 ? "c-mt" : g.efet >= 0.4 ? "c-am" : "c-cr") : "";
+    id("r-efet-x").innerHTML =
+      "O modelo projetou <b>" + rs(g.proj) + "</b> de retorno líquido na compra e realizou <b>" +
+      rs(g.realz) + "</b> no horizonte (" + (g.desvio >= 0 ? "+" : "") + rs(g.desvio) +
+      "). Por real aplicado: projetou " + rs2(g.mod_valor ? g.proj / g.mod_valor : 0) +
+      ", realizou " + rs2(g.mod_valor ? g.realz / g.mod_valor : 0) + ". " +
+      N.num(g.acima) + " itens rendem mais que o projetado, " + N.num(g.abaixo) + " menos. " +
+      "Peça que sobrou no fim do horizonte conta como parada, mesmo que venda depois.";
+
     /* -------------------------------------------------- o comparativo */
     id("cmp-escopo").innerHTML = escopo;
     var h = "";
@@ -675,7 +707,10 @@
         kv("Pedido real somado", "R$ " + N.moeda(IV.t.ped)) +
         kv("Investimento do plano", "R$ " + N.moeda(IV.t.inv)) +
         kv("Recebido de fato", "R$ " + N.moeda(IV.t.real)) +
-        kv("Margem do plano", "R$ " + N.moeda(IV.t.mar));
+        kv("Margem do plano", "R$ " + N.moeda(IV.t.mar)) +
+        kv("Retorno projetado", "R$ " + N.moeda(IV.t.proj)) +
+        kv("Retorno realizado", "R$ " + N.moeda(IV.t.realz)) +
+        kv("Efetividade", IV.t.proj > 0 ? N.pct(IV.t.realz / IV.t.proj, 0) : "–");
     } else {
       id("ctx-a").innerHTML =
         kv("Dia da decisão", j.corte) +
@@ -878,13 +913,15 @@
   var IV = null;   /* contexto do intervalo, quando e um intervalo */
 
   function intervalo(rodadas, itens, iv) {
-    var t = { inv: 0, real: 0, ped: 0, mar: 0 };
+    var t = { inv: 0, real: 0, ped: 0, mar: 0, proj: 0, realz: 0 };
     var datas = rodadas.map(function (d) {
       var s = d.resumo, ct = d.contexto;
       t.inv += s.investimento;
       t.real += ct.compra_real_valor;
       t.ped += ct.pedido_ciclo_valor;
       t.mar += s.margem_do_plano;
+      t.proj += s.retorno_projetado || 0;
+      t.realz += s.retorno_realizado || 0;
       return { corte: d.janela.corte, resumo: s, contexto: ct };
     });
     IV = { iv: iv, t: t };
@@ -909,6 +946,10 @@
         '<td class="n c-cr forte"><span class="pre">R$</span>' +
           N.moeda(s.dinheiro_parado) + "</td>" +
         '<td class="n">' + N.num(c.modelo_itens_com_ruptura || 0) + "</td>" +
+        '<td class="n fraco"><span class="pre">R$</span>' + N.moeda(s.retorno_projetado || 0) + "</td>" +
+        '<td class="n forte"><span class="pre">R$</span>' + N.moeda(s.retorno_realizado || 0) + "</td>" +
+        '<td class="n ' + (s.efetividade == null ? "" : s.efetividade >= 0.8 ? "c-mt" : s.efetividade >= 0.4 ? "c-am" : "c-cr") + '">' +
+          (s.efetividade == null ? "–" : N.pct(s.efetividade, 0)) + "</td>" +
         '<td class="n fraco">' + (s.canais ? N.pct(s.canais.ecommerce.share_prevista, 0) + " → " +
           N.pct(s.canais.ecommerce.share_realizada, 0) : "–") + "</td></tr>";
     }).join("");

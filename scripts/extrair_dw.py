@@ -10,11 +10,13 @@ Extrai do DW da Elevato (Postgres `dwanalitico`) as seis tabelas que a base
 
 Depois: python scripts/rodar_pipeline.py  (detecta a pasta e usa base=dw)
 
-O universo e o mesmo da exportacao manual em dbt-elevato/exports: os SKUs que
-o e-commerce (empresa 33) vendeu nos ultimos 12 meses da janela. A demanda,
-porem, e a de TODAS as lojas (gold.vendas, todas as empresas) - o estoque
-dimensionado e o do CD Gravatai (empresa 26, local 124), que abastece o grupo
-inteiro, e o e-commerce consome menos de um decimo da saida dele.
+O universo e TUDO que o CD Gravatai (empresa 26, local 124) estocou na janela:
+todo SKU com linha em db2.estoque_sintetico nesse local. A demanda e a de
+TODAS as lojas (gold.vendas, todas as empresas), porque e esse CD que abastece
+o grupo inteiro. Ate 2026-09-17 o universo era so o que o e-commerce (empresa
+33) vendeu nos ultimos 12 meses - 3.230 SKUs contra 19.139 agora; a venda do
+e-commerce ainda e extraida a parte (raw_vendas_ecommerce) para a tela de
+qualidade e para a separacao da demanda por canal.
 
 Cada consulta esta documentada em docs/estudo_dados_faltantes_dw.md, com os
 numeros medidos e as armadilhas de cada fonte.
@@ -52,18 +54,17 @@ LOTE_LINHAS = 200_000
 # ------------------------------------------------------------------ SQL
 # Todas as consultas recebem %(dt_ini)s, %(dt_fim)s (a janela desta consulta, que
 # na grade de estoque e UM ANO por vez) e %(dt_universo)s/%(dt_universo_fim)s (a
-# janela do universo, sempre a global - senao o chunk de 2023 nao acha SKU nenhum).
+# janela do universo, sempre a global - senao o chunk de 2023 so acharia os SKUs
+# com movimento em 2023).
 
-UNIVERSO = """
+UNIVERSO = f"""
 universo as (
-    select distinct cast(v.idsubproduto as integer) as idsubproduto
-    from gold.vendas v
-    where v.idempresa = {ecom}
-      and v.data between %(dt_universo)s and %(dt_universo_fim)s
-      and v.qtdproduto > 0
-      and v.idsubproduto ~ '^[0-9]+$'
+    select distinct e.idsubproduto
+    from db2.estoque_sintetico e
+    where e.idempresa = {EMPRESA_CD} and e.idlocalestoque = {LOCAL_CD}
+      and e.dtmovimento between %(dt_universo)s and %(dt_universo_fim)s
 )
-""".format(ecom=EMPRESA_ECOMMERCE)
+"""
 
 # Cadastro. gold.produtos_compras ja traz a hierarquia (secao/grupo) que o
 # db2.produto so tem por id; a marca vem de db2.marca.
@@ -376,14 +377,14 @@ def main() -> None:
 
     dt_fim = date.fromisoformat(args.ate) if args.ate else date.today()
     dt_ini = dt_fim - timedelta(days=365 * args.anos - 1)
-    dt_universo = dt_fim - timedelta(days=364)
+    dt_universo = dt_ini  # o universo e a janela inteira
     destino = Path(args.destino)
     alvo = args.so or list(TABELAS)
     desconhecidas = [t for t in alvo if t not in TABELAS]
     if desconhecidas:
         raise SystemExit(f"tabelas desconhecidas: {desconhecidas}")
 
-    print(f"janela {dt_ini} -> {dt_fim} · universo: SKUs vendidos pelo e-commerce desde {dt_universo}")
+    print(f"janela {dt_ini} -> {dt_fim} · universo: SKUs com movimento no CD {EMPRESA_CD}/{LOCAL_CD} desde {dt_universo}")
     print(f"destino {destino}")
     con = conectar()
     t_total = time.time()
@@ -425,7 +426,7 @@ def main() -> None:
             if "\t" in l:
                 linhas[l.split("\t")[0]] = l
     for t, n in resumo:
-        linhas[t] = f"{t}\t{n}\t{date.today()}\t{dt_ini}->{dt_fim}\tuniverso desde {dt_universo}"
+        linhas[t] = f"{t}\t{n}\t{date.today()}\t{dt_ini}->{dt_fim}\tuniverso: movimento no CD desde {dt_universo}"
     reg.write_text("tabela\tlinhas\textraido_em\tjanela\tuniverso\n"
                    + "\n".join(linhas[k] for k in sorted(linhas)) + "\n", encoding="utf-8")
     print(f"\nextracao concluida em {time.time() - t_total:.0f}s")

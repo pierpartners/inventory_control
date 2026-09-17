@@ -16,11 +16,24 @@ exportação manual (`dbt-elevato/exports`) não trazia.
 
 ## 0. Universo e demanda — as duas decisões de escopo
 
-**Universo**: SKUs que o e-commerce (empresa 33) vendeu nos últimos 12 meses da janela.
-É o mesmo recorte da exportação manual; muda apenas de "vendido em 2026" para "vendido
-nos últimos 365 dias", para o extrator não envelhecer. Resultado hoje: **3.278 SKUs**
-(a exportação de janeiro em diante tinha 2.698), dos quais **3.231 tiveram posição no CD**
-em algum momento e são os planejados; os 47 restantes vendem sem estoque próprio.
+**Universo** (desde 2026-09-17): **todo SKU que o CD Gravataí (empresa 26, local 124)
+movimentou na janela de 3 anos** — qualquer linha em `db2.estoque_sintetico` nesse local.
+Medido em 2026-09-17: **19.139 SKUs**. É a mesma definição que o staging já usava
+(`stg_catalogo` só planeja o que tem posição no CD), agora aplicada também na extração.
+
+Até então o universo era o recorte da exportação manual: SKUs que o e-commerce (empresa
+33) vendeu nos últimos 12 meses — 3.278 SKUs, 3.231 com posição no CD. Ficavam de fora
+os itens que o CD estoca mas só as lojas físicas vendem. Contagens de referência do dia
+da troca, para dimensionar alternativas:
+
+| Recorte | SKUs | Com posição no CD |
+|---|---|---|
+| E-commerce, 12 meses (antigo) | 3.279 | 3.230 |
+| Qualquer loja, 12 meses | 17.459 | 11.809 |
+| Movimento no CD, 3 anos (atual) | 19.139 | 19.139 |
+| Saldo > 0 no CD hoje | 7.214 | 7.214 |
+
+Os números das seções seguintes foram medidos ainda no universo antigo.
 
 **Demanda**: venda de **todas as lojas** desses SKUs, não só do e-commerce. O estoque
 dimensionado é o do CD Gravataí (empresa 26, local 124), que abastece o grupo. Medido
@@ -163,7 +176,7 @@ faturamento é demanda que existiu e não se realizou; fica no sinal de propósi
 ## 10. Como rodar
 
 ```bash
-python scripts/extrair_dw.py            # 3 anos, universo dos últimos 12 meses
+python scripts/extrair_dw.py            # 3 anos, universo = tudo que o CD movimentou
 python scripts/rodar_pipeline.py        # detecta data/fonte_dw e usa base=dw
 python scripts/revisao.py               # ~90 conferências independentes
 ```
