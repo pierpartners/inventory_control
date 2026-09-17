@@ -273,6 +273,7 @@
         <th class="n nao-ord">Sobrou</th>
         <th class="n nao-ord">Dinheiro parado</th>
         <th class="n nao-ord">Itens com ruptura</th>
+        <th class="n" title="participação do e-commerce: prevista pelo plano → realizada na venda">e-com prev → real</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -907,7 +908,9 @@
         '<td class="n c-am">' + N.num(s.pecas_sobrando, 0) + "</td>" +
         '<td class="n c-cr forte"><span class="pre">R$</span>' +
           N.moeda(s.dinheiro_parado) + "</td>" +
-        '<td class="n">' + N.num(c.modelo_itens_com_ruptura || 0) + "</td></tr>";
+        '<td class="n">' + N.num(c.modelo_itens_com_ruptura || 0) + "</td>" +
+        '<td class="n fraco">' + (s.canais ? N.pct(s.canais.ecommerce.share_prevista, 0) + " → " +
+          N.pct(s.canais.ecommerce.share_realizada, 0) : "–") + "</td></tr>";
     }).join("");
 
     /* uma unica pintura, pelo mesmo caminho da rodada de uma data */

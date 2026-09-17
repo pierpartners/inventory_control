@@ -412,6 +412,24 @@
         kv("Giro anual", N.num(m.giro_ano, 1) + "×") +
         "</div><div>" + pol + "</div></div>");
 
+      /* ------- 4b. os dois canais */
+      var cn = d.canais || {}, ce = cn.ecommerce || {}, cl = cn.lojas || {};
+      h += bloco("Demanda por canal",
+        '<div class="gr gr-2" style="gap:0 22px"><div>' +
+        kv("E-commerce · demanda/dia", N.num(ce.demanda_dia, 3) + " ± " + N.num(ce.desvio_dia, 3)) +
+        kv("Participação", N.pct(ce.share, 1)) +
+        kv("Lucro por peça", "R$ " + N.moeda(ce.lucro_por_peca, 2) + " × " + N.num(ce.fator, 2)) +
+        "</div><div>" +
+        kv("Lojas · demanda/dia", N.num(cl.demanda_dia, 3) + " ± " + N.num(cl.desvio_dia, 3)) +
+        kv("Participação", N.pct(cl.share, 1)) +
+        kv("Lucro por peça", "R$ " + N.moeda(cl.lucro_por_peca, 2) + " × " + N.num(cl.fator, 2)) +
+        "</div></div>" +
+        '<div class="pequeno t4 mt10">Os dois canais são estimados com as mesmas máscaras de ' +
+        'ruptura do CD. A política de estoque usa a soma; a participação pondera o custo de ' +
+        'ruptura e reparte o custo de cada peça entre os dois caixas. Covariância diária entre ' +
+        'canais: ' + N.num(cn.covariancia, 3) + '.</div>',
+        "a mesma demanda, separada em quem a puxa");
+
       /* ------- 5. economia */
       h += bloco("Economia anual projetada",
         '<div class="gr gr-2" style="gap:0 22px"><div>' +

@@ -937,6 +937,23 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
             "posicao": pos_atual,
             "comprar": int(pl.quantidade_a_comprar) if pl is not None else 0,
         },
+        "canais": {
+            "ecommerce": {
+                "demanda_dia": float(np.nan_to_num(m.get("demanda_media_dia_ecommerce", 0.0))),
+                "desvio_dia": float(np.nan_to_num(m.get("desvio_padrao_dia_ecommerce", 0.0))),
+                "share": float(np.nan_to_num(m.get("share_ecommerce", 0.0))),
+                "lucro_por_peca": float(np.nan_to_num(m.get("lucro_por_peca_ecommerce", m.lucro_por_peca))),
+                "fator": p.fator_perda_ruptura_ecommerce,
+            },
+            "lojas": {
+                "demanda_dia": float(np.nan_to_num(m.get("demanda_media_dia_lojas", 0.0))),
+                "desvio_dia": float(np.nan_to_num(m.get("desvio_padrao_dia_lojas", 0.0))),
+                "share": 1.0 - float(np.nan_to_num(m.get("share_ecommerce", 0.0))),
+                "lucro_por_peca": float(np.nan_to_num(m.get("lucro_por_peca_lojas", m.lucro_por_peca))),
+                "fator": p.fator_perda_ruptura_lojas,
+            },
+            "covariancia": float(np.nan_to_num(m.get("covariancia_canais", 0.0))),
+        },
         "dias": dias,
         "resumo_dias": {
             "disponivel": int(disponivel.sum()),
