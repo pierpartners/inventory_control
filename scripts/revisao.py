@@ -430,6 +430,41 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
     r.alerta(B, "tamanho da correcao",
              f"sem corrigir, a demanda media do catalogo sairia {quanto:.1%} menor")
 
+    # --- os dois canais, estimados com as mesmas mascaras de dia ---
+    cols = {"demanda_media_dia_ecommerce", "demanda_media_dia_lojas", "share_ecommerce",
+            "demanda_media_dia_ingenua_ecommerce", "demanda_media_dia_ingenua_lojas"}
+    if cols <= set(m.columns) and "pecas_ecommerce" in dia.columns:
+        g_e = dia.groupby("sku").pecas_ecommerce.mean()
+        g_l = dia.groupby("sku").pecas_lojas.mean()
+        mi = m.set_index("sku")
+        idx = g_e.index.intersection(mi.index)
+        r.compara(B, "media ingenua do e-commerce = media da coluna na grade",
+                  g_e.reindex(idx).to_numpy(), mi.demanda_media_dia_ingenua_ecommerce.reindex(idx).to_numpy(),
+                  tol=TOL_FROUXA)
+        r.compara(B, "media ingenua das lojas = media da coluna na grade",
+                  g_l.reindex(idx).to_numpy(), mi.demanda_media_dia_ingenua_lojas.reindex(idx).to_numpy(),
+                  tol=TOL_FROUXA)
+        soma = m.demanda_media_dia_ecommerce + m.demanda_media_dia_lojas
+        esperado = np.where(soma > 0, m.demanda_media_dia_ecommerce / soma.replace(0, np.nan), 0.0)
+        r.compara(B, "participacao do e-commerce = mu_e / (mu_e + mu_l)",
+                  np.nan_to_num(esperado), m.share_ecommerce.to_numpy(), tol=TOL_FROUXA)
+        r.afirma(B, "participacao do e-commerce em [0, 1]",
+                 bool(((m.share_ecommerce >= 0) & (m.share_ecommerce <= 1)).all()),
+                 f"mediana {float(m.share_ecommerce.median()):.1%} · "
+                 f"{int((m.share_ecommerce > 0.5).sum())} itens com o e-commerce majoritario")
+        # A correcao de censura e nao linear: a soma das medias corrigidas por
+        # canal nao precisa bater com a media corrigida do total. O tamanho da
+        # diferenca e diagnostico, nao erro.
+        com = m.demanda_media_dia > 0
+        gap = ((soma - m.demanda_media_dia) / m.demanda_media_dia)[com]
+        r.alerta(B, "soma dos canais corrigidos vs. total corrigido",
+                 f"diferenca relativa mediana {float(gap.median()):+.2%} · "
+                 f"p95 {float(gap.abs().quantile(.95)):.2%} · a EM por canal e a EM do total "
+                 f"nao somam exatamente, e o modelo usa o total para a politica")
+    else:
+        r.falha(B, "modelo traz a demanda por canal",
+                "faltam demanda_media_dia_ecommerce / _lojas / share_ecommerce em res_sku_modelo")
+
 
 # ----------------------------------------------------------------------
 # 3. distribuicao da demanda

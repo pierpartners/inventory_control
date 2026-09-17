@@ -79,6 +79,19 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
                              aggfunc="first")
     est = est.reindex(index=g.index, columns=g.columns)
     V = g.to_numpy(float)
+
+    # A venda por canal na MESMA grade (mesmos SKUs, mesmos dias). As mascaras
+    # de dia sao as do estoque compartilhado: quando o CD zera, os dois canais
+    # ficam censurados juntos - por isso o formato largo, e nao uma serie por
+    # canal com censura propria.
+    def grade(col: str) -> np.ndarray:
+        if col not in diario.columns:
+            return np.zeros_like(V)
+        t = diario.pivot_table(index="sku", columns="data", values=col, aggfunc="sum")
+        return t.reindex(index=g.index, columns=g.columns).fillna(0.0).to_numpy(float)
+    VE = grade("pecas_ecommerce")
+    VL = V - VE
+
     OK = (est == "Disponivel").to_numpy()
     CENS = (est == "Ruptura parcial").to_numpy()
     SEM = (est == "Sem estoque").to_numpy()
@@ -102,6 +115,22 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         if insuficiente:
             m = float(V[i].mean())
             s = float(V[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
+
+        # os dois canais pelo mesmo caminho do total, com as mesmas mascaras
+        m_e, s_e, _, _ = em_censurado(VE[i], OK[i], CENS[i], p.imputar_dias_censurados)
+        m_l, s_l, _, _ = em_censurado(VL[i], OK[i], CENS[i], p.imputar_dias_censurados)
+        if insuficiente:
+            m_e = float(VE[i].mean())
+            m_l = float(VL[i].mean())
+            s_e = float(VE[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
+            s_l = float(VL[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
+        soma = m_e + m_l
+        share = m_e / soma if soma > 0 else 0.0
+        # covariancia entre canais so nos dias em que os dois podiam vender;
+        # e o que o bloco 8 da revisao usa para decompor a variancia do total
+        dias_ok = OK[i]
+        cov = float(np.cov(VE[i][dias_ok], VL[i][dias_ok])[0, 1]) if dias_ok.sum() >= 2 else 0.0
+
         linhas.append(dict(
             sku=sku,
             demanda_media_dia=m,
@@ -118,6 +147,14 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             demanda_max_dia=float(V[i].max()),
             dias_com_venda=int((V[i] > 0).sum()),
             dias_historico=V.shape[1],
+            demanda_media_dia_ecommerce=m_e,
+            desvio_padrao_dia_ecommerce=s_e,
+            demanda_media_dia_lojas=m_l,
+            desvio_padrao_dia_lojas=s_l,
+            demanda_media_dia_ingenua_ecommerce=float(VE[i].mean()),
+            demanda_media_dia_ingenua_lojas=float(VL[i].mean()),
+            share_ecommerce=share,
+            covariancia_canais=cov,
         ))
     return pd.DataFrame(linhas)
 
@@ -1100,8 +1137,8 @@ def ler_base(wh: Warehouse, ate: str | None = None,
     `disponivel_final` e a posicao que decide a compra (liquida de reserva);
     `saldo_final` e o estoque fisico, que diz se o dia tem sinal de demanda.
     """
-    colunas = ("sku, data, pecas_vendidas, estado_estoque, saldo_final, "
-               "disponivel_final")
+    colunas = ("sku, data, pecas_vendidas, pecas_ecommerce, pecas_lojas, estado_estoque, "
+               "saldo_final, disponivel_final")
     fim = (f"where data <= DATE '{str(ate)[:10]}'" if ate else
            f"where data <= (select max(data) from {ref('mart_estoque_diario')})")
     piso = ""
