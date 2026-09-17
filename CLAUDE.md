@@ -90,6 +90,10 @@ logic. Order of the pipeline inside `executar()`: `ler_base` → censored-demand
 money on excluded items). `backend/analitico.py` re-derives page-level slices by calling back
 into `modelo.py`'s functions rather than reimplementing math, so a page's explanation is
 guaranteed to be the same calculation that produced the number, never a parallel reimplementation.
+A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
+`*_ecommerce`/`*_lojas`) com as mesmas máscaras de censura; a política usa a soma e
+`share_ecommerce` pondera o custo de ruptura e reparte o custo de cada peça entre
+`teto_compra_ecommerce` e o resto do caixa.
 
 **Other backend modules, each a distinct concern:**
 - `backend/config.py` — `Parametros` dataclass (all economic assumptions), `CAMPOS`/`GRUPOS`

@@ -114,3 +114,11 @@ discordar) e só estatística por canal com um teto (não dá caixa ao e-commerc
 
 Venda por encomenda, ordens de compra em aberto e simulação de custo estão
 no `to-do.txt` e não entram aqui.
+
+## Desvios registrados na implementação
+
+- A coluna do canal chama-se `canal_demanda` (a coluna `canal` de `stg_vendas` já existia e é o nome da loja).
+- `int_vendas_sku_dia` continua no grão SKU × dia e ganhou `pecas_ecommerce`/`lucro_ecommerce`; o invariante `pecas_ecommerce + pecas_lojas = pecas_vendidas` é garantido em `int_demanda_diaria` com `least()`.
+- Na base `exports` tudo é `ecommerce` (o export é só a venda do e-commerce); na `sintetica`, tudo é `lojas`.
+- `mart_demanda_estatistica` não mudou: as estatísticas por canal vivem em `res_sku_modelo`.
+- `fator_perda_ruptura` (agregado) só é usado na "Política atual" de referência. O custo de ruptura do modelo usa sempre os dois fatores por canal.

@@ -178,6 +178,16 @@ fila inteira.
    `margem` é o lucro por peça descontado pelo fator de perda na ruptura. `perda` é o custo de
    carregar a peça pelo horizonte mais a fração do custo que se perde no encalhe.
 
+   **Dois canais, um estoque.** A venda de cada SKU é separada em e-commerce (empresa 33) e
+   lojas (as demais). Os dois fluxos são estimados com as mesmas máscaras de ruptura do CD,
+   porque o estoque é um só. A política usa a soma; a participação do e-commerce
+   (μ_e/(μ_e+μ_l)) pondera o custo de ruptura (`fator_perda_ruptura_ecommerce`/`_lojas` ×
+   margem do canal) e reparte o custo de cada peça da fila entre dois caixas: a fatia do
+   e-commerce (`teto_compra_ecommerce`) e o resto. Com `fatia_ecommerce_rigida` ligada cada
+   canal para no seu teto; desligada, só o total limita e a fatia é leitura. Nível de serviço
+   por canal não existe: num estoque compartilhado sem reserva a probabilidade de faltar é a
+   mesma.
+
 4. **Alocação marginal.** Todas as peças candidatas do catálogo inteiro entram numa fila única
    ordenada pela nota. O motor desce a fila comprando; um bloco que não cabe no caixa restante é
    pulado, não encerra a fila. Como `P` cai a cada peça, o retorno marginal de um item decresce
