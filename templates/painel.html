@@ -28,6 +28,11 @@
       {{ ((k.comprar_valor / k.teto_ciclo) if k.teto_ciclo else 0)|pct(0) }} do caixa do ciclo
       (R$ {{ k.teto_ciclo|curto }}) utilizado
     </div>
+    <div class="pequeno t4">
+      e-commerce <b>R$ {{ k.comprar_valor_ecommerce|curto }}</b>
+      ({{ ((k.comprar_valor_ecommerce / k.comprar_valor) if k.comprar_valor else 0)|pct(0) }})
+      · lojas <b>R$ {{ k.comprar_valor_lojas|curto }}</b>
+    </div>
   </div>
 
   <div class="div"></div>

@@ -72,6 +72,15 @@
       <b>{{ resumo.pecas|n }} peças</b> de <b>{{ resumo.itens }} produtos diferentes</b>,
       em {{ resumo.familias }} famílias. Sobram R$ {{ resumo.sobra|n }} do caixa
       de R$ {{ resumo.teto|curto }}.
+      <span class="pequeno t3" style="display:block;margin-top:6px">
+        Puxado pelo <b>e-commerce: R$ {{ resumo.investimento_ecommerce|curto }}</b>
+        ({{ (resumo.investimento_ecommerce / resumo.investimento if resumo.investimento else 0)|pct(0) }})
+        · pelas <b>lojas: R$ {{ resumo.investimento_lojas|curto }}</b>.
+        {% if resumo.teto_ecommerce %}
+          Fatia do e-commerce: R$ {{ resumo.teto_ecommerce|curto }}
+          {{ '(rígida)' if resumo.fatia_rigida else '(leitura)' }}.
+        {% endif %}
+      </span>
     </div>
     <div class="faixa" style="margin-top:auto">
       <i style="width: {{ [ (resumo.investimento / resumo.teto * 100) if resumo.teto else 0, 100 ]|min|round(1) }}%"></i>
@@ -241,6 +250,8 @@
       <span class="dica">cada item repartido pela participação de cada empresa na demanda dele — a soma fecha com o pedido</span>
     </div>
     <div class="painel-int">
+      <div id="faixa-canais" style="display:flex;height:22px;border-radius:6px;overflow:hidden;gap:1px;margin-bottom:8px"></div>
+      <div class="legenda mb10" id="lg-canais"></div>
       <div id="faixa-lojas" style="display:flex;height:34px;border-radius:6px;overflow:hidden;gap:1px"></div>
       <div class="legenda mt10" id="lg-lojas"></div>
       <div class="nota-lat mt14" id="nota-rateio">–</div>
@@ -418,6 +429,21 @@
     var cores = {};
     lojas.forEach(function (l, i) { cores[l.loja_id] = N.corProduto("loja-" + l.loja_id); });
     var total = d.total_valor || 1;
+
+    /* a barra de cima e a quebra por CANAL, a que o motor cobrou dos dois
+       caixas; a de baixo reparte a fatia das lojas entre as lojas */
+    var cn = d.canais || {};
+    var ce = (cn.ecommerce || {}).valor || 0, cl = (cn.lojas || {}).valor || 0;
+    document.getElementById("faixa-canais").innerHTML =
+      '<div style="width:' + (ce / total * 100).toFixed(3) + '%;min-width:2px;background:' + C.menta +
+      '" title="e-commerce | R$ ' + N.moeda(ce) + '"></div>' +
+      '<div style="width:' + (cl / total * 100).toFixed(3) + '%;min-width:2px;background:' + C.ambar +
+      '" title="lojas | R$ ' + N.moeda(cl) + '"></div>';
+    document.getElementById("lg-canais").innerHTML =
+      '<span><i style="background:' + C.menta + '"></i>e-commerce <b class="mono">' + N.pct(ce / total, 0) + "</b></span>" +
+      '<span><i style="background:' + C.ambar + '"></i>lojas <b class="mono">' + N.pct(cl / total, 0) + "</b></span>" +
+      (d.teto_ecommerce ? '<span class="t4">fatia do e-commerce R$ ' + N.curto(d.teto_ecommerce) +
+        (d.fatia_rigida ? " (rígida)" : " (leitura)") + "</span>" : "");
 
     function faixa(destaque) {
       document.getElementById("faixa-lojas").innerHTML = lojas.map(function (l) {
