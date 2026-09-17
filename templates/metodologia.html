@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block titulo %}Metodologia{% endblock %}
 {% block cabecalho %}Como o motor decide a compra{% endblock %}
-{% block subcabecalho %}cinco perguntas, com os números de um produto de verdade — escolha qual{% endblock %}
+{% block subcabecalho %}sete perguntas, com os números de um produto de verdade — escolha qual{% endblock %}
 
 {% block cabeca %}
 <style>
@@ -22,6 +22,14 @@
   .curto p:last-child { margin-bottom: 0; }
   .curto b { color: var(--tinta); font-weight: 600; }
   .curto em { color: var(--ambar); font-style: normal; font-weight: 600; }
+  /* termo que e um parametro da tela /parametros: destacado para o olho achar onde ele entra */
+  .eq .cx.param { border-color: rgba(85,180,242,.45); background: rgba(85,180,242,.08); }
+  .eq .cx.param .v { color: var(--ceu); }
+  .eq .cx.param .s { color: var(--ceu); opacity: .8; }
+  .eq .cx .s sub { font-size: 8px; }
+  #tb-mapa td, #tb-sens td { vertical-align: top; }
+  #tb-mapa td:last-child { color: var(--tinta-3); font-size: 12px; line-height: 1.5; max-width: 520px; }
+  #tb-mapa a { color: var(--ambar); }
 </style>
 {% endblock %}
 
@@ -51,8 +59,11 @@
   <a href="#e1" class="on"><i>1</i>O que o cliente queria</a>
   <a href="#e2"><i>2</i>Quanto sai até chegar</a>
   <a href="#e3"><i>3</i>Vale a próxima peça?</a>
-  <a href="#e4"><i>4</i>Comparando produtos</a>
-  <a href="#e5"><i>5</i>A fila do caixa</a>
+  <a href="#e4"><i>4</i>De onde saem M e L</a>
+  <a href="#e5"><i>5</i>Comparando produtos</a>
+  <a href="#e6"><i>6</i>A fila do caixa</a>
+  <a href="#e7"><i>7</i>Estoque ideal e ponto de pedido</a>
+  <a href="#mapa"><i>⚙</i>Onde cada parâmetro entra</a>
   <a href="#glossario"><i>?</i>Glossário</a>
 </nav>
 
@@ -199,6 +210,8 @@
       <div class="pequeno t4" id="eq-valor-leg" style="margin-top:-4px"></div>
 
       <div class="nota-lat aviso mt18" id="x3-nota">–</div>
+      <div class="curto mt14"><p>De onde saem exatamente esses dois números — e onde os
+        parâmetros da aba <b>Economia</b> entram neles — é a pergunta 4, logo abaixo.</p></div>
     </div>
 
     <div class="painel">
@@ -221,7 +234,104 @@
 
 <!-- ============================================ 4 -->
 <section class="estacao" id="e4">
-  <div class="pergunta">4. Como comparar uma peça barata com uma de milhares de reais</div>
+  <div class="pergunta">4. De onde saem a margem M e a perda L</div>
+  <div class="resposta">é aqui que entram os três parâmetros da aba Economia: custo de manter estoque, perda na ruptura e perda no encalhe</div>
+
+  <div class="curto mt18 mb14" style="max-width:860px">
+    <p>A conta da peça (pergunta 3) tem só quatro números: a chance de vender, <b>M</b>, a chance
+    de encalhar e <b>L</b>. Os parâmetros econômicos <em>nunca aparecem sozinhos</em> — eles são
+    ingredientes de M e de L. Quem aumenta M faz o motor comprar mais; quem aumenta L faz o motor
+    parar antes.</p>
+  </div>
+
+  <div class="gr gr-2">
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>M — o que a peça rende se vender</h2>
+        <span class="dica">a margem, descontada pela perda na ruptura, canal a canal</span>
+      </div>
+      <div class="painel-int">
+        <div class="curto mb8">
+          <p>O ponto de partida é a <b>margem por peça</b> (preço líquido menos custo). Mas nem toda
+          margem está em jogo quando o produto falta: parte dos clientes espera, parte aceita um
+          substituto. A <b>perda na ruptura</b> é a fração da margem que se perde de verdade — e por
+          isso ela entra como <em>desconto sobre a margem</em>, não como multa.</p>
+          <p>Como o site e as lojas se comportam diferente, a conta é feita por canal e depois
+          ponderada pela participação de cada um na demanda deste produto:</p>
+        </div>
+        <div class="eq" id="eq-m-ecom"></div>
+        <div class="eq" id="eq-m-lojas"></div>
+        <div class="eq" id="eq-m"></div>
+        <div class="nota-lat mt14" id="x4-m">–</div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>L — o que a peça custa se encalhar</h2>
+        <span class="dica">carregar pelo horizonte + risco de sair de linha</span>
+      </div>
+      <div class="painel-int">
+        <div class="curto mb8">
+          <p>O <b>custo de manter estoque</b> é uma taxa anual sobre o custo da peça: juro do
+          dinheiro parado, armazenagem, seguro. Para <b>uma</b> peça o motor cobra só o pedaço
+          do ano que ela fica esperando — o horizonte H. Quando o estoque total não cabe no teto
+          de capital, soma-se à taxa um <b>prêmio de escassez λ</b>, que encarece o dinheiro
+          por dentro até caber.</p>
+          <p>A <b>perda no encalhe</b> é outra coisa: a fração do custo que se perde se a peça não
+          vender — remarcação, tonalidade fora de linha, descontinuação.</p>
+        </div>
+        <div class="eq" id="eq-l-carregar"></div>
+        <div class="eq" id="eq-l-encalhe"></div>
+        <div class="eq" id="eq-l"></div>
+        <div class="nota-lat mt14" id="x4-l">–</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gr gr-2 mt18">
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Onde M e L se encontram: a chance mínima</h2>
+        <span class="dica">a peça só se paga se a chance de vender passar deste ponto</span>
+      </div>
+      <div class="painel-int">
+        <div class="curto mb8">
+          <p>V = P×M − (1−P)×L é positivo exatamente quando <b>P &gt; L ÷ (M + L)</b>. Esse
+          quociente é o único lugar em que os três parâmetros se encontram — e é ele que decide
+          em qual peça a escada da pergunta 3 cruza o zero.</p>
+        </div>
+        <div class="eq" id="eq-limite"></div>
+        <div class="nota-lat aviso" id="x4-limite">–</div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Se você mexer no parâmetro…</h2>
+        <span class="dica">o que muda em cada peça deste produto</span>
+      </div>
+      <div class="painel-int rente">
+        <div class="rolo">
+          <table class="tb" id="tb-sens">
+            <thead><tr>
+              <th>Parâmetro</th>
+              <th class="n">Hoje</th>
+              <th>Entra em</th>
+              <th class="n">+1 ponto muda</th>
+              <th>Efeito na compra</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 5 -->
+<section class="estacao" id="e5">
+  <div class="pergunta">5. Como comparar uma peça barata com uma de milhares de reais</div>
   <div class="resposta">tudo vira a mesma medida: quanto cada real investido rende por dia</div>
 
   <div class="gr gr-23 mt18">
@@ -240,7 +350,7 @@
       <div class="curto mt14">
         <p>É essa nota — e só ela — que ordena a fila de compra.</p>
       </div>
-      <div class="nota-lat aviso" id="x4-nota">–</div>
+      <div class="nota-lat aviso" id="x5-nota">–</div>
     </div>
 
     <div class="painel">
@@ -268,9 +378,9 @@
   </div>
 </section>
 
-<!-- ============================================ 5 -->
-<section class="estacao" id="e5">
-  <div class="pergunta">5. O caixa compra sempre a melhor peça disponível</div>
+<!-- ============================================ 6 -->
+<section class="estacao" id="e6">
+  <div class="pergunta">6. O caixa compra sempre a melhor peça disponível</div>
   <div class="resposta">e refaz a pergunta a cada peça, até o dinheiro acabar</div>
 
   <div class="gr gr-23 mt18">
@@ -302,7 +412,115 @@
           <span>1ª peça</span><span>última peça comprada</span>
         </div>
         <div class="gr gr-2 mt18" id="kv-fila"></div>
-        <div class="nota-lat aviso mt14" id="x5-nota">–</div>
+        <div class="nota-lat aviso mt14" id="x6-nota">–</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ 7 -->
+<section class="estacao" id="e7">
+  <div class="pergunta">7. E o "estoque ideal", o ponto de pedido, o lote?</div>
+  <div class="resposta">a política por item continua sendo calculada — é aqui que entram o custo por pedido, os limites de nível de serviço e o limiar do regime discreto</div>
+
+  <div class="gr gr-23 mt18">
+    <div>
+      <div class="curto mb14">
+        <p>Além da fila de peças, o modelo calcula para cada item um <b>ponto de pedido</b> (o
+        nível em que vale a pena olhar) e um <b>estoque máximo</b>. Eles servem de alarme e de
+        referência na tela de Itens, e é sobre eles que o modelo mede a conta anual do produto.
+        Mas quem decide a compra de hoje é a fila — encher um item até o estoque ideal antes de
+        olhar os outros era justamente o que fazia o dinheiro acabar em poucos produtos.</p>
+        <p>O item cai em um de dois regimes conforme a demanda esperada no horizonte μ passa ou
+        não do <b>limiar do regime discreto</b>:</p>
+      </div>
+      <div id="regime-tag" class="mb14"></div>
+
+      <div id="bloco-eoq">
+        <div class="curto mb8"><p><b>Lote econômico.</b> O <b>custo por pedido</b> só entra aqui:
+          pedidos caros empurram para lotes maiores; carregar caro (h = custo × (taxa + λ),
+          por peça e por ano) empurra para lotes menores.</p></div>
+        <div class="eq" id="eq-eoq"></div>
+        <div class="curto mb8 mt14"><p><b>Nível de serviço.</b> Sai da comparação entre o que custa
+          carregar um lote e o que custa faltar — e é preso entre o <b>mínimo</b> e o
+          <b>máximo</b> da aba Limites:</p></div>
+        <div class="eq" id="eq-ns"></div>
+        <div class="curto mb8 mt14"><p><b>Ponto de pedido.</b> A demanda média do horizonte mais um
+          colchão proporcional ao desvio, dimensionado pelo nível de serviço:</p></div>
+        <div class="eq" id="eq-rop"></div>
+      </div>
+
+      <div id="bloco-disc">
+        <div class="curto mb8"><p><b>Unidade marginal.</b> Para itens de giro baixo a curva normal
+          não serve; o ponto de pedido é o número de peças cuja chance de vender ainda supera a razão
+          entre carregar e ganhar. Aqui a comparação usa <b>só o custo de carregar</b> (sem a perda
+          no encalhe, que só a fila usa), por isso o ponto de pedido pode ser mais folgado do que
+          a fila compraria:</p></div>
+        <div class="eq" id="eq-marginal"></div>
+        <div class="curto mt14"><p>O lote é o mínimo do fornecedor, e o custo por pedido entra só
+          na conta anual ao lado, uma vez por reposição.</p></div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>A conta anual deste produto</h2>
+        <span class="dica">onde o custo de manter e o de pedir aparecem em reais por ano</span>
+      </div>
+      <div class="painel-int">
+        <div id="kv-anual"></div>
+        <div class="nota-lat mt14" id="x7-nota">–</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ mapa -->
+<section class="estacao" id="mapa">
+  <div class="pergunta">Onde cada parâmetro entra</div>
+  <div class="resposta">a lista da tela de Parâmetros, com o valor em vigor e a conta em que cada um aparece</div>
+
+  <div class="painel mt18">
+    <div class="painel-int rente">
+      <div class="rolo">
+        <table class="tb" id="tb-mapa">
+          <thead><tr>
+            <th>Parâmetro</th>
+            <th class="n">Valor</th>
+            <th>Entra em</th>
+            <th>Como</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="nome forte">Período de revisão</td><td class="n">{{ p.periodo_revisao_dias }} dias</td>
+              <td><a href="#e2">2 · horizonte</a></td><td>H = revisão + prazo do fornecedor. Entra em μ, σ, em L (dias carregando) e na nota (dias presos).</td></tr>
+            <tr><td class="nome forte">Custo de manter estoque</td><td class="n">{{ '%.0f'|format(p.taxa_manutencao_ano*100) }}% a.a.</td>
+              <td><a href="#e4">4 · L</a> e <a href="#e7">7</a></td><td>Na fila: custo × (taxa + λ) × H ÷ 365 = custo de carregar uma peça pelo horizonte. Na política: h = custo × (taxa + λ) por peça-ano, no lote econômico e no nível de serviço; custo × taxa × estoque médio na conta anual.</td></tr>
+            <tr><td class="nome forte">Perda quando falta no e-commerce</td><td class="n">{{ '%.0f'|format(p.fator_perda_ruptura_ecommerce*100) }}%</td>
+              <td><a href="#e4">4 · M</a></td><td>Desconta a margem do e-commerce: só essa fração está em jogo quando falta. Ponderada pela participação do canal.</td></tr>
+            <tr><td class="nome forte">Perda quando falta nas lojas</td><td class="n">{{ '%.0f'|format(p.fator_perda_ruptura_lojas*100) }}%</td>
+              <td><a href="#e4">4 · M</a></td><td>Idem para a margem das lojas. M é a média dos dois canais pesada pela demanda de cada um neste produto.</td></tr>
+            <tr><td class="nome forte">Perda se a peça encalhar</td><td class="n">{{ '%.0f'|format(p.perda_encalhe*100) }}% do custo</td>
+              <td><a href="#e4">4 · L</a></td><td>custo × perda no encalhe é a segunda parcela de L. Não entra na política por item (pergunta 7), só na fila.</td></tr>
+            <tr><td class="nome forte">Custo por pedido</td><td class="n">R$ {{ '%.0f'|format(p.custo_por_pedido) }}</td>
+              <td><a href="#e7">7 · lote</a></td><td>Só na política por item: lote econômico = √(2 × demanda anual × custo por pedido ÷ h) e custo de pedir do ano = pedidos × custo por pedido. Não muda a fila.</td></tr>
+            <tr><td class="nome forte">Nível de serviço mínimo / máximo</td><td class="n">{{ '%.0f'|format(p.nivel_servico_min*100) }}% – {{ '%.1f'|format(p.nivel_servico_max*100) }}%</td>
+              <td><a href="#e7">7 · nível de serviço</a></td><td>Prendem o nível de serviço do regime EOQ + normal. Não entram na fila.</td></tr>
+            <tr><td class="nome forte">Limiar do regime discreto</td><td class="n">{{ '%.0f'|format(p.limiar_giro_baixo) }} peças</td>
+              <td><a href="#e7">7 · regime</a></td><td>μ abaixo disto: unidade marginal; acima: EOQ + normal. Só muda a política por item; a fila trata todos os itens do mesmo jeito.</td></tr>
+            <tr><td class="nome forte">Ajuste do desvio no horizonte</td><td class="n">{{ '%.2f'|format(p.fator_desvio_horizonte) }}×</td>
+              <td><a href="#e2">2 · σ</a></td><td>Multiplica σ = √(H × desvio diário² + demanda² × desvio do prazo²). Achata ou alarga a distribuição da pergunta 2 e, com ela, a chance de vender de cada peça.</td></tr>
+            <tr><td class="nome forte">Teto de capital em estoque</td><td class="n">R$ {{ '{:,.0f}'.format(p.teto_capital).replace(',', '.') }}</td>
+              <td><a href="#e4">4 · λ</a></td><td>Se a soma do estoque ideal não cabe, o modelo sobe λ até caber. λ soma à taxa de manter em L e em h. Hoje λ = {{ '%.3f'|format(exec.lam) }}.</td></tr>
+            <tr><td class="nome forte">Teto de compra por ciclo</td><td class="n">R$ {{ '{:,.0f}'.format(p.teto_compra_ciclo).replace(',', '.') }}</td>
+              <td><a href="#e6">6 · fila</a></td><td>Onde a fila é cortada. Não muda a nota de nenhuma peça, só quantas entram.</td></tr>
+            <tr><td class="nome forte">Fatia do e-commerce no caixa</td><td class="n">{% if p.teto_compra_ecommerce %}R$ {{ '{:,.0f}'.format(p.teto_compra_ecommerce).replace(',', '.') }}{% else %}sem fatia{% endif %}</td>
+              <td><a href="#e6">6 · fila</a></td><td>Cada peça comprada é cobrada aos dois caixas na participação do e-commerce no item. Com a fatia rígida, o e-commerce para de puxar peças quando a dele acaba.</td></tr>
+            <tr><td class="nome forte">Janela de estimação</td><td class="n">{{ p.janela_estimacao_dias }} dias</td>
+              <td><a href="#e1">1 · demanda</a></td><td>Quantos dias de histórico entram na média corrigida. Custo e margem vêm do histórico inteiro.</td></tr>
+            <tr><td class="nome forte">Piso de histórico</td><td class="n">{{ p.dias_utilizaveis_minimo }} dias</td>
+              <td><a href="#e1">1 · demanda</a></td><td>Com menos dias utilizáveis que isto, o item usa a média simples em vez da corrigida.</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -340,20 +558,6 @@
         </div>
       </div>
 
-      <div class="painel">
-        <div class="painel-cab">
-          <h2>E o "estoque ideal"?</h2>
-          <span class="dica">ele continua existindo, mas não manda na compra</span>
-        </div>
-        <div class="painel-int curto">
-          <p>O modelo também calcula, para cada item, um <b>ponto de pedido</b> (o nível em que
-          vale a pena olhar) e um <b>estoque ideal</b>. Eles servem de alarme e de referência —
-          você os vê na tela de Itens.</p>
-          <p>Mas quem decide o pedido de hoje é a fila de peças. Encher um item até o estoque
-          ideal antes de olhar os outros é justamente o que fazia o dinheiro acabar em poucos
-          produtos.</p>
-        </div>
-      </div>
     </div>
   </div>
 </section>
@@ -365,7 +569,11 @@
 (function () {
   var C = N.COR;
   var P = {{ {'revisao': p.periodo_revisao_dias, 'encalhe': p.perda_encalhe,
-              'perda_ruptura': p.fator_perda_ruptura, 'taxa': p.taxa_manutencao_ano}|tojson }};
+              'perda_ruptura': p.fator_perda_ruptura, 'taxa': p.taxa_manutencao_ano,
+              'fator_e': p.fator_perda_ruptura_ecommerce, 'fator_l': p.fator_perda_ruptura_lojas,
+              'pedido': p.custo_por_pedido, 'ns_min': p.nivel_servico_min,
+              'ns_max': p.nivel_servico_max, 'limiar': p.limiar_giro_baixo,
+              'dias_ano': p.dias_por_ano}|tojson }};
 
   function id(x) { return document.getElementById(x); }
   function txt(x, v) { var e = id(x); if (e) e.innerHTML = v; }
@@ -569,7 +777,169 @@
             : ""));
     }
 
-    /* -------- 4. a nota */
+    /* -------- 4. de onde saem M e L */
+    var ca = d.canais || {}, ce = ca.ecommerce || {}, cl = ca.lojas || {};
+    var lam = m.premio_escassez || 0, c = ec.custo_unitario, H = m.periodo_protecao_dias;
+    var mE = ce.lucro_por_peca * ce.fator, mL = cl.lucro_por_peca * cl.fator;
+    id("eq-m-ecom").innerHTML =
+      cx("margem no e-commerce", "R$ " + N.moeda(ce.lucro_por_peca, 2), "por peça") + op("×") +
+      cx("perda na ruptura (site)", N.pct(ce.fator, 0), "parâmetro", "param") + op("=") +
+      cx("em jogo no site", "R$ " + N.moeda(mE, 2), "M<sub>e</sub>", "ganho");
+    id("eq-m-lojas").innerHTML =
+      cx("margem nas lojas", "R$ " + N.moeda(cl.lucro_por_peca, 2), "por peça") + op("×") +
+      cx("perda na ruptura (lojas)", N.pct(cl.fator, 0), "parâmetro", "param") + op("=") +
+      cx("em jogo nas lojas", "R$ " + N.moeda(mL, 2), "M<sub>l</sub>", "ganho");
+    id("eq-m").innerHTML =
+      cx("fatia do site na demanda", N.pct(ce.share, 0), "s") + op("×") +
+      cx("M<sub>e</sub>", "R$ " + N.moeda(mE, 2), "") + op("+") +
+      cx("fatia das lojas", N.pct(cl.share, 0), "1−s") + op("×") +
+      cx("M<sub>l</sub>", "R$ " + N.moeda(mL, 2), "") + op("=") +
+      cx("margem se vender", "R$ " + N.moeda(ec.margem_se_vender, 2), "M", "res");
+    txt("x4-m",
+      "Da margem de R$ " + N.moeda(ec.lucro_por_peca, 2) + " que este produto dá por peça, o motor " +
+      "considera <b>R$ " + N.moeda(ec.margem_se_vender, 2) + "</b> em jogo. " +
+      (ce.share > 0.5
+        ? "Como " + N.pct(ce.share, 0) + " da demanda vem do site, é a perda na ruptura do e-commerce que pesa aqui."
+        : "Como " + N.pct(cl.share, 0) + " da demanda vem das lojas, é a perda na ruptura das lojas que pesa aqui.") +
+      " Subir esse parâmetro <b>aumenta</b> M e faz o motor comprar mais peças, não menos.");
+
+    var coTaxa = c * P.taxa * H / P.dias_ano, coLam = c * lam * H / P.dias_ano;
+    id("eq-l-carregar").innerHTML =
+      cx("custa a peça", "R$ " + N.moeda(c, 2), "c") + op("×") +
+      cx("( custo de manter", N.pct(P.taxa, 0) + " a.a.", "parâmetro", "param") + op("+") +
+      cx("prêmio de escassez )", N.num(lam, 3), "λ", lam > 0 ? "param" : "") + op("×") +
+      cx("dias carregando", N.num(H) + " ÷ " + P.dias_ano, "H ÷ dias do ano") + op("=") +
+      cx("carregar pelo horizonte", "R$ " + N.moeda(ec.custo_carregar, 2), "C<sub>o</sub>", "perda");
+    id("eq-l-encalhe").innerHTML =
+      cx("custa a peça", "R$ " + N.moeda(c, 2), "c") + op("×") +
+      cx("perda se encalhar", N.pct(P.encalhe, 0) + " do custo", "parâmetro", "param") + op("=") +
+      cx("risco de sair de linha", "R$ " + N.moeda(ec.custo_obsolescencia, 2), "obsolescência", "perda");
+    id("eq-l").innerHTML =
+      cx("carregar pelo horizonte", "R$ " + N.moeda(ec.custo_carregar, 2), "C<sub>o</sub>") + op("+") +
+      cx("risco de sair de linha", "R$ " + N.moeda(ec.custo_obsolescencia, 2), "") + op("=") +
+      cx("perda se encalhar", "R$ " + N.moeda(ec.perda_se_encalhar, 2), "L", "res mau");
+    var pesoObs = ec.perda_se_encalhar > 0 ? ec.custo_obsolescencia / ec.perda_se_encalhar : 0;
+    txt("x4-l",
+      "Dos R$ " + N.moeda(ec.perda_se_encalhar, 2) + " de perda, <b>" + N.pct(pesoObs, 0) +
+      "</b> é o risco de sair de linha e <b>" + N.pct(1 - pesoObs, 0) + "</b> é o custo de carregar por " +
+      N.num(H) + " dias" +
+      (lam > 0
+        ? " — dos quais R$ " + N.moeda(coLam, 2) + " vêm do prêmio de escassez, porque o estoque ideal não cabe no teto de capital."
+        : ". O prêmio de escassez está em zero: o estoque ideal cabe no teto de capital, e o dinheiro custa só a taxa declarada.") +
+      " Repare que os " + N.pct(P.taxa, 0) + " ao ano viram só R$ " + N.moeda(coTaxa, 2) +
+      " por peça, porque a peça fica " + N.num(H) + " dias esperando, não um ano.");
+
+    var lim = ec.perda_se_encalhar / (ec.margem_se_vender + ec.perda_se_encalhar);
+    id("eq-limite").innerHTML =
+      cx("perda se encalhar", "R$ " + N.moeda(ec.perda_se_encalhar, 2), "L", "perda") + op("÷") +
+      cx("( margem se vender", "R$ " + N.moeda(ec.margem_se_vender, 2), "M", "ganho") + op("+") +
+      cx("perda se encalhar )", "R$ " + N.moeda(ec.perda_se_encalhar, 2), "L", "perda") + op("=") +
+      cx("chance mínima de vender", N.pct(lim, 1), "P*", "res");
+    var ultimaValida = esc.filter(function (x) { return x.vale; }).slice(-1)[0];
+    txt("x4-limite",
+      "Neste produto uma peça se paga enquanto tiver mais de <b>" + N.pct(lim, 1) +
+      "</b> de chance de vender dentro do horizonte. " +
+      (lim < 0.1
+        ? "É um limiar baixo: a margem em jogo é muito maior que a perda, então o motor aceita peças bem improváveis — o freio real acaba sendo o caixa, não L."
+        : lim < 0.35
+          ? "É um limiar moderado: o motor para quando a peça vira mais aposta do que venda."
+          : "É um limiar alto: perda grande em relação à margem. O motor só compra peças quase certas.") +
+      (ultimaValida ? " Aqui isso acontece na peça nº <b>" + N.num(ultimaValida.unidade) + "</b>." : ""));
+
+    var sens = [
+      ["Custo de manter estoque", N.pct(P.taxa, 0) + " a.a.", "L (carregar)",
+       "+R$ " + N.moeda(c * 0.01 * H / P.dias_ano, 2) + " em L", "sobe L → para antes"],
+      ["Prêmio de escassez λ", N.num(lam, 3), "L (carregar) e h",
+       "+R$ " + N.moeda(c * 0.01 * H / P.dias_ano, 2) + " em L a cada +0,01", "sobe L → para antes"],
+      ["Perda na ruptura (site)", N.pct(ce.fator, 0), "M",
+       "+R$ " + N.moeda(ce.share * ce.lucro_por_peca * 0.01, 2) + " em M", "sobe M → compra mais"],
+      ["Perda na ruptura (lojas)", N.pct(cl.fator, 0), "M",
+       "+R$ " + N.moeda(cl.share * cl.lucro_por_peca * 0.01, 2) + " em M", "sobe M → compra mais"],
+      ["Perda se encalhar", N.pct(P.encalhe, 0) + " do custo", "L (obsolescência)",
+       "+R$ " + N.moeda(c * 0.01, 2) + " em L", "sobe L → para antes"],
+      ["Período de revisão", N.num(P.revisao) + " dias", "H → μ, σ, L, nota",
+       "+R$ " + N.moeda(c * (P.taxa + lam) / P.dias_ano, 2) + " em L por dia a mais",
+       "mais dias a cobrir: μ sobe e a chance de cada peça também"]
+    ];
+    document.querySelector("#tb-sens tbody").innerHTML = sens.map(function (r) {
+      return "<tr><td class=\"nome forte\">" + r[0] + "</td><td class=\"n\">" + r[1] + "</td>" +
+        "<td class=\"fraco\">" + r[2] + "</td><td class=\"n\">" + r[3] + "</td>" +
+        "<td class=\"pequeno t3\">" + r[4] + "</td></tr>";
+    }).join("");
+
+    /* -------- 7. politica por item */
+    var disc = m.regime === "Unidade marginal", semDemanda = !(m.mu_periodo > 0);
+    id("regime-tag").innerHTML = semDemanda
+      ? '<div class="conceitos"><div class="conceito ruim"><div class="t">Sem demanda estimada</div>' +
+        '<div class="d">Este produto não tem venda utilizável na janela: μ = 0, e sem demanda não há ' +
+        "política a calcular — ponto de pedido zero, nenhuma peça na fila.</div></div></div>"
+      :
+      '<div class="conceitos"><div class="conceito ' + (disc ? "meio" : "ok") + '">' +
+      '<div class="t">' + (disc ? "Unidade marginal" : "EOQ + normal") + "</div>" +
+      '<div class="d">μ = <b>' + N.num(m.mu_periodo, 1) + "</b> peças no horizonte, " +
+      (disc ? "abaixo" : "acima") + " do limiar de " + N.num(P.limiar) + ". " +
+      (disc ? "Poucas peças por ciclo: cada uma é avaliada como uma aposta separada."
+            : "Volume suficiente para a curva normal descrever bem a demanda do horizonte.") +
+      "</div></div></div>";
+    id("bloco-eoq").style.display = (disc || semDemanda) ? "none" : "";
+    id("bloco-disc").style.display = (disc && !semDemanda) ? "" : "none";
+
+    var hDec = m.custo_manter_unit_decisao, D = m.demanda_anual;
+    if (semDemanda) {
+    } else if (!disc) {
+      id("eq-eoq").innerHTML =
+        cx("√( 2 × vende por ano", N.num(D, 0) + " un", "D") + op("×") +
+        cx("custo por pedido", "R$ " + N.moeda(P.pedido, 0), "parâmetro", "param") + op("÷") +
+        cx("carregar 1 peça 1 ano )", "R$ " + N.moeda(hDec, 2), "h = c × (taxa + λ)") + op("=") +
+        cx("lote econômico", N.num(m.eoq, 1) + " un", "Q", "res") +
+        (m.lote_compra > Math.ceil(m.eoq) ? op("→") + cx("lote mínimo do fornecedor", N.num(m.lote_compra) + " un", "manda") : "");
+      var nsBruto = 1 - (m.lote_compra * hDec) / (D * ec.margem_se_vender);
+      var preso = m.nivel_servico <= P.ns_min + 1e-9 ? "preso no mínimo"
+                : m.nivel_servico >= P.ns_max - 1e-9 ? "preso no máximo" : "dentro dos limites";
+      id("eq-ns").innerHTML =
+        cx("1 −  lote", N.num(m.lote_compra) + " un", "Q") + op("×") +
+        cx("carregar 1 peça 1 ano", "R$ " + N.moeda(hDec, 2), "h") + op("÷") +
+        cx("( vende por ano", N.num(D, 0) + " un", "D") + op("×") +
+        cx("margem se vender )", "R$ " + N.moeda(ec.margem_se_vender, 2), "M") + op("=") +
+        cx("nível de serviço", N.pct(m.nivel_servico, 1), preso + " (" + N.pct(P.ns_min, 0) + "–" +
+           N.pct(P.ns_max, 1) + ")", "res") +
+        (Math.abs(nsBruto - m.nivel_servico) > 1e-4
+          ? op("←") + cx("a conta pura dava", N.pct(Math.max(0, nsBruto), 1), "antes do limite") : "");
+      id("eq-rop").innerHTML =
+        cx("deve sair na janela", N.num(m.mu_periodo, 1) + " un", "μ") + op("+") +
+        cx("fator do nível de serviço", N.num(m.z, 2), "z") + op("×") +
+        cx("desvio na janela", N.num(m.sd_periodo, 1) + " un", "σ") + op("=") +
+        cx("ponto de pedido", N.num(m.ponto_de_pedido) + " un", "μ + segurança", "res") + op("→") +
+        cx("estoque máximo", N.num(m.estoque_maximo) + " un", "ponto de pedido + lote");
+    } else {
+      id("eq-marginal").innerHTML =
+        cx("carregar pelo horizonte", "R$ " + N.moeda(m.custo_manter_no_periodo, 2), "C<sub>o</sub>", "perda") + op("÷") +
+        cx("( margem se vender", "R$ " + N.moeda(ec.margem_se_vender, 2), "M", "ganho") + op("+") +
+        cx("carregar )", "R$ " + N.moeda(m.custo_manter_no_periodo, 2), "C<sub>o</sub>", "perda") + op("=") +
+        cx("chance mínima", N.pct(m.limite_marginal, 1), "sem a obsolescência") + op("→") +
+        cx("ponto de pedido", N.num(m.ponto_de_pedido) + " un", "peças com P acima disso", "res");
+    }
+
+    var kvA = [
+      ["Lucro bruto do ano", "vende por ano × margem por peça", m.lucro_bruto_ano, "mt"],
+      ["− custo de manter", "estoque médio " + N.num(m.estoque_medio, 1) + " un × c × " + N.pct(P.taxa, 0), -m.custo_manter_ano, "cr"],
+      ["− custo de pedir", N.num(m.pedidos_por_ano, 1) + " pedidos × R$ " + N.moeda(P.pedido, 0), -m.custo_pedir_ano, "cr"],
+      ["− custo de ruptura", N.num(m.faltas_esperadas_ano, 1) + " peças em falta × M", -m.custo_ruptura_ano, "cr"],
+      ["= lucro líquido do ano", "", m.lucro_liquido_ano, m.lucro_liquido_ano >= 0 ? "mt" : "cr"]
+    ];
+    id("kv-anual").innerHTML = kvA.map(function (r) {
+      return '<div class="kv"><span class="k">' + r[0] +
+        (r[1] ? '<div class="pequeno t4">' + r[1] + "</div>" : "") + "</span>" +
+        '<span class="v ' + r[3] + '">' + (r[2] < 0 ? "− " : "") + "R$ " + N.moeda(Math.abs(r[2]), 0) + "</span></div>";
+    }).join("");
+    var custos = m.custo_manter_ano + m.custo_pedir_ano + m.custo_ruptura_ano;
+    txt("x7-nota",
+      "Os custos do ano somam R$ " + N.moeda(custos, 0) + ", ou <b>" +
+      N.pct(m.lucro_bruto_ano > 0 ? custos / m.lucro_bruto_ano : 0, 1) + "</b> do lucro bruto. " +
+      "É nesta conta — e só nela — que o custo de manter aparece sobre o ano inteiro (estoque médio × " +
+      N.pct(P.taxa, 0) + "); na fila ele entra por peça e só pelo horizonte.");
+
+    /* -------- 5. a nota */
     if (primeira) {
       id("eq-nota").innerHTML =
         cx("vale", "R$ " + N.moeda(primeira.valor, 2), "V") + op("÷") +
@@ -578,7 +948,7 @@
         cx("nota", N.num(primeira.nota * 1000, 2), "por R$ 1.000/dia", "res");
     }
 
-    /* -------- 5. fila (parte do item) */
+    /* -------- 6. fila (parte do item) */
     id("kv-fila").innerHTML =
       '<div><div class="kv"><span class="k">Este produto entrou?</span><span class="v ' +
         (ec.comprar > 0 ? "mt" : "cr") + '">' +
@@ -672,7 +1042,7 @@
           N.pct(maiorMargem.p_vender, 0) + ") não cobre o risco de deixar tanto dinheiro parado.";
       }
     }
-    txt("x4-nota", msg);
+    txt("x5-nota", msg);
   });
 
   N.buscar("/api/plano/entradas").then(function (d) {
@@ -692,7 +1062,7 @@
       cx("melhores compradas", N.num(pecas), "até o caixa acabar") + op("→") +
       cx("produtos atendidos", N.num(e.length), "sem regra de rodízio", "res");
 
-    txt("x5-nota", "Neste ciclo o dinheiro se espalhou por <b>" + e.length +
+    txt("x6-nota", "Neste ciclo o dinheiro se espalhou por <b>" + e.length +
       " produtos</b>. O primeiro leva as peças até a nº <b>" + N.num(e[1] ? e[1].entra_na_peca - 1 : e[0].pecas) +
       "</b>; a partir daí outro produto passa a ganhar cada disputa.");
   });
