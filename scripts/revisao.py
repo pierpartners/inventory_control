@@ -1155,6 +1155,54 @@ def bloco8(r: Relatorio, wh, p, ctx) -> None:
              f"o modelo de comprar so o que gira em dias. Se o item for de colecao ou "
              f"fim de linha, esse percentual precisa subir (30-50%)")
 
+    # (e) os dois canais se comportam igual? Se sim, separar nao muda nada;
+    # se nao, e aqui que aparece o quanto muda.
+    if {"pecas_ecommerce", "pecas_lojas"} <= set(dia.columns) and "share_ecommerce" in m.columns:
+        ok = dia.estado_estoque.eq("Disponivel")
+        d_ok = dia[ok]
+        # e1. decomposicao da variancia: Var(total) = Var(e) + Var(l) + 2 Cov
+        g = d_ok.groupby("sku")
+        var_t = g.pecas_vendidas.var(ddof=1)
+        var_e = g.pecas_ecommerce.var(ddof=1)
+        var_l = g.pecas_lojas.var(ddof=1)
+        cov = g[["pecas_ecommerce", "pecas_lojas"]].apply(
+            lambda x: np.cov(x.pecas_ecommerce, x.pecas_lojas)[0, 1] if len(x) > 2 else np.nan,
+            include_groups=False)
+        rho = cov / np.sqrt(var_e * var_l)
+        rho = rho[np.isfinite(rho)]
+        recomposta = var_e + var_l + 2 * cov
+        gap = ((recomposta - var_t) / var_t)[(var_t > 0) & np.isfinite(recomposta)]
+        r.compara(B, "Var(total) = Var(e) + Var(l) + 2 Cov nos dias disponiveis",
+                  recomposta[gap.index].to_numpy(), var_t[gap.index].to_numpy(), tol=TOL_FROUXA)
+        r.alerta(B, "correlacao diaria entre e-commerce e lojas",
+                 f"rho mediano {float(rho.median()):+.2f} · p10 {float(rho.quantile(.1)):+.2f} · "
+                 f"p90 {float(rho.quantile(.9)):+.2f} em {len(rho)} itens — perto de zero, os canais "
+                 f"sao independentes e o sigma da soma e a raiz da soma das variancias; positivo, "
+                 f"promocoes puxam os dois juntos e a soma e mais volatil que a independencia diz")
+        # e2. dispersao relativa por canal
+        cv_e = (m.desvio_padrao_dia_ecommerce / m.demanda_media_dia_ecommerce.replace(0, np.nan)).dropna()
+        cv_l = (m.desvio_padrao_dia_lojas / m.demanda_media_dia_lojas.replace(0, np.nan)).dropna()
+        r.alerta(B, "coeficiente de variacao por canal",
+                 f"e-commerce mediano {float(cv_e.median()):.2f} · lojas mediano {float(cv_l.median()):.2f} · "
+                 f"total {float((m.desvio_padrao_dia / m.demanda_media_dia.replace(0, np.nan)).median()):.2f} — "
+                 f"quanto mais o CV de um canal difere do outro, mais a mistura escondia")
+        # e3. deriva da participacao do e-commerce ao longo do tempo
+        mes = pd.to_datetime(dia.data).dt.to_period("M")
+        por_mes = dia.groupby(mes).agg(e=("pecas_ecommerce", "sum"), t=("pecas_vendidas", "sum"))
+        sh = (por_mes.e / por_mes.t.replace(0, np.nan)).dropna()
+        r.alerta(B, "participacao do e-commerce mes a mes",
+                 f"primeiro mes {float(sh.iloc[0]):.1%} · ultimo {float(sh.iloc[-1]):.1%} · "
+                 f"minimo {float(sh.min()):.1%} · maximo {float(sh.max()):.1%} — a participacao usada "
+                 f"e a media da janela; deriva forte pede janela mais curta para a participacao")
+        # e4. sazonalidade semanal por canal
+        dow = pd.to_datetime(d_ok.data).dt.dayofweek
+        sem = d_ok.groupby(dow).agg(e=("pecas_ecommerce", "mean"), l=("pecas_lojas", "mean"))
+        perfil_e = (sem.e / sem.e.mean()).round(2).tolist()
+        perfil_l = (sem.l / sem.l.mean()).round(2).tolist()
+        r.alerta(B, "perfil semanal por canal (seg..dom, 1,00 = media)",
+                 f"e-commerce {perfil_e} · lojas {perfil_l} — perfis diferentes sao o sinal mais "
+                 f"direto de que sao dinamicas distintas")
+
 
 # ----------------------------------------------------------------------
 def main() -> None:
