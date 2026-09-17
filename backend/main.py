@@ -514,7 +514,11 @@ def conferencia_csv(sku: str = "", decisao: str = "", q: str = ""):
 @app.get("/api/plano/rateio")
 def api_rateio():
     """Quanto da compra do ciclo cabe a cada empresa, pela demanda dela em cada item."""
-    return JSONResponse(analitico.rateio_por_loja(wh()))
+    p = Parametros.carregar()
+    d = analitico.rateio_por_loja(wh())
+    d["teto_ecommerce"] = float(p.teto_compra_ecommerce)
+    d["fatia_rigida"] = bool(p.fatia_ecommerce_rigida)
+    return JSONResponse(d)
 
 
 @app.get("/api/plano/entradas")

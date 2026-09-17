@@ -1453,6 +1453,9 @@ def rateio_por_loja(wh: Warehouse, janela: int = 365) -> dict:
     loja na demanda DAQUELE SKU na janela - a venda observada, sem correcao de
     ruptura por loja. E aditivo: a soma das fatias fecha com o plano. Um SKU
     comprado sem venda em nenhuma loja na janela fica em `sem_venda`.
+
+    A fatia de cada canal vem do plano (`valor_da_compra_ecommerce` / `_lojas`);
+    a venda por loja so reparte a fatia das lojas entre elas.
     """
     fim = f"(select max(data) from {ref('mart_estoque_diario')})"
     v = wh.query(f"""
@@ -1468,15 +1471,25 @@ def rateio_por_loja(wh: Warehouse, janela: int = 365) -> dict:
             for k, x in (nomes.sort_values("n", ascending=False).drop_duplicates("loja_id")
                          .set_index("loja_id").loja.to_dict()).items()}
     plano = wh.query(f"""
-        select sku, quantidade_a_comprar as q, valor_da_compra as valor
+        select sku, quantidade_a_comprar as q, valor_da_compra as valor,
+               coalesce(valor_da_compra_ecommerce, 0.0)              as valor_e,
+               coalesce(valor_da_compra_lojas, valor_da_compra)      as valor_l
         from {ref('res_plano_compra')} where quantidade_a_comprar > 0""")
 
-    tot = v.groupby("sku").pecas.sum().rename("total")
-    v = v.merge(tot, on="sku")
-    v["participacao"] = v.pecas / v.total
+    # A fatia de cada CANAL vem do proprio plano (e a que o motor cobrou dos
+    # dois caixas). A venda observada por loja so reparte a fatia das lojas
+    # ENTRE as lojas - assim o rateio nunca discorda do plano por canal.
+    v["ecom"] = v.loja_id.astype(str).eq("33")
+    tot_c = v.groupby(["sku", "ecom"]).pecas.sum().rename("total_canal").reset_index()
+    v = v.merge(tot_c, on=["sku", "ecom"])
+    v["participacao_canal"] = v.pecas / v.total_canal
     r = v.merge(plano, on="sku", how="inner")
-    r["pecas_rateadas"] = r.q * r.participacao
-    r["valor_rateado"] = r.valor * r.participacao
+    frac_e = np.where(r.valor > 0, r.valor_e / r.valor.replace(0, np.nan), 0.0)
+    r["valor_canal"] = np.where(r.ecom, r.valor_e, r.valor_l)
+    r["pecas_canal"] = np.where(r.ecom, r.q * frac_e, r.q * (1.0 - frac_e))
+    r["valor_rateado"] = r.valor_canal * r.participacao_canal
+    r["pecas_rateadas"] = r.pecas_canal * r.participacao_canal
+    r["participacao"] = np.where(r.valor > 0, r.valor_rateado / r.valor.replace(0, np.nan), 0.0)
 
     com_venda = set(r.sku)
     sem = plano[~plano.sku.isin(com_venda)]
@@ -1492,9 +1505,18 @@ def rateio_por_loja(wh: Warehouse, janela: int = 365) -> dict:
             row.sku: dict(participacao=float(row.participacao),
                           pecas=float(row.pecas_rateadas), valor=float(row.valor_rateado))
             for row in g.itertuples(index=False)}
+    canais = {
+        "ecommerce": dict(valor=float(plano.valor_e.sum()),
+                          pecas=float((plano.q * np.where(plano.valor > 0, plano.valor_e / plano.valor.replace(0, np.nan), 0.0)).sum()),
+                          itens=int((plano.valor_e > 0).sum())),
+        "lojas": dict(valor=float(plano.valor_l.sum()),
+                      pecas=float((plano.q * np.where(plano.valor > 0, plano.valor_l / plano.valor.replace(0, np.nan), 0.0)).sum()),
+                      itens=int((plano.valor_l > 0).sum())),
+    }
     return dict(
         janela_dias=int(janela),
         total_valor=float(plano.valor.sum()), total_pecas=float(plano.q.sum()),
         sem_venda=dict(itens=int(len(sem)), pecas=float(sem.q.sum()), valor=float(sem.valor.sum())),
+        canais=canais,
         lojas=registros(lojas[["loja_id", "loja", "itens", "pecas", "valor"]]),
         detalhe=detalhe)
