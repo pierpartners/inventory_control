@@ -845,6 +845,40 @@ def bloco5(r: Relatorio, wh, p, ctx) -> None:
               (p.teto_compra_ciclo - esperado), fo.caixa_restante.to_numpy(),
               tol=TOL_FROUXA)
 
+    # --- dois caixas: a fatia de cada canal fecha e respeita o teto ---
+    if {"custo_ecommerce", "caixa_acumulado_ecommerce"} <= set(f.columns):
+        r.compara(B, "custo do e-commerce = custo x participacao",
+                  (f.custo * f.share_ecommerce).to_numpy(), f.custo_ecommerce.to_numpy(),
+                  tol=TOL_FROUXA)
+        r.compara(B, "custo e-commerce + lojas = custo da peca",
+                  (f.custo_ecommerce + f.custo_lojas).to_numpy(), f.custo.to_numpy(), tol=TOL_FROUXA)
+        esp_e = (fo.custo_ecommerce * fo.comprar).cumsum().to_numpy()
+        r.compara(B, "caixa acumulado do e-commerce = soma corrida da fatia dele",
+                  esp_e, fo.caixa_acumulado_ecommerce.to_numpy(), tol=TOL_FROUXA)
+        r.compara(B, "caixa acumulado das lojas = total - e-commerce",
+                  esperado - esp_e, fo.caixa_acumulado_lojas.to_numpy(), tol=TOL_FROUXA)
+        agg_c = f[f.comprar].groupby("sku").agg(e=("custo_ecommerce", "sum"), l=("custo_lojas", "sum"))
+        r.compara(B, "valor da compra do e-commerce por item = soma da fila",
+                  agg_c.e.to_numpy(), pl.valor_da_compra_ecommerce.reindex(agg_c.index).to_numpy(),
+                  tol=TOL_FROUXA)
+        r.compara(B, "valor e-commerce + lojas = valor da compra do item",
+                  (pl.valor_da_compra_ecommerce + pl.valor_da_compra_lojas).reindex(idx).to_numpy(),
+                  pl.valor_da_compra.reindex(idx).to_numpy(), tol=TOL_FROUXA)
+        teto_e = float(f.teto_ecommerce.iloc[0])
+        gasto_e = float(f[f.comprar].custo_ecommerce.sum())
+        if bool(f.fatia_rigida.iloc[0]) and "caixa" in set(p.criterio_parada.split(",")):
+            r.afirma(B, "fatia rigida: e-commerce nao passa da fatia dele",
+                     gasto_e <= teto_e + 1e-6, f"gasto {gasto_e:,.2f} de {teto_e:,.2f}")
+            r.afirma(B, "fatia rigida: lojas nao passam do resto do caixa",
+                     gasto - gasto_e <= p.teto_compra_ciclo - teto_e + 1e-6,
+                     f"gasto {gasto - gasto_e:,.2f} de {p.teto_compra_ciclo - teto_e:,.2f}")
+        else:
+            r.alerta(B, "fatia do e-commerce e leitura, nao limite",
+                     f"o e-commerce puxou R$ {gasto_e:,.0f} de R$ {gasto:,.0f} "
+                     f"({gasto_e / gasto if gasto else 0:.1%}) · fatia declarada R$ {teto_e:,.0f}")
+    else:
+        r.falha(B, "fila traz o custo por canal", "faltam custo_ecommerce / caixa_acumulado_ecommerce")
+
 
 # ----------------------------------------------------------------------
 # 6. a conta de cada peca, refeita do zero

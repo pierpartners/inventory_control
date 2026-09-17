@@ -36,6 +36,12 @@ class Parametros:
     corte_xyz_y: float = 2.80
     teto_capital: float = 1_500_000.0
     teto_compra_ciclo: float = 250_000.0
+    # Fatia INTERNA do e-commerce dentro do caixa do ciclo. A compra e uma so,
+    # da empresa 26; a fatia diz quanto desse dinheiro a demanda do e-commerce
+    # pode puxar. 0 = sem fatia declarada. Rigida: cada canal para no seu
+    # teto; flexivel (padrao): so o total limita e a fatia e leitura.
+    teto_compra_ecommerce: float = 0.0
+    fatia_ecommerce_rigida: bool = False
     limiar_giro_baixo: float = 20.0
     perda_encalhe: float = 0.04
     fator_desvio_horizonte: float = 1.00
@@ -158,6 +164,11 @@ CAMPOS = [
     ("teto_compra_ciclo", "Teto de compra por ciclo", "R$", "float", 0, 100_000_000,
      "Caixa liberado para UMA rodada de compras. Corta a fila do plano de compra pelo "
      "retorno por real investido.", "Restrições"),
+    ("teto_compra_ecommerce", "Fatia do e-commerce no caixa do ciclo", "R$", "float", 0, 100_000_000,
+     "Quanto do caixa do ciclo cabe à demanda do e-commerce. Cada peça comprada é cobrada aos "
+     "dois caixas na proporção da participação do e-commerce naquele item. Com a fatia rígida "
+     "ligada (abaixo, nos interruptores), o e-commerce para de puxar peças quando a fatia acaba; "
+     "as lojas ficam com o resto do caixa.", "Restrições"),
 
     ("corte_curva_a", "Corte da curva A", "% do lucro", "pct", 0.5, 0.95,
      "Itens até este acumulado de lucro potencial são classe A.", "Classificação"),
@@ -185,6 +196,10 @@ CHAVES = [
      "Ligado: a primeira compra de um item é avaliada em bloco, do tamanho do lote mínimo — "
      "é o que dá para executar de verdade. Desligado: o motor compra peça a peça, sem "
      "arredondar, mostrando a alocação teoricamente ideal."),
+    ("fatia_ecommerce_rigida", "Fatia do e-commerce rígida",
+     "Ligado: o e-commerce não passa da fatia dele e as lojas não passam do resto do caixa. "
+     "Desligado: só o caixa total limita a compra, e a fatia aparece só como leitura de quanto "
+     "cada canal puxou."),
 ]
 
 GRUPOS = ["Operação", "Demanda", "Economia", "Limites", "Restrições",

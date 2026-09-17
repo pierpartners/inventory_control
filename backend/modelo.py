@@ -511,6 +511,7 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         custo = qtd * float(r.custo_unitario)
         horizonte = float(r.periodo_protecao_dias)
         var_periodo = float(r.sd_periodo) ** 2
+        share_e = float(np.nan_to_num(getattr(r, "share_ecommerce", 0.0)))
 
         partes.append(pd.DataFrame({
             # ---- identificacao
@@ -560,7 +561,7 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "preco_liquido_peca": float(getattr(r, "preco_liquido_peca", 0.0)),
             # a margem capturada e a media por canal: os cinco insumos ficam
             # na linha para a conta poder ser refeita a mao
-            "share_ecommerce": float(np.nan_to_num(getattr(r, "share_ecommerce", 0.0))),
+            "share_ecommerce": share_e,
             "lucro_por_peca_ecommerce": float(getattr(r, "lucro_por_peca_ecommerce", r.lucro_por_peca)),
             "lucro_por_peca_lojas": float(getattr(r, "lucro_por_peca_lojas", r.lucro_por_peca)),
             "fator_perda_ruptura_ecommerce": float(p.fator_perda_ruptura_ecommerce),
@@ -586,6 +587,9 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "valor_esperado": valor,
             "valor_por_real": valor / custo,
             "custo": custo,
+            # o custo repartido pelos dois caixas, na participacao do canal
+            "custo_ecommerce": custo * share_e,
+            "custo_lojas": custo * (1.0 - share_e),
             "nota": valor / (custo * horizonte),
         }))
 
@@ -702,6 +706,10 @@ def regra_de_parada(p: Parametros, criterio=None) -> dict:
         # sem o criterio de caixa ligado o dinheiro nao limita: ele e o numero
         # que sai no fim (e o que o criterio por risco faz)
         "caixa_limita": "caixa" in ativos,
+        # a fatia do e-commerce nunca passa do caixa do ciclo
+        "teto_ecommerce": float(min(max(getattr(p, "teto_compra_ecommerce", 0.0), 0.0),
+                                    p.teto_compra_ciclo)),
+        "fatia_rigida": bool(getattr(p, "fatia_ecommerce_rigida", False)),
     }
 
 
@@ -713,6 +721,11 @@ def caminhar(fila: pd.DataFrame, regra: dict,
     assim o troco ainda compra as unidades baratas que vem logo abaixo.
     """
     custo = fila.custo.to_numpy(float)
+    # o custo de cada peca repartido pelos dois caixas, na participacao do
+    # e-commerce no item. Sem a coluna (fila antiga) tudo e das lojas.
+    custo_e = (fila.custo_ecommerce.to_numpy(float) if "custo_ecommerce" in fila.columns
+               else np.zeros(len(fila)))
+    custo_l = custo - custo_e
     skus = fila.sku.to_numpy()
     blocos = fila.bloco.to_numpy(int)
     qtds = fila.quantidade.to_numpy(int)
@@ -742,6 +755,14 @@ def caminhar(fila: pd.DataFrame, regra: dict,
 
     ultimo_bloco: dict = {}
     restante = teto if regra["caixa_limita"] else np.inf
+    # a fatia so morde quando e rigida E o caixa limita; flexivel, os dois
+    # saldos sao infinitos e viram so leitura acumulada
+    teto_e = float(regra.get("teto_ecommerce", 0.0))
+    rigida = bool(regra.get("fatia_rigida", False)) and bool(regra["caixa_limita"])
+    restante_e = teto_e if rigida else np.inf
+    restante_l = (teto - teto_e) if rigida else np.inf
+    gasto_e = 0.0
+    acumulado_e = np.zeros(n, dtype=float)
     gasto, pecas, ganho = 0.0, 0, 0.0
     risco, falta = risco_inicial, falta_inicial
 
@@ -752,6 +773,10 @@ def caminhar(fila: pd.DataFrame, regra: dict,
         # nao da para comprar a 90a peca sem ter comprado as 89 anteriores
         depende = b > 0 and ultimo_bloco.get(s, -1) != b - 1
         cabe = custo[i] <= restante
+        # tolerancia: custo_e e custo x participacao, e a soma de muitas
+        # fatias pode passar do teto por erro de ponto flutuante
+        cabe_e = custo_e[i] <= restante_e + 1e-9
+        cabe_l = custo_l[i] <= restante_l + 1e-9
 
         # a ordem de teste e a ordem do relato: o motivo mostrado e o do
         # primeiro criterio que fechou a porta para esta peca
@@ -761,16 +786,23 @@ def caminhar(fila: pd.DataFrame, regra: dict,
             motivo[i] = "abaixo do piso de retorno"
         elif not passa_chance[i]:
             motivo[i] = "abaixo do piso de chance de vender"
-        elif depende and not cabe:
+        elif depende and not (cabe and cabe_e and cabe_l):
             motivo[i] = "caixa ja esgotado quando chegou a vez dela"
         elif depende:
             motivo[i] = "bloqueada: a peca anterior deste item nao entrou"
         elif not cabe:
             motivo[i] = "nao coube no caixa restante"
+        elif not cabe_e:
+            motivo[i] = "nao coube na fatia do e-commerce"
+        elif not cabe_l:
+            motivo[i] = "nao coube na fatia das lojas"
         else:
             comprado[i] = True
             restante -= custo[i]
+            restante_e -= custo_e[i]
+            restante_l -= custo_l[i]
             gasto += custo[i]
+            gasto_e += custo_e[i]
             pecas += int(qtds[i])
             ganho += float(valores[i])
             risco -= float(red_risco[i])
@@ -779,6 +811,7 @@ def caminhar(fila: pd.DataFrame, regra: dict,
             motivo[i] = "comprada"
 
         acumulado[i] = gasto
+        acumulado_e[i] = gasto_e
         sobra[i] = teto - gasto        # sempre contra o caixa do ciclo, para leitura
         pecas_ac[i] = pecas
         valor_ac[i] = ganho
@@ -790,6 +823,11 @@ def caminhar(fila: pd.DataFrame, regra: dict,
         "caixa_antes": antes, "caixa_acumulado": acumulado, "caixa_restante": sobra,
         "pecas_acumuladas": pecas_ac, "valor_acumulado": valor_ac,
         "margem_em_risco_restante": risco_ac, "falta_restante": falta_ac,
+        "caixa_acumulado_ecommerce": acumulado_e,
+        "caixa_acumulado_lojas": acumulado - acumulado_e,
+        # sempre contra a fatia declarada, para leitura, rigida ou nao
+        "caixa_restante_ecommerce": teto_e - acumulado_e,
+        "caixa_restante_lojas": (teto - teto_e) - (acumulado - acumulado_e),
     }
 
 
@@ -914,6 +952,8 @@ def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd
     for coluna, valores in passo.items():
         fila[coluna] = valores
     fila["teto_ciclo"] = float(p.teto_compra_ciclo)
+    fila["teto_ecommerce"] = regra["teto_ecommerce"]
+    fila["fatia_rigida"] = regra["fatia_rigida"]
     fila["criterio_parada"] = regra["criterio"]
     fila["piso_retorno"] = regra["piso_retorno"]
     fila["piso_chance"] = regra["piso_chance"]
@@ -928,6 +968,8 @@ def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd
         blocos_comprados=("bloco", "count"),
         ultima_unidade=("unidade_ate", "max"),
         p_vender_ultima=("p_vender_ultima", "min"),
+        valor_da_compra_ecommerce=("custo_ecommerce", "sum"),
+        valor_da_compra_lojas=("custo_lojas", "sum"),
     ).reset_index()
 
     disponiveis = fila.groupby("sku").agg(
@@ -948,7 +990,8 @@ def plano_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd.Da
     for col, padrao in [("quantidade_a_comprar", 0), ("valor_da_compra", 0.0),
                         ("margem_esperada", 0.0), ("blocos_comprados", 0),
                         ("unidades_com_retorno", 0), ("valor_total_disponivel", 0.0),
-                        ("custo_total_disponivel", 0.0), ("melhor_nota", 0.0)]:
+                        ("custo_total_disponivel", 0.0), ("melhor_nota", 0.0),
+                        ("valor_da_compra_ecommerce", 0.0), ("valor_da_compra_lojas", 0.0)]:
         plano[col] = plano.get(col, padrao)
         plano[col] = plano[col].fillna(padrao)
     plano["quantidade_a_comprar"] = plano.quantidade_a_comprar.astype(int)
