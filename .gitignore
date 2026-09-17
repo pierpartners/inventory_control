@@ -69,3 +69,6 @@ conferencia-*.csv
 
 # sessoes do navegador Playwright (MCP) - capturas e snapshots de tela
 .playwright-mcp/
+
+# area de trabalho dos planos superpowers (ledger, briefs, relatorios de revisao)
+.superpowers/
