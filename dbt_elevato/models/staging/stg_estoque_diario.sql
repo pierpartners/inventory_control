@@ -32,20 +32,25 @@ with pos as (
 ),
 
 vendido as (
-    -- venda do dia de TODAS as lojas, liquida de devolucao e com piso zero:
-    -- devolucao nao e demanda negativa.
+    -- venda do dia de TODAS as lojas, pela MESMA regra da tabela de vendas:
+    -- sai de stg_vendas, que ja descarta devolucao/cancelamento (linha
+    -- negativa) e a venda sob ENCOMENDA. Ate aqui esta CTE lia a fonte crua
+    -- direto, somava por dia e truncava em zero - e com isso a encomenda
+    -- entrava no sinal de demanda e o cancelamento lancado em outro dia se
+    -- perdia. Medido em 365 dias, so nos dias utilizaveis: 158 mil pecas de
+    -- ENCOMENDA (1.457 SKUs) dentro da grade, e 1.966 dos 3.231 itens com
+    -- total diferente entre a grade e a tabela de vendas. O caso que denunciou:
+    -- a pastilha 1088006, vendida duas vezes em tres anos sob encomenda, lida
+    -- como 25 m2/dia porque a passagem da mercadoria pelo CD (5 dias, toda
+    -- reservada) era o unico historico "utilizavel".
     --
-    -- Esta e A coluna do projeto: dela sai toda estimativa de demanda. Ate
-    -- aqui ela lia `raw_vendas_ecommerce` - so a empresa 33 -, enquanto o
-    -- estoque desta grade e o do CD (empresa 26, local 124), que abastece as
-    -- 33 lojas. Medido em 3 anos nos 1.190 SKUs com estoque: a baixa de
-    -- disponivel foi de 584.158 pecas, o e-commerce vendeu 91.821 (17%) e
-    -- todas as lojas 672.225. No par SKU-dia, o e-commerce explicava 8,3% da
-    -- baixa e o conjunto explica 85,8%.
-    select cast(IDSUBPRODUTO as varchar) as sku,
-           cast(DATA as date)            as data,
-           greatest(sum(cast(QTDPRODUTO as double)), 0) as pecas
-    from {{ source('raw', 'raw_vendas_todas') }}
+    -- Esta e A coluna do projeto: dela sai toda estimativa de demanda. A
+    -- fonte e a de todas as lojas porque o estoque desta grade e o do CD
+    -- (empresa 26, local 124), que abastece as 33 lojas. Medido em 3 anos nos
+    -- 1.190 SKUs com estoque: a baixa de disponivel foi de 584.158 pecas, o
+    -- e-commerce vendeu 91.821 (17%) e todas as lojas 672.225.
+    select sku, data, sum(pecas_vendidas) as pecas
+    from {{ ref('stg_vendas') }}
     group by 1, 2
 ),
 
@@ -89,6 +94,30 @@ select
     case when coalesce(saldo_ant, saldo_final + pecas_vendidas) > 0
           and saldo_final <= 0 then 1 else 0 end as dia_censurado
 from grade
+
+{% elif var('base', 'sintetica') == 'exports' %}
+
+-- A exportacao ja traz saldo de abertura e fechamento encadeados (conferido na
+-- origem: final = inicial + entradas - saidas em 100% das linhas). A venda do
+-- dia e a do e-commerce (qtd_vendida, pedidos brutos: devolucao nao e demanda
+-- negativa). ATENCAO: `saidas` do CD inclui transferencia para as lojas e e
+-- ~11x maior que a venda do e-commerce; a demanda aqui e so a do canal online.
+select
+    cast(sku as varchar)                          as sku,
+    cast(data as date)                            as data,
+    greatest(cast(estoque_inicial as double), 0)  as saldo_inicial,
+    greatest(cast(estoque_final as double), 0)    as saldo_final,
+    greatest(cast(estoque_final as double), 0)    as disponivel_final,
+    cast(round(cast(qtd_vendida as double)) as integer) as pecas_vendidas,
+    case
+        when cast(estoque_inicial as double) <= 0 then 'Sem estoque'
+        when cast(estoque_final as double)   <= 0 then 'Ruptura parcial'
+        else 'Disponivel'
+    end as estado_estoque,
+    case when cast(estoque_inicial as double) <= 0 then 0 else 1 end as dia_utilizavel,
+    case when cast(estoque_inicial as double) > 0
+          and cast(estoque_final as double) <= 0 then 1 else 0 end as dia_censurado
+from {{ source('raw', 'raw_diario_sku') }}
 
 {% else %}
 

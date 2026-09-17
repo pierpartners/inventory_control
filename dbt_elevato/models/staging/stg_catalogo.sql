@@ -158,6 +158,61 @@ left join prazo on prazo.sku = u.sku
 left join lote  on lote.sku  = u.sku
 left join preco on preco.sku = u.sku
 
+{% elif var('base', 'sintetica') == 'exports' %}
+
+-- Exportacao do DW: o cadastro ja vem juntado em raw_atributos_sku. A mesma
+-- trava do extrato real contra o custo "R$ 1,00" de item zerado se aplica.
+with a as (
+    select
+        cast(sku as varchar)                        as sku,
+        cast(item as varchar)                       as item,
+        cast(secao as varchar)                      as familia,
+        cast(unidade as varchar)                    as unidade,
+        coalesce(cast(marca as varchar),
+                 cast(fabricante as varchar))       as origem,
+        cast(custo_ultimo as double)                as custo_ultimo,
+        cast(custo_mediano as double)               as custo_mediano,
+        cast(prazo_previsto_mediano as double)      as prazo,
+        cast(lote_min as double)                    as lote,
+        cast(n_pedidos as integer)                  as n_pedidos
+    from {{ source('raw', 'raw_atributos_sku') }}
+),
+
+preco as (
+    -- preco praticado mediano no e-commerce (o diario nao tem preco de tabela)
+    select cast(sku as varchar) as sku,
+           median(cast(valor_venda_liquido as double)
+                  / nullif(cast(qtd_venda_liquida as double), 0)) as preco_tabela
+    from {{ source('raw', 'raw_diario_sku') }}
+    where cast(qtd_venda_liquida as double) > 0
+    group by 1
+),
+
+mediana_prazo as (
+    select cast(round(median(prazo)) as integer) as m from a where prazo is not null
+)
+
+select
+    a.sku,
+    coalesce(a.item, 'SKU ' || a.sku)                as item,
+    coalesce(a.familia, 'Sem classificacao')         as familia,
+    coalesce(a.unidade, 'UN')                        as unidade,
+    coalesce(a.origem, 'Nao informado')              as origem,
+    coalesce(case when a.custo_ultimo < a.custo_mediano * 0.25
+                    or a.custo_ultimo > a.custo_mediano * 4
+                  then a.custo_mediano else a.custo_ultimo end, 0.0) as custo_unitario,
+    coalesce(a.custo_ultimo, 0.0)                    as custo_ultimo_lancado,
+    coalesce(a.custo_mediano, 0.0)                   as custo_mediano,
+    coalesce(preco.preco_tabela, a.custo_ultimo * 1.3, 0.0) as preco_tabela,
+    0.0                                              as peso_unit_kg,
+    coalesce(cast(round(a.prazo) as integer), mp.m)  as lead_time_dias,
+    0.0                                              as lead_time_desvio_dias,
+    coalesce(a.n_pedidos, 0)                         as lead_time_pedidos,
+    greatest(coalesce(cast(round(a.lote) as integer), 1), 1) as lote_minimo_compra
+from a
+cross join mediana_prazo mp
+left join preco on preco.sku = a.sku
+
 {% else %}
 
 select

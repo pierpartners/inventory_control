@@ -321,6 +321,19 @@
       });
     });
 
+    /* menu lateral: alterna sem recarregar; os graficos ja se reajustam no
+       evento de resize da janela, entao basta dispara-lo depois da troca */
+    var bm = document.getElementById("btn-menu");
+    if (bm) {
+      bm.addEventListener("click", function () {
+        var oculto = r.getAttribute("data-menu") === "oculto";
+        if (oculto) r.removeAttribute("data-menu");
+        else r.setAttribute("data-menu", "oculto");
+        gravarPref("nucleo-menu", oculto ? "visivel" : "oculto");
+        raiz.dispatchEvent(new Event("resize"));
+      });
+    }
+
     var bd = document.getElementById("btn-daltonismo");
     if (bd) {
       if (dalt) bd.classList.add("on");

@@ -47,6 +47,14 @@ class Parametros:
     # nao janela mais curta - e um ciclo anual e a escolha honesta enquanto
     # sazonalidade nao for modelada.
     janela_estimacao_dias: int = 365
+    # Piso de historico: com menos dias utilizaveis do que isto na janela, a
+    # correcao de censura nao tem amostra para ser confiavel e o item cai para
+    # a media ingenua (dias sem estoque contam como zero). O caso que motivou:
+    # a pastilha 1088006, vendida duas vezes em tres anos sob encomenda, tinha
+    # 5 dias utilizaveis e uma venda de 100 m2 num deles - a corrigida dava
+    # 25 m2/dia e uma compra de R$ 68 mil. Medido: 30 e 60 dias dao quase o
+    # mesmo plano; abaixo de 30 o dano volta. 0 desliga.
+    dias_utilizaveis_minimo: int = 30
     # --- critério de parada da compra (ver CRITERIOS abaixo) ---
     # lista separada por virgula: varios criterios valem ao mesmo tempo e
     # a compra e cortada pelo primeiro que chegar
@@ -111,6 +119,13 @@ CAMPOS = [
      "vende por dia. É a memória do modelo, e não o tamanho do banco: janela longa "
      "dilui crescimento recente, janela curta vira ruído. A economia da peça (custo "
      "e margem) continua vindo do histórico inteiro, porque não é taxa.",
+     "Demanda"),
+
+    ("dias_utilizaveis_minimo", "Piso de histórico para corrigir a demanda", "dias", "int", 0, 365,
+     "Com menos dias utilizáveis (dias em que havia estoque) do que isto na janela, a "
+     "correção de ruptura não tem amostra e o item usa a média simples, contando os dias "
+     "sem estoque como zero. Evita que uma venda isolada num item quase sempre zerado "
+     "vire uma demanda enorme. O item fica marcado “histórico insuficiente”. 0 desliga.",
      "Demanda"),
 
     ("fator_desvio_horizonte", "Ajuste do desvio no horizonte", "×", "float", 0.4, 1.5,

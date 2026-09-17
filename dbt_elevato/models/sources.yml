@@ -51,3 +51,20 @@ sources:
           Pedido a pagamento, com prazo de entrega combinado e realizado. E a
           unica fonte de prazo REAL e da sua variabilidade, que o modelo antes
           nao tinha como medir.
+
+      # ---- exportacao do DW dwanalitico (var base=exports) ----
+      # Dois arquivos gerados em dbt-elevato/exports. O diario e a fonte de
+      # estoque E de venda (o e-commerce nao vem linha a linha, so agregado por
+      # SKU e dia); o de atributos supre o que o diario nao tem: custo, prazo,
+      # lote e cadastro.
+      - name: raw_diario_sku
+        description: >
+          1 linha por SKU x dia, 365 dias. Venda do e-commerce (empresa 33) e
+          entradas/saidas/saldo do CD Gravatai (empresa 26, local 124).
+      - name: raw_atributos_sku
+        description: >
+          1 linha por SKU: descricao, marca, secao, unidade, custo medio (ultimo
+          dia com estoque + mediana), prazo previsto mediano e lote minimo.
+        columns:
+          - name: sku
+            tests: [unique, not_null]

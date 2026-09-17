@@ -22,6 +22,8 @@ data/*.bak
 # Quem for rodar com a base real recebe a pasta por fora e a coloca aqui; o
 # `scripts/rodar_pipeline.py` detecta a presenca dela sozinho (base=real).
 data/fonte_verdadeira/
+# extracao direta do DW (scripts/extrair_dw.py), mesmo conteudo em Parquet
+data/fonte_dw/
 
 # ------------------------------------------- rascunho de analise pontual
 # artefatos de investigacao que nascem na raiz durante uma sessao e nao fazem
@@ -64,3 +66,6 @@ Thumbs.db
 # CSVs baixados pela propria aplicacao (plano de compra, conferencia)
 plano-de-compra-*.csv
 conferencia-*.csv
+
+# sessoes do navegador Playwright (MCP) - capturas e snapshots de tela
+.playwright-mcp/

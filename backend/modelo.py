@@ -87,14 +87,27 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         OK = OK | CENS | SEM        # volta ao metodo ingenuo, de proposito
         CENS = np.zeros_like(CENS)
 
+    piso = int(getattr(p, "dias_utilizaveis_minimo", 0) or 0)
     linhas = []
     for i, sku in enumerate(g.index):
         m, s, n_c, imp = em_censurado(V[i], OK[i], CENS[i], p.imputar_dias_censurados)
         usaveis = int(OK[i].sum() + CENS[i].sum())
+        m_em, s_em = m, s
+        # Piso de historico. A correcao de censura divide a venda pelos dias
+        # utilizaveis; com poucos deles, uma venda isolada vira uma taxa
+        # enorme (5 dias, 100 pecas num deles = 20/dia num item que vende
+        # duas vezes por ano). Abaixo do piso o item usa a media ingenua e
+        # fica marcado, para a tela dizer que o numero e o simples.
+        insuficiente = bool(p.corrigir_censura and piso > 0 and usaveis < piso)
+        if insuficiente:
+            m = float(V[i].mean())
+            s = float(V[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
         linhas.append(dict(
             sku=sku,
             demanda_media_dia=m,
             desvio_padrao_dia=s,
+            demanda_media_dia_em=m_em,
+            historico_insuficiente=insuficiente,
             dias_utilizaveis=usaveis,
             dias_sem_estoque=int(SEM[i].sum()) if p.corrigir_censura else 0,
             dias_ruptura_parcial=n_c,
@@ -945,6 +958,70 @@ def tabela_probabilidade(modelo: pd.DataFrame, pontos: int = 30) -> pd.DataFrame
 
 # ----------------------------------------------------------------------
 # 7. Orquestracao
+
+# ----------------------------------------------------------------------
+# 6b. Em transito: o que ja foi pedido e ainda nao chegou
+# ----------------------------------------------------------------------
+def em_transito_por_sku(wh: Warehouse, hoje, protecao: pd.Series,
+                        ate: str | None = None, idade_max_dias: int = 180) -> pd.Series:
+    """Pecas pedidas ao fornecedor que ainda nao entraram no CD e que chegam
+    dentro do periodo de protecao de cada item.
+
+    Entram na posicao de estoque (posicao = disponivel + em transito) porque
+    uma peca que chega antes do fim do horizonte protege a demanda do
+    horizonte tanto quanto uma na prateleira - e sem ela o modelo mandaria
+    comprar de novo o que ja esta comprado. O que chega DEPOIS do horizonte
+    fica fora: nao serve a demanda que a compra de hoje precisa cobrir.
+
+    Pedido em aberto = colocado ha no maximo `idade_max_dias` (o que passa
+    disso e cancelamento que o ERP nunca fechou) e sem entrada no livro de
+    recebimentos do CD (`raw_ciclo_pagamento`) ate `hoje`. A data de chegada
+    e a previsao do pedido; previsao vencida conta como chegando agora, a
+    mesma leitura da projecao no dossie do item. Na operacao normal a
+    quantidade e o que falta atender (solicitado - atendido); no backtest
+    (`ate`) a coluna `qtdatendida` e a de hoje, nao a da epoca, entao vale o
+    solicitado inteiro e so o livro de entradas diz o que ja tinha chegado.
+
+    `protecao` e uma Series sku -> periodo_protecao_dias. Devolve sku -> pecas.
+    Sem as tabelas de compra na base (sintetica/exports) devolve zero para
+    todos, que e o comportamento anterior.
+    """
+    vazio = pd.Series(0.0, index=protecao.index, name="em_transito")
+    if not (wh.existe("raw_compras") and wh.existe("raw_ciclo_pagamento")):
+        return vazio
+    hoje = pd.Timestamp(hoje)
+    H = str(hoje)[:10]
+    c = wh.query(f"""
+        with c as (
+            select distinct idpedido, cast(idsubproduto as varchar) as sku,
+                   cast(dtmovimento as date)      as pedido_em,
+                   cast(previsaoentrega as date)  as previsto_para,
+                   cast(diasprevisaoentrega as integer) as prazo_previsto,
+                   cast(qtdsolicitada as double)  as solicitado,
+                   cast(qtdatendida as double)    as atendido
+            from {ref('raw_compras')}
+            where cast(dtmovimento as date) <= DATE '{H}'
+              and cast(dtmovimento as date) >= DATE '{H}' - INTERVAL {int(idade_max_dias)} DAY)
+        select c.* from c
+        where not exists (select 1 from {ref('raw_ciclo_pagamento')} k
+                          where k.idpedido = c.idpedido
+                            and cast(k.idsubproduto as varchar) = c.sku
+                            and cast(k.dt_entrada_estoque as date) <= DATE '{H}')""")
+    if c.empty:
+        return vazio
+    c["sku"] = c.sku.astype(str)
+    pend = c.solicitado - (c.atendido.fillna(0.0) if ate is None else 0.0)
+    prev = pd.to_datetime(c.previsto_para)
+    sem_prev = prev.isna()
+    prev = prev.where(~sem_prev,
+                      pd.to_datetime(c.pedido_em) + pd.to_timedelta(c.prazo_previsto.fillna(0), unit="D"))
+    chega = prev.where(prev >= hoje, hoje)
+    dias_ate_chegar = (chega - hoje).dt.days
+    prot = c.sku.map(protecao.astype(float))
+    ok = (pend > 0) & prot.notna() & (dias_ate_chegar <= prot)
+    soma = c[ok].assign(pecas=pend[ok]).groupby("sku").pecas.sum()
+    return vazio.add(soma.reindex(protecao.index).fillna(0.0), fill_value=0.0).rename("em_transito")
+
 # ----------------------------------------------------------------------
 # Espelha mart_sku_financeiro.sql com um corte de data. Existe por causa da
 # validacao historica: aquele mart agrega o periodo INTEIRO, e rodar o modelo
@@ -1167,7 +1244,11 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
     # peca reservada ja tem dono e nao protege a proxima venda
     posicoes = (diario[diario.data == ultimo][["sku", "disponivel_final"]]
                 .rename(columns={"disponivel_final": "estoque_fisico"}))
-    posicoes["em_transito"] = 0.0
+    # ... mais o que ja foi pedido e chega dentro do periodo de protecao do
+    # item: a peca a caminho protege o horizonte tanto quanto a da prateleira
+    transito = em_transito_por_sku(
+        wh, ultimo, b.set_index("sku").periodo_protecao_dias, ate=ate)
+    posicoes["em_transito"] = posicoes.sku.map(transito).fillna(0.0).to_numpy()
 
     # duas formas de gastar o mesmo caixa do ciclo, para poder comparar:
     #   reposicao  - enche item por item ate o estoque ideal (concentra)

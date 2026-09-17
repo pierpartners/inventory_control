@@ -146,6 +146,71 @@
   </div>
 </div>
 
+
+<!-- ============================================ ABC x XYZ por empresa -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>ABC × XYZ por empresa</h2>
+    <span class="dica">a classe de cada item dentro de uma loja, só com a venda dela, e como ela se compara à classe no CD</span>
+  </div>
+  <div class="gr gr-32">
+    <div class="painel">
+      <div class="painel-cab">
+        <div class="filtros" style="width:100%">
+          <span class="rotulo" style="flex:0 0 auto">Empresa</span>
+          <select id="sel-loja" class="cresce" style="max-width:360px"></select>
+          <span class="pequeno t4" id="loja-resumo"></span>
+        </div>
+      </div>
+      <div class="painel-int">
+        <div class="gr gr-2">
+          <div>
+            <div class="rotulo mb8">Matriz da loja</div>
+            <div id="matriz-loja"></div>
+          </div>
+          <div>
+            <div class="rotulo mb8">Classe na loja × classe no CD</div>
+            <div id="cruz-loja"></div>
+          </div>
+        </div>
+        <div class="nota-lat mt14" id="nota-loja"></div>
+        <div class="rolo rolo-baixo mt14">
+          <table class="tb" id="tb-divergentes">
+            <thead><tr>
+              <th>Item A nesta loja que não é A no CD</th>
+              <th>Na loja</th><th>No CD</th>
+              <th class="n">Lucro na loja</th>
+              <th class="n">Peças</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="painel-cab">
+        <h2>Todas as lojas</h2>
+        <span class="dica">últimos <span id="loja-janela">365</span> dias</span>
+      </div>
+      <div class="painel-int rente">
+        <div class="rolo rolo-medio">
+          <table class="tb" id="tb-lojas">
+            <thead><tr>
+              <th>Loja</th>
+              <th class="n" data-ajuda="Itens do universo que a loja vendeu na janela.">SKUs</th>
+              <th class="n">Lucro</th>
+              <th class="n" data-ajuda="Quantos itens formam 80% do lucro da loja.">Itens A</th>
+              <th class="n" data-ajuda="Itens A na loja que o modelo classifica como C no CD: importantes para a loja, cauda para o estoque central.">A → C no CD</th>
+            </tr></thead>
+            <tbody><tr><td colspan="5"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ============================================ tempo -->
 <div class="secao">
   <div class="secao-cab">
@@ -321,6 +386,113 @@
       '<b>XYZ</b>, mais o modelo precisa de estoque de segurança: vale muito e é difícil de prever. ' +
       "A intensidade da célula é o capital parado nela.</div>";
     document.getElementById("matriz").innerHTML = h;
+  });
+
+
+  /* ---------------------------------------------------- ABC x XYZ por loja */
+  N.buscar("/api/painel/abc_lojas").then(function (d) {
+    var A = ["A", "B", "C"], X = ["X", "Y", "Z"];
+    var lojas = d.lojas;
+    if (!lojas.length) return;
+    document.getElementById("loja-janela").textContent = d.janela_dias;
+    var sel = document.getElementById("sel-loja");
+    sel.innerHTML = lojas.map(function (l) {
+      return '<option value="' + N.esc(l.loja_id) + '">' + N.esc(l.loja) + "</option>";
+    }).join("");
+    var ecom = lojas.filter(function (l) { return l.loja_id === "33"; })[0];
+    sel.value = ecom ? "33" : lojas[0].loja_id;
+
+    function celula(cor, f, topo, baixo) {
+      return '<td class="centro" style="height:60px;border-radius:6px;padding:6px 4px;' +
+        "background:rgba(" + cor + "," + (0.08 + f * 0.34).toFixed(3) + ");" +
+        "border:1px solid rgba(" + cor + "," + (0.2 + f * 0.35).toFixed(3) + ')">' +
+        '<div class="mono" style="font-size:16px;color:var(--tinta);line-height:1.1">' + topo + "</div>" +
+        '<div class="pequeno t3" style="margin-top:2px">' + baixo + "</div></td>";
+    }
+    function vazia() {
+      return '<td style="background:var(--painel-2);border:1px solid var(--linha-2);border-radius:6px;height:60px" class="centro"><span class="t4">–</span></td>';
+    }
+    var corDe = { A: "242,169,59", B: "85,180,242", C: "148,165,182" };
+
+    function pintar(id) {
+      var l = lojas.filter(function (x) { return x.loja_id === id; })[0];
+      var det = d.detalhe[id];
+      if (!l || !det) return;
+      document.getElementById("loja-resumo").innerHTML =
+        N.num(l.skus) + " itens · R$ " + N.curto(l.lucro) + " de lucro · <b>" + l.itens_a +
+        "</b> itens A";
+
+      /* matriz da loja */
+      var mapa = {}, maxL = 0;
+      det.celulas.forEach(function (c) { mapa[c.curva_abc + c.classe_xyz] = c; if (c.lucro > maxL) maxL = c.lucro; });
+      var h = '<table style="width:100%;border-collapse:separate;border-spacing:4px">';
+      h += "<tr><td></td>" + X.map(function (x) {
+        return '<td class="centro"><div class="rotulo">' + x + "</div></td>"; }).join("") + "</tr>";
+      A.forEach(function (a) {
+        h += '<tr><td style="width:34px"><div class="rotulo">' + a + "</div></td>";
+        X.forEach(function (x) {
+          var c = mapa[a + x];
+          h += (!c || !c.skus) ? vazia()
+            : celula(corDe[a], maxL ? Math.max(c.lucro, 0) / maxL : 0, c.skus, "R$ " + N.curto(c.lucro));
+        });
+        h += "</tr>";
+      });
+      document.getElementById("matriz-loja").innerHTML = h + "</table>";
+
+      /* loja x CD */
+      var cz = {}, maxS = 0;
+      det.cruzamento.forEach(function (c) { cz[c.curva_abc + c.abc_cd] = c; if (c.skus > maxS) maxS = c.skus; });
+      var g = '<table style="width:100%;border-collapse:separate;border-spacing:4px">';
+      g += '<tr><td></td>' + A.map(function (a) {
+        return '<td class="centro"><div class="rotulo">' + a + ' no CD</div></td>'; }).join("") + "</tr>";
+      A.forEach(function (a) {
+        g += '<tr><td style="width:64px"><div class="rotulo">' + a + " na loja</div></td>";
+        A.forEach(function (b) {
+          var c = cz[a + b];
+          var cor = a === b ? "55,214,160" : (a === "A" && b === "C" ? "255,106,94" : "148,165,182");
+          g += (!c || !c.skus) ? vazia()
+            : celula(cor, maxS ? c.skus / maxS : 0, c.skus, "itens");
+        });
+        g += "</tr>";
+      });
+      document.getElementById("cruz-loja").innerHTML = g + "</table>";
+
+      document.getElementById("nota-loja").innerHTML =
+        "A classe <b>na loja</b> usa só a venda desta loja nos últimos " + d.janela_dias +
+        " dias: ABC pela participação no lucro (cortes " + N.pct(d.cortes.abc_a, 0) + " e " +
+        N.pct(d.cortes.abc_b, 0) + "), XYZ pela variação da venda diária (cortes " +
+        d.cortes.xyz_x + " e " + d.cortes.xyz_y + "), <b>sem</b> correção de ruptura — o estoque " +
+        "diário disponível é o do CD. A classe <b>no CD</b> é a do modelo, que decide a compra. " +
+        (l.a_na_loja_c_no_cd ? "<b>" + l.a_na_loja_c_no_cd + " itens</b> são A aqui e C no CD." :
+          "Nenhum item A aqui é C no CD.") +
+        (det.sem_classe_cd ? " " + det.sem_classe_cd + " itens vendidos aqui não têm classe no CD (nunca tiveram estoque lá)." : "");
+
+      document.querySelector("#tb-divergentes tbody").innerHTML = det.divergentes.length
+        ? det.divergentes.map(function (r) {
+            return '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '">' +
+              '<td class="nome forte">' + N.esc(r.item) + '<div class="pequeno t4">' + N.esc(r.sku) + " · " + N.esc(r.familia) + "</div></td>" +
+              "<td>" + N.seloClasse(r.classificacao) + "</td>" +
+              "<td>" + N.seloClasse(r.classe_cd || "") + "</td>" +
+              '<td class="n"><span class="pre">R$</span>' + N.moeda(r.lucro) + "</td>" +
+              '<td class="n">' + N.num(r.pecas) + "</td></tr>";
+          }).join("")
+        : '<tr><td colspan="5" class="t4 centro">todos os itens A desta loja também são A no CD</td></tr>';
+    }
+
+    document.querySelector("#tb-lojas tbody").innerHTML = lojas.map(function (l) {
+      return '<tr class="clicavel" data-loja="' + N.esc(l.loja_id) + '"' +
+        (l.loja_id === "33" ? ' style="background:rgba(242,169,59,.07)"' : "") + ">" +
+        '<td class="nome forte">' + N.esc(l.loja) + '<div class="pequeno t4">empresa ' + N.esc(l.loja_id) + "</div></td>" +
+        '<td class="n">' + N.num(l.skus) + "</td>" +
+        '<td class="n"><span class="pre">R$</span>' + N.curto(l.lucro) + "</td>" +
+        '<td class="n">' + l.itens_a + "</td>" +
+        '<td class="n ' + (l.a_na_loja_c_no_cd ? "c-cr" : "") + '">' + l.a_na_loja_c_no_cd + "</td></tr>";
+    }).join("");
+    document.querySelectorAll("#tb-lojas tr[data-loja]").forEach(function (tr) {
+      tr.addEventListener("click", function () { sel.value = tr.dataset.loja; pintar(sel.value); });
+    });
+    sel.addEventListener("change", function () { pintar(this.value); });
+    pintar(sel.value);
   });
 
   /* ---------------------------------------------------- série temporal */

@@ -257,6 +257,41 @@ def compras_do_ciclo(wh: Warehouse, corte: str, dias: int,
     return agg, mapa
 
 
+def chegadas_em_transito(wh: Warehouse, corte: str, ini_janela,
+                         skus: set[str] | None = None) -> dict[str, dict]:
+    """O que estava A CAMINHO no corte e chegou depois: pedidos colocados
+    ANTES da janela de revisao, com entrada real depois do corte.
+
+    E a contraparte, no que aconteceu, do `em_transito` que o motor soma a
+    posicao ao decidir: o motor conta com a previsao do pedido; a simulacao
+    entrega na data real do livro de entradas. Entra nas tres politicas
+    comparadas (plano, empresa, nada), porque essa mercadoria chegaria
+    independentemente da decisao do ciclo. Os pedidos DA janela ficam fora
+    daqui: sao a compra da empresa e ja entram por `compras_do_ciclo`.
+    """
+    d = wh.query(f"""
+        with k as (
+            select distinct idpedido, cast(idsubproduto as varchar) as sku, numnota,
+                   cast(dt_pedido as date)          as pedido_em,
+                   cast(dt_entrada_estoque as date) as entrou_em,
+                   cast(qtdatendida as double)      as pecas
+            from {ref('raw_ciclo_pagamento')}
+            where cast(qtdatendida as double) > 0
+              and cast(dt_pedido as date) < DATE '{str(ini_janela)[:10]}'
+              and cast(dt_entrada_estoque as date) > DATE '{str(corte)[:10]}')
+        select sku, entrou_em, sum(pecas) pecas from k
+        where 1 = 1 {_so(skus, 'sku')} group by 1, 2""")
+    mapa: dict[str, dict] = {}
+    if d.empty:
+        return mapa
+    dias64 = pd.to_datetime(d.entrou_em).to_numpy("datetime64[D]")
+    pecas = d.pecas.to_numpy(float)
+    for i, sku in enumerate(d.sku.astype(str).to_numpy()):
+        mapa.setdefault(sku, {})
+        mapa[sku][dias64[i]] = mapa[sku].get(dias64[i], 0.0) + pecas[i]
+    return mapa
+
+
 def datas_disponiveis(wh: Warehouse) -> dict:
     """Os limites do banco e o horizonte maximo do catalogo."""
     d = wh.query(f"select min(data) a, max(data) b, count(distinct data) n "
@@ -498,6 +533,9 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
     ped_item, ent_fut = compras_do_ciclo(
         wh, corte, int(base["periodo_revisao_dias"]), skus)
     ped_item = ped_item.set_index("sku") if len(ped_item) else ped_item
+    # o que ja estava a caminho no corte, chegando nas datas reais
+    ini_janela = (T - pd.Timedelta(days=int(base["periodo_revisao_dias"]) - 1)).date()
+    transito_fut = chegadas_em_transito(wh, corte, ini_janela, skus)
     linhas, fora = [], []
     for r in plano.itertuples(index=False):
         H = int(r.periodo_protecao_dias)
@@ -518,11 +556,24 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
         dem[indisp] = np.maximum(dem[indisp], taxa)
 
         Q = float(r.quantidade_a_comprar)
-        pos0 = float(r.posicao_estoque)
+        # a simulacao parte do DISPONIVEL: o em transito que o motor somou a
+        # posicao para decidir entra aqui na data real em que chegou, nao no
+        # dia zero - senao a peca a caminho venderia antes de existir
+        pos0 = float(getattr(r, "estoque_fisico", r.posicao_estoque))
         dia_chegada = int(min(max(r.lead_time_dias, 1), H)) - 1
+        transito = np.zeros(H)
+        mapa_t = transito_fut.get(r.sku)
+        if mapa_t:
+            for i in range(H):
+                q = mapa_t.get(dias[i])
+                if q:
+                    transito[i] = q
 
-        com = _simular(pos0, Q, dia_chegada, dem)
-        sem = _simular(pos0, 0.0, dia_chegada, dem)
+        ch_plano = np.zeros(H)
+        if 0 <= dia_chegada < H:
+            ch_plano[dia_chegada] = Q
+        com = _simular_fluxo(pos0, ch_plano + transito, dem)
+        sem = _simular_fluxo(pos0, transito, dem)
 
         # A compra da EMPRESA no mesmo horizonte: as entradas reais, nos dias
         # reais, pelo mesmo simulador. Sem isso nao ha como dizer qual das duas
@@ -534,7 +585,7 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
                 q = mapa.get(dias[i])
                 if q:
                     chegou[i] = q
-        real = _simular_fluxo(pos0, chegou, dem)
+        real = _simular_fluxo(pos0, chegou + transito, dem)
 
         # o tamanho da ordem que a empresa colocou naquele ciclo, e quanto
         # dela ja tinha entrado antes do corte (essa parte ja esta dentro de
@@ -568,6 +619,8 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
             custo_unitario=float(r.custo_unitario),
             lucro_por_peca=float(r.lucro_por_peca),
             posicao_inicial=pos0,
+            em_transito=float(getattr(r, "em_transito", 0.0) or 0.0),
+            transito_chegou_no_horizonte=float(transito.sum()),
             # --- o que a plataforma mandaria
             mandaria_comprar=int(Q),
             investimento=float(r.valor_da_compra),

@@ -11,7 +11,7 @@
   "corte_xyz_x": 1.6,
   "corte_xyz_y": 2.8,
   "teto_capital": 8033279.0,
-  "teto_compra_ciclo": 600000.0,
+  "teto_compra_ciclo": 10000000.0,
   "limiar_giro_baixo": 20.0,
   "perda_encalhe": 0.04,
   "fator_desvio_horizonte": 1.0,

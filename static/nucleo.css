@@ -296,6 +296,10 @@ h3 { font-size: 13.5px; }
 .trilho-pe .num { color: var(--tinta-3); }
 .pulso { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--menta); margin-right: 6px; box-shadow: 0 0 0 3px var(--menta-lav); }
 
+/* menu lateral recolhido: o botao na crista alterna data-menu no <html>, e o
+   script do <head> reaplica a escolha antes da pintura (sem salto de layout) */
+html[data-menu="oculto"] .trilho { display: none; }
+
 /* -------------------------------------------------------------- 4. palco */
 .palco { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
@@ -307,6 +311,13 @@ h3 { font-size: 13.5px; }
   display: flex; align-items: center; gap: 18px;
   padding: 10px 26px; position: sticky; top: 0; z-index: 30;
 }
+.btn-menu {
+  flex: 0 0 32px; width: 32px; height: 32px; border-radius: var(--raio-p);
+  border: 1px solid var(--linha-2); background: transparent; color: var(--tinta-3);
+  display: grid; place-items: center; cursor: pointer; transition: background .12s, color .12s;
+}
+.btn-menu:hover { background: var(--painel); color: var(--tinta); }
+html[data-menu="oculto"] .btn-menu { color: var(--ambar); border-color: var(--ambar-2); }
 .crista-tit { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .crista-tit h1 { font-size: 16px; }
 .crista-tit .sub { font-size: 11.5px; color: var(--tinta-3); }
@@ -771,6 +782,8 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
   color: var(--msg-er-tinta); }
 .msg-in { background: var(--ceu-lav); border-color: var(--ceu);
   color: var(--msg-in-tinta); }
+.msg-am { background: var(--ambar-lav); border-color: var(--ambar);
+  color: var(--tinta); }
 
 .carregando { display: grid; place-items: center; height: 100%; min-height: 130px; color: var(--tinta-4); font-size: 12px; }
 .girar { width: 15px; height: 15px; border: 2px solid var(--linha); border-top-color: var(--ambar); border-radius: 50%; animation: gira .7s linear infinite; }

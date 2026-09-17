@@ -46,6 +46,24 @@ FONTES = {
         ("compras_3anos.csv", "raw_compras"),
         ("ciclo_pagamento_fornecedor.csv", "raw_ciclo_pagamento"),
     ]),
+    # extracao direta do DW (scripts/extrair_dw.py): as MESMAS seis tabelas do
+    # extrato real, em Parquet (uma pasta por tabela). Usa o staging `real`.
+    "dw": ("fonte_dw", [
+        ("raw_produtos", "raw_produtos"),
+        ("raw_vendas_todas", "raw_vendas_todas"),
+        ("raw_vendas_ecommerce", "raw_vendas_ecommerce"),
+        ("raw_estoque_diario_erp", "raw_estoque_diario_erp"),
+        ("raw_compras", "raw_compras"),
+        ("raw_ciclo_pagamento", "raw_ciclo_pagamento"),
+    ]),
+    # exportacao do DW (repo dbt-elevato/exports): UM arquivo diario por SKU
+    # (venda do e-commerce + entradas/saidas/saldo do CD Gravatai, 365 dias) e
+    # um complemento por SKU (cadastro, custo medio, prazo e lote) gerado no
+    # mesmo DW. A pasta fica FORA deste repositorio; EXPORTS_DIR redefine.
+    "exports": (os.environ.get("EXPORTS_DIR", "../../dbt-elevato/exports"), [
+        ("ecommerce_vendas_estoque_diario_sku.csv.gz", "raw_diario_sku"),
+        ("atributos_sku.csv", "raw_atributos_sku"),
+    ]),
     "sintetica": ("fonte", [
         ("catalogo.csv", "raw_catalogo"),
         ("vendas.csv", "raw_vendas"),
@@ -54,21 +72,30 @@ FONTES = {
 }
 
 
+# qual ramo do staging (var `base` do dbt) cada base usa
+STAGING = {"real": "real", "dw": "real", "exports": "exports", "sintetica": "sintetica"}
+
+
+def pasta_da_base(base: str) -> Path:
+    pasta, _ = FONTES[base]
+    return (RAIZ / "data" / pasta).resolve()
+
+
 def base_disponivel() -> str:
-    """Prefere o extrato real quando a pasta dele existe."""
+    """Ordem: extrato real em CSV, extracao direta do DW, exportacao manual, sintetica."""
     forcada = os.environ.get("BASE")
     if forcada in FONTES:
         return forcada
     for nome, (pasta, arquivos) in FONTES.items():
-        alvo = RAIZ / "data" / pasta
+        alvo = pasta_da_base(nome)
         if alvo.exists() and all((alvo / a).exists() for a, _ in arquivos):
             return nome
     return "sintetica"
 
 
 def carregar_fontes(wh, base: str) -> None:
-    pasta, arquivos = FONTES[base]
-    fonte = RAIZ / "data" / pasta
+    _, arquivos = FONTES[base]
+    fonte = pasta_da_base(base)
     print(f"  - base `{base}`, carregando de {fonte}")
     for arquivo, tabela in arquivos:
         n = wh.carregar_csv(fonte / arquivo, tabela)
@@ -84,7 +111,7 @@ def rodar_dbt(base: str) -> None:
     # o resto da aplicacao (que roda com cwd=app/).
     env["DUCKDB_PATH"] = "../data/elevato.duckdb"
     print("  - dbt build em", dbt_dir)
-    r = subprocess.run(["dbt", "build", "--vars", f"base: {base}"],
+    r = subprocess.run(["dbt", "build", "--vars", f"base: {STAGING[base]}"],
                        cwd=dbt_dir, env=env, capture_output=True, text=True)
     print(r.stdout[-4000:])
     if r.returncode != 0:

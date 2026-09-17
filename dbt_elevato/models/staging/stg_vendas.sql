@@ -68,12 +68,14 @@ v as (
     select
         -- empresa + pedido + sequencia + produto + data. Menos que isso
         -- repete: a mesma linha de credito aparece em varias datas.
+        -- IDORCAMENTO fica como texto: no DW a venda direta ('VD...') e a
+        -- Revest ('R...') nao sao numericas.
         cast(IDEMPRESA as varchar) || '|' ||
-            coalesce(cast(cast(IDORCAMENTO as double) as varchar), 's') || '|' ||
+            coalesce(cast(IDORCAMENTO as varchar), 's') || '|' ||
             cast(NUMSEQUENCIA as varchar) || '|' ||
             cast(IDSUBPRODUTO as varchar) || '|' ||
             cast(cast(DATA as date) as varchar)      as chave,
-        coalesce(cast(cast(IDORCAMENTO as double) as varchar),
+        coalesce(cast(IDORCAMENTO as varchar),
                  '(sem pedido)')                     as pedido,
         cast(DATAHORA as timestamp)           as data_hora_venda,
         cast(DATA as date)                    as data,
@@ -94,11 +96,12 @@ v as (
         -- periodo inteiro, e por isso a demanda nao o usa - fica exposto para
         -- a tela de qualidade poder mostrar isso.
         cast(LOCALRETESTOQUE as varchar)      as local_estoque,
-        -- NORMAL, ENCOMENDA, IMEDIATO, AGUARDANDO. Medido: NORMAL sozinho
-        -- explica 85,8% da baixa de disponivel e o total tambem 85,8% - os
-        -- outros tipos somam peca sem somar explicacao. Ficam no sinal de
-        -- demanda de proposito: encomenda e cliente que quis e nao achou na
-        -- prateleira, que e demanda real e nao ruido.
+        -- NORMAL, ENCOMENDA, IMEDIATO, AGUARDANDO, Venda Direta. ENCOMENDA e
+        -- venda que a loja fecha sem a peca na prateleira e so entao compra
+        -- para entregar: nao passa pelo estoque do CD e por isso nao pode
+        -- dimensionar a prateleira - sai do sinal de demanda no `where`
+        -- abaixo. Os demais tipos ficam (medido: NORMAL sozinho explica 85,8%
+        -- da baixa de disponivel, igual ao total).
         cast(TIPOENTREGA as varchar)          as tipo_entrega,
         cast(MOTIVODEVCAN as varchar)         as motivo_dev_can,
         cast(DESCRDEPARTAMENTO as varchar)    as departamento,
@@ -154,7 +157,65 @@ left join custo_medio cm on cm.sku = v.sku
 -- financeiro, nao ao sinal de demanda: manter aqui inverteria o sinal do dia e
 -- o modelo leria "o mercado devolveu" como "o mercado nao quis". A tela de
 -- qualidade dos dados mostra quanto ficou de fora por esta regra.
+-- A venda sob encomenda (TIPOENTREGA = 'ENCOMENDA') tambem sai: e comprada
+-- para o pedido, nao atendida da prateleira, e o modelo dimensiona a
+-- prateleira. A tela de qualidade mostra o volume excluido.
 where v.pecas_vendidas > 0
+  and coalesce(upper(trim(v.tipo_entrega)), '') <> 'ENCOMENDA'
+
+{% elif var('base', 'sintetica') == 'exports' %}
+
+-- A exportacao nao tem linha de pedido: a venda vem agregada por SKU e dia.
+-- Cada dia com venda vira UMA linha; `pedido` e sintetico e por isso a
+-- contagem de pedidos nos marts e na verdade a contagem de dias com venda.
+-- O lucro e venda liquida menos custo medio x pecas, como no extrato real.
+with d as (
+    select cast(sku as varchar)                          as sku,
+           cast(data as date)                            as data,
+           cast(qtd_vendida as double)                   as pecas,
+           cast(qtd_venda_liquida as double)             as pecas_liq,
+           cast(valor_venda_liquido as double)           as receita,
+           cast(n_pedidos as integer)                    as n_pedidos
+    from {{ source('raw', 'raw_diario_sku') }}
+    where cast(qtd_vendida as double) > 0
+),
+c as (
+    select cast(sku as varchar) as sku,
+           coalesce(case when cast(custo_ultimo as double) < cast(custo_mediano as double) * 0.25
+                           or cast(custo_ultimo as double) > cast(custo_mediano as double) * 4
+                         then cast(custo_mediano as double) else cast(custo_ultimo as double) end, 0.0) as custo
+    from {{ source('raw', 'raw_atributos_sku') }}
+)
+select
+    row_number() over (order by d.data, d.sku)        as id_linha,
+    d.sku || '@' || cast(d.data as varchar)           as pedido,
+    cast(d.data as timestamp)                         as data_hora_venda,
+    d.data,
+    d.sku,
+    cast(round(d.pecas) as integer)                   as pecas_vendidas,
+    case when d.pecas_liq > 0 then d.receita / d.pecas_liq else 0.0 end as valor_da_peca,
+    case when d.pecas_liq > 0 then d.receita / d.pecas_liq else 0.0 end as preco_tabela_unit,
+    0.0                                               as desconto_pct,
+    d.receita                                         as receita_bruta,
+    d.receita                                         as receita_liquida,
+    c.custo                                           as custo_unitario,
+    d.pecas * c.custo                                 as cmv,
+    0.0                                               as valor_do_frete,
+    0.0                                               as frete_cobrado_cliente,
+    0.0                                               as impostos_sobre_venda,
+    d.receita - d.pecas * c.custo                     as lucro,
+    d.receita                                         as total,
+    'E-commerce'                                      as canal,
+    -- a tela de acompanhamento separa e-commerce (33) das lojas por loja_id
+    '33'                                              as loja_id,
+    'E-commerce'                                      as tipo_cliente,
+    cast(null as varchar)                             as cliente_id,
+    cast(null as varchar)                             as uf,
+    cast(null as varchar)                             as regiao,
+    'NORMAL'                                          as modalidade_frete,
+    0.0                                               as peso_total_kg
+from d
+left join c on c.sku = d.sku
 
 {% else %}
 
@@ -178,6 +239,7 @@ select
     cast(lucro as double)                 as lucro,
     cast(total as double)                 as total,
     cast(canal as varchar)                as canal,
+    cast(null as varchar)                 as loja_id,
     cast(tipo_cliente as varchar)         as tipo_cliente,
     cast(cliente_id as varchar)           as cliente_id,
     cast(uf as varchar)                   as uf,

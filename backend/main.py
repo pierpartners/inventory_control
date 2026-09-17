@@ -290,6 +290,12 @@ def api_matriz():
     return JSONResponse({"celulas": analitico.registros(df)})
 
 
+@app.get("/api/painel/abc_lojas")
+def api_abc_lojas():
+    """ABC x XYZ de cada loja, so com a venda dela, e o cruzamento com a classe do CD."""
+    return JSONResponse(analitico.abc_xyz_por_loja(wh(), Parametros.carregar()))
+
+
 @app.get("/api/painel/familias")
 def api_familias():
     return JSONResponse({"familias": analitico.cobertura_familias(wh())})
@@ -362,7 +368,8 @@ def plano(request: Request):
         "lote_minimo": bool(p.respeitar_lote_minimo),
     }
 
-    cols = ["sku", "item", "familia", "classificacao", "curva_abc",
+    cols = ["dias_utilizaveis", "historico_insuficiente",
+            "sku", "item", "familia", "origem", "classificacao", "curva_abc",
             "posicao_estoque", "quantidade_a_comprar", "ultima_unidade",
             "p_vender_ultima", "custo_unitario", "valor_da_compra",
             "margem_esperada", "retorno_por_real", "melhor_nota",
@@ -370,13 +377,19 @@ def plano(request: Request):
             "cobertura_dias", "cobertura_apos_dias", "risco_de_faltar",
             "risco_apos_compra", "ponto_de_pedido", "lote_minimo_compra"]
     cols = [c for c in cols if c in df.columns]
-    fora_cols = [c for c in ["sku", "item", "familia", "classificacao", "curva_abc",
+    fora_cols = [c for c in ["sku", "item", "familia", "origem", "classificacao", "curva_abc",
                              "posicao_estoque", "unidades_com_retorno", "melhor_nota",
                              "custo_total_disponivel", "valor_total_disponivel",
                              "risco_de_faltar", "cobertura_dias"] if c in df.columns]
 
+    # marcas (coluna `origem` do catalogo) presentes no pedido ou na fila de
+    # espera, para o filtro da tela - as que nao tem nenhuma peca nem
+    # candidata ficam de fora da lista
+    presentes = pd.concat([comprados.origem, fora.origem]) if "origem" in df.columns else pd.Series(dtype=str)
+    marcas = sorted(presentes.dropna().astype(str).unique(), key=str.casefold)
+
     return tpl.TemplateResponse(request, "plano.html", contexto(
-        request, "plano", resumo=resumo,
+        request, "plano", resumo=resumo, marcas=marcas,
         linhas=analitico.registros(comprados[cols]),
         fora=analitico.registros(fora[fora_cols].head(40)),
         estrategias=analitico.registros(est)))
@@ -496,6 +509,12 @@ def conferencia_csv(sku: str = "", decisao: str = "", q: str = ""):
     nome = f"conferencia-fila{'-' + sku if sku else ''}.csv"
     return StreamingResponse(gerar(), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
+
+@app.get("/api/plano/rateio")
+def api_rateio():
+    """Quanto da compra do ciclo cabe a cada empresa, pela demanda dela em cada item."""
+    return JSONResponse(analitico.rateio_por_loja(wh()))
 
 
 @app.get("/api/plano/entradas")

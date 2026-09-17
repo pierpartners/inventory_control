@@ -16,11 +16,13 @@
        try/catch porque em janela privada o acesso pode lancar - e uma
        preferencia de cor nunca deve derrubar a pagina. */
     (function () {
-      var r = document.documentElement, t = null, d = null;
+      var r = document.documentElement, t = null, d = null, m = null;
       try {
         t = localStorage.getItem("nucleo-tema");
         d = localStorage.getItem("nucleo-daltonismo");
+        m = localStorage.getItem("nucleo-menu");
       } catch (e) {}
+      if (m === "oculto") r.setAttribute("data-menu", "oculto");
       if (!t) {
         t = (window.matchMedia &&
              window.matchMedia("(prefers-color-scheme: light)").matches)
@@ -149,6 +151,9 @@
 
   <main class="palco">
     <header class="crista">
+      <button class="btn-menu" id="btn-menu" type="button" title="Mostrar ou esconder o menu lateral" aria-label="Mostrar ou esconder o menu lateral">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
       <div class="crista-tit">
         <h1>{% block cabecalho %}{% endblock %}</h1>
         <div class="sub">{% block subcabecalho %}{% endblock %}</div>

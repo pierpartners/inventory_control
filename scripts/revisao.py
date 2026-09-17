@@ -159,9 +159,21 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     col_pos = "disponivel_final" if "disponivel_final" in dia.columns else "saldo_final"
     pos_real = (dia[dia.data == ultimo][["sku", col_pos]]
                 .set_index("sku")[col_pos])
-    junto = plano.set_index("sku").posicao_estoque.reindex(pos_real.index)
-    r.compara(B, f"posicao de estoque = {col_pos} do ultimo dia", pos_real.to_numpy(),
-              junto.to_numpy(), contexto=f"posicao de {str(ultimo)[:10]}")
+    pl_i = plano.set_index("sku")
+    fisico = (pl_i.estoque_fisico if "estoque_fisico" in pl_i.columns
+              else pl_i.posicao_estoque).reindex(pos_real.index)
+    r.compara(B, f"estoque fisico da posicao = {col_pos} do ultimo dia", pos_real.to_numpy(),
+              fisico.to_numpy(), contexto=f"posicao de {str(ultimo)[:10]}")
+    # ... e a posicao que decide soma o em transito: pedido colocado, ainda nao
+    # entrado no CD, chegando dentro do periodo de protecao do item
+    if "em_transito" in pl_i.columns:
+        transito = pl_i.em_transito.fillna(0.0)
+        r.afirma(B, "em transito nao e negativo", bool((transito >= 0).all()),
+                 f"{float(transito.sum()):,.0f} pecas a caminho em "
+                 f"{int((transito > 0).sum())} itens entram na posicao")
+        r.compara(B, "posicao = disponivel + em transito",
+                  (pl_i.estoque_fisico.fillna(0) + transito).to_numpy(),
+                  pl_i.posicao_estoque.to_numpy(), contexto="soma das duas colunas")
     if col_pos == "disponivel_final":
         reservado = float((dia[dia.data == ultimo].saldo_final
                            - dia[dia.data == ultimo].disponivel_final).sum())
@@ -325,7 +337,22 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
     # proposital. O que nao pode e o desvio ser grande: na base real o gap
     # maximo medido e de 0,009 un/dia, 14% em termos relativos num item de
     # demanda quase nula.
-    comp = m[(m.dias_ruptura_parcial > 0) & (m.demanda_media_dia_disponivel > 0)]
+    # abaixo do piso de historico o item usa a media ingenua de proposito, e
+    # por isso fica fora das duas comparacoes com a corrigida
+    insuf = (m.historico_insuficiente.astype(bool) if "historico_insuficiente" in m.columns
+             else pd.Series(False, index=m.index))
+    piso = int(getattr(p, "dias_utilizaveis_minimo", 0) or 0)
+    if piso > 0:
+        abaixo = m[m.dias_utilizaveis < piso]
+        r.afirma(B, f"abaixo do piso de {piso} dias utilizaveis, demanda = media ingenua",
+                 bool((abaixo.historico_insuficiente.astype(bool)).all()
+                      and np.allclose(abaixo.demanda_media_dia, abaixo.demanda_media_dia_ingenua)),
+                 f"{len(abaixo)} itens abaixo do piso usam a media simples · "
+                 f"a corrigida (EM) fica guardada em demanda_media_dia_em")
+        r.afirma(B, "acima do piso, ninguem esta marcado como historico insuficiente",
+                 bool((~insuf[m.dias_utilizaveis >= piso]).all()),
+                 f"{int(insuf.sum())} marcados no total")
+    comp = m[(m.dias_ruptura_parcial > 0) & (m.demanda_media_dia_disponivel > 0) & ~insuf]
     if len(comp):
         gap = comp.demanda_media_dia_disponivel - comp.demanda_media_dia
         rel = (gap / comp.demanda_media_dia_disponivel).abs()
@@ -339,7 +366,7 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
 
     # e nao pode ficar abaixo da ingenua quando houve dia sem estoque - mesma
     # ressalva do teto acima
-    comp2 = m[m.dias_sem_estoque > 0]
+    comp2 = m[(m.dias_sem_estoque > 0) & ~insuf]
     if len(comp2):
         gap2 = comp2.demanda_media_dia_ingenua - comp2.demanda_media_dia
         r.afirma(B, "corrigida >= ingenua quando faltou estoque (fora do teto do EM)",

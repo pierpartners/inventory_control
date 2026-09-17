@@ -17,6 +17,9 @@
 
 {% block cabeca %}
 <style>
+  .col-loja { display: none; }
+  .otica-loja .col-loja { display: table-cell; }
+  .otica-loja tr.fora-da-otica { opacity: .38; }
   .corrida { display: flex; flex-wrap: wrap; align-content: flex-start; }
   .corrida b {
     display: grid; place-items: center; border-radius: 3px; cursor: pointer;
@@ -155,6 +158,7 @@
           <thead><tr>
             <th class="nao-ord"></th>
             <th>Produto</th>
+            <th data-ajuda="Classe ABC×XYZ do item no CD, a que o modelo usa: ABC pela participação no lucro potencial, XYZ pela regularidade da demanda diária.">Classe</th>
             <th class="n">Entra na peça nº</th>
             <th class="n">Leva</th>
             <th class="n">Custo unitário</th>
@@ -162,7 +166,7 @@
             <th class="n">Chance da 1ª peça</th>
             <th class="n">Chance da última</th>
           </tr></thead>
-          <tbody><tr><td colspan="8"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
+          <tbody><tr><td colspan="9"><div class="carregando"><div class="girar"></div></div></td></tr></tbody>
         </table>
       </div>
     </div>
@@ -213,7 +217,33 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <input type="search" id="q" placeholder="Buscar…" style="width:210px">
       </div>
+      <select id="f-marca" title="Filtrar pela marca (fabricante) do item">
+        <option value="">Todas as marcas</option>
+        {% for m in marcas %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+      </select>
+      <div class="seg" id="f-abc" data-ajuda="Curva ABC do item no CD: A concentra 80% do lucro potencial, B os 15% seguintes, C a cauda.">
+        <button class="on" data-v="">ABC</button>
+        <button data-v="A">A</button><button data-v="B">B</button><button data-v="C">C</button>
+      </div>
+      <div class="seg" id="f-xyz" data-ajuda="Regularidade da demanda diária no CD: X regular, Y moderada, Z errática.">
+        <button class="on" data-v="">XYZ</button>
+        <button data-v="X">X</button><button data-v="Y">Y</button><button data-v="Z">Z</button>
+      </div>
+      <span class="rotulo" style="flex:0 0 auto" data-ajuda="Reparte a compra de cada item pela participação de cada empresa na demanda daquele item nos últimos 365 dias. A compra continua uma só; a ótica só mostra quanto dela cabe a cada empresa.">Ótica</span>
+      <select id="sel-otica" style="max-width:260px"><option value="">Grupo inteiro</option></select>
       <span class="pequeno t3"><b class="mono" id="conta">{{ linhas|length }}</b> produtos</span>
+    </div>
+  </div>
+
+  <div class="painel mb14" id="painel-rateio">
+    <div class="painel-cab">
+      <h2>Quem demanda esta compra</h2>
+      <span class="dica">cada item repartido pela participação de cada empresa na demanda dele — a soma fecha com o pedido</span>
+    </div>
+    <div class="painel-int">
+      <div id="faixa-lojas" style="display:flex;height:34px;border-radius:6px;overflow:hidden;gap:1px"></div>
+      <div class="legenda mt10" id="lg-lojas"></div>
+      <div class="nota-lat mt14" id="nota-rateio">–</div>
     </div>
   </div>
 
@@ -227,6 +257,8 @@
             <th>Classe</th>
             <th class="n">Posição hoje</th>
             <th class="n">Comprar</th>
+            <th class="n col-loja" data-ajuda="Peças e dinheiro desta compra que cabem à empresa escolhida, pela participação dela na demanda do item.">Parcela da empresa</th>
+            <th class="n col-loja" data-ajuda="Participação da empresa na venda deste item nos últimos 365 dias, em peças.">Participação</th>
             <th class="n">Unidades</th>
             <th class="n">Chance da última</th>
             <th class="n">Investimento</th>
@@ -237,13 +269,16 @@
           </tr></thead>
           <tbody>
           {% for r in linhas %}
-            <tr class="clicavel" data-sku="{{ r.sku }}">
+            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}">
               <td class="idx">{{ loop.index }}</td>
-              <td class="nome forte">{{ r.item }}
-                <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
+              <td class="nome forte">{{ r.item }}{% if r.historico_insuficiente %}
+                <span class="selo selo-am" title="Só {{ r.dias_utilizaveis }} dias com estoque na janela: a demanda usada é a média simples, não a corrigida.">histórico insuficiente</span>{% endif %}
+                <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
               <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
               <td class="n fraco">{{ r.posicao_estoque|n }}</td>
               <td class="n forte">{{ r.quantidade_a_comprar|n }}</td>
+              <td class="n col-loja parcela" data-v="0"></td>
+              <td class="n col-loja participacao" data-v="0"></td>
               <td class="n fraco pequeno">{{ (r.posicao_estoque + 1)|n }} → {{ r.ultima_unidade|n }}</td>
               <td class="n" data-v="{{ r.p_vender_ultima }}" data-chance="{{ r.p_vender_ultima }}"></td>
               <td class="n" data-v="{{ r.valor_da_compra }}"><span class="pre">R$</span>{{ r.valor_da_compra|n }}</td>
@@ -284,8 +319,8 @@
           </tr></thead>
           <tbody>
           {% for r in fora %}
-            <tr class="clicavel" data-sku="{{ r.sku }}">
-              <td class="nome forte">{{ r.item }}<div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
+            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}">
+              <td class="nome forte">{{ r.item }}<div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
               <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
               <td class="n">{{ r.unidades_com_retorno|n }}</td>
               <td class="n fraco"><span class="pre">R$</span>{{ r.custo_total_disponivel|n }}</td>
@@ -340,7 +375,112 @@
     td.innerHTML = N.seloRisco(+td.dataset.risco);
   });
 
-  N.tabela("#tb-compra", { busca: "#q", conta: "#conta" });
+  /* filtro de marca: vale para o pedido, para a fila de espera e para o CSV
+     (o export so leva as linhas visiveis) */
+  var marca = "", fc = { abc: "", xyz: "" };
+  function passa(tr) {
+    if (marca && tr.dataset.marca !== marca) return false;
+    if (fc.abc && tr.dataset.abc !== fc.abc) return false;
+    if (fc.xyz && tr.dataset.xyz !== fc.xyz) return false;
+    return true;
+  }
+  var tbCompra = N.tabela("#tb-compra", { busca: "#q", conta: "#conta", filtro: passa });
+  function refiltrar() {
+    tbCompra.aplicar();
+    document.querySelectorAll("#proximos tr[data-marca]").forEach(function (tr) {
+      tr.style.display = passa(tr) ? "" : "none";
+    });
+  }
+  document.getElementById("f-marca").addEventListener("change", function () {
+    marca = this.value; refiltrar();
+  });
+  /* filtro de classe ABC / XYZ, o mesmo da tela de itens */
+  [["f-abc", "abc"], ["f-xyz", "xyz"]].forEach(function (par) {
+    var el = document.getElementById(par[0]);
+    el.addEventListener("click", function (e) {
+      var b = e.target.closest("button");
+      if (!b) return;
+      el.querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
+      b.classList.add("on");
+      fc[par[1]] = b.dataset.v;
+      refiltrar();
+    });
+  });
+
+  /* ---------------------------------------------------- rateio por empresa */
+  N.buscar("/api/plano/rateio").then(function (d) {
+    var lojas = d.lojas;
+    if (!lojas.length) return;
+    var sel = document.getElementById("sel-otica");
+    sel.innerHTML += lojas.map(function (l) {
+      return '<option value="' + N.esc(l.loja_id) + '">' + N.esc(l.loja) + "</option>";
+    }).join("");
+    var cores = {};
+    lojas.forEach(function (l, i) { cores[l.loja_id] = N.corProduto("loja-" + l.loja_id); });
+    var total = d.total_valor || 1;
+
+    function faixa(destaque) {
+      document.getElementById("faixa-lojas").innerHTML = lojas.map(function (l) {
+        var on = !destaque || destaque === l.loja_id;
+        return '<div style="width:' + (l.valor / total * 100).toFixed(3) + "%;min-width:2px;background:" +
+          cores[l.loja_id] + ";opacity:" + (on ? 1 : .25) + '" title="' + N.esc(l.loja) + " | R$ " +
+          N.moeda(l.valor) + " | " + N.num(l.pecas, 0) + ' peças"></div>';
+      }).join("") + (d.sem_venda.valor > 0
+        ? '<div style="width:' + (d.sem_venda.valor / total * 100).toFixed(3) +
+          '%;min-width:2px;background:var(--linha-2)" title="sem venda na janela | R$ ' +
+          N.moeda(d.sem_venda.valor) + '"></div>' : "");
+      var top = lojas.slice(0, 8);
+      document.getElementById("lg-lojas").innerHTML = top.map(function (l) {
+        return '<span><i style="background:' + cores[l.loja_id] + '"></i>' + N.esc(l.loja) +
+          ' <b class="mono">' + N.pct(l.valor / total, 0) + "</b></span>";
+      }).join("") + (lojas.length > 8 ? '<span class="t4">+ ' + (lojas.length - 8) + " lojas</span>" : "");
+    }
+
+    function aplicar(id) {
+      var tabela = document.getElementById("tb-compra");
+      var secao = tabela.closest(".secao");
+      var linhas = tabela.querySelectorAll("tbody tr[data-sku]");
+      if (!id) {
+        secao.classList.remove("otica-loja");
+        linhas.forEach(function (tr) { tr.classList.remove("fora-da-otica"); });
+        faixa(null);
+        document.getElementById("nota-rateio").innerHTML =
+          "Neste ciclo, <b>R$ " + N.moeda(d.total_valor) + "</b> em " + N.num(d.total_pecas, 0) +
+          " peças. A empresa que mais demanda é <b>" + N.esc(lojas[0].loja) + "</b> (" +
+          N.pct(lojas[0].valor / total, 0) + " do dinheiro)." +
+          (d.sem_venda.itens ? " " + d.sem_venda.itens + " itens comprados não venderam em nenhuma loja nos últimos " +
+            d.janela_dias + " dias e ficam sem empresa (R$ " + N.moeda(d.sem_venda.valor) + ")." : "");
+        return;
+      }
+      var l = lojas.filter(function (x) { return x.loja_id === id; })[0];
+      var det = d.detalhe[id] || {};
+      secao.classList.add("otica-loja");
+      linhas.forEach(function (tr) {
+        var r = det[tr.dataset.sku];
+        var tp = tr.querySelector("td.parcela"), tq = tr.querySelector("td.participacao");
+        if (r) {
+          tr.classList.remove("fora-da-otica");
+          tp.dataset.v = r.valor;
+          tp.innerHTML = '<b>' + N.num(r.pecas, 1) + '</b><span class="suf">peças</span>' +
+            '<div class="pequeno t3"><span class="pre">R$</span>' + N.moeda(r.valor) + "</div>";
+          tq.dataset.v = r.participacao;
+          tq.innerHTML = N.pct(r.participacao, 0);
+        } else {
+          tr.classList.add("fora-da-otica");
+          tp.dataset.v = 0; tp.innerHTML = '<span class="t4">–</span>';
+          tq.dataset.v = 0; tq.innerHTML = '<span class="t4">0%</span>';
+        }
+      });
+      faixa(id);
+      document.getElementById("nota-rateio").innerHTML =
+        "<b>" + N.esc(l.loja) + "</b> demanda <b>R$ " + N.moeda(l.valor) + "</b> desta compra (" +
+        N.pct(l.valor / total, 0) + "), em " + N.num(l.pecas, 0) + " peças de " + l.itens +
+        " itens. A participação é a fatia da empresa na venda de cada item nos últimos " +
+        d.janela_dias + " dias, sem correção de ruptura por loja. Itens apagados não tiveram venda nesta empresa.";
+    }
+    sel.addEventListener("change", function () { aplicar(this.value); });
+    aplicar("");
+  });
   document.body.addEventListener("click", function (e) {
     var tr = e.target.closest("tr[data-sku]");
     if (tr) abrirItem(tr.dataset.sku);
@@ -462,6 +602,7 @@
         "<td>" + N.pontoProduto(x.sku, 10) + "</td>" +
         '<td class="nome forte">' + N.esc(x.item) +
           '<div class="pequeno t4">' + N.esc(x.sku) + " · " + N.esc(x.familia) + "</div></td>" +
+        "<td>" + N.seloClasse(x.classificacao) + "</td>" +
         '<td class="n forte">' + N.num(x.entra_na_peca) + "</td>" +
         '<td class="n">' + N.num(x.pecas) + '<span class="suf">peças</span></td>' +
         '<td class="n fraco"><span class="pre">R$</span>' + N.moeda(x.custo_unitario, 2) + "</td>" +
@@ -469,7 +610,7 @@
         '<td class="n c-mt">' + N.pct(x.chance_primeira, 0) + "</td>" +
         '<td class="n">' + N.pct(x.chance_ultima, 0) + "</td></tr>";
     }).join("");
-    N.tabela("#tb-entradas", { col: 2, dir: "asc" });
+    N.tabela("#tb-entradas", { col: 3, dir: "asc" });
   });
 
   /* ---------------------------------------------------- fila completa */
@@ -576,13 +717,13 @@
     Array.prototype.forEach.call(tb.tBodies[0].rows, function (tr) {
       if (tr.style.display !== "none") visiveis[tr.dataset.sku] = true;
     });
-    var linhas = [["ordem", "sku", "item", "familia", "classe", "posicao_hoje", "comprar",
+    var linhas = [["ordem", "sku", "item", "familia", "marca", "classe", "posicao_hoje", "comprar",
       "ate_unidade", "chance_ultima_peca", "custo_unitario", "investimento",
       "margem_esperada", "retorno_por_real", "cobertura_depois_dias"].join(";")];
     DADOS.forEach(function (r, i) {
       if (!visiveis[r.sku]) return;
       linhas.push([i + 1, r.sku, '"' + String(r.item).replace(/"/g, '""') + '"',
-        '"' + r.familia + '"', r.classificacao, r.posicao_estoque, r.quantidade_a_comprar,
+        '"' + r.familia + '"', '"' + (r.origem || "") + '"', r.classificacao, r.posicao_estoque, r.quantidade_a_comprar,
         r.ultima_unidade, (r.p_vender_ultima || 0).toFixed(4),
         (r.custo_unitario || 0).toFixed(2), (r.valor_da_compra || 0).toFixed(2),
         (r.margem_esperada || 0).toFixed(2), (r.retorno_por_real || 0).toFixed(4),

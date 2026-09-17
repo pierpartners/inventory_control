@@ -21,6 +21,16 @@ python scripts/rodar_pipeline.py
 uvicorn backend.main:app --reload --port 8000
 ```
 
+Para usar os dados reais direto do DW da Elevato (Postgres `dwanalitico`), preencha as
+variáveis `DW_*` / `DWANALITICO_*` no `.env` (modelo em `.env.example`) e rode antes do pipeline:
+
+```bash
+python scripts/extrair_dw.py        # 3 anos de venda, estoque diário, compras e entradas -> data/fonte_dw/
+python scripts/rodar_pipeline.py    # detecta a pasta e usa a base `dw`
+```
+
+O que cada consulta busca, e por quê, está em `docs/estudo_dados_faltantes_dw.md`.
+
 Abra `http://localhost:8000`. Depois disso, para reprocessar só o modelo (após mudar um
 parâmetro), use **Salvar e recalcular** na tela de Parâmetros — não é preciso voltar ao terminal.
 O `dbt build` só é necessário quando os CSVs de origem mudam.
@@ -56,8 +66,11 @@ Toda madrugada o ERP fecha o estoque do dia anterior e grava, por SKU: `saldo_in
 - **Disponível** — saldo positivo o dia inteiro. Dado limpo.
 
 Essa distinção é a base da correção de censura feita em Python. A posição de estoque usada no
-plano de compra é sempre o `saldo_final` do último dia carregado — não um "estoque atual"
-separado.
+plano de compra é o **disponível** do último dia carregado (`disponivel_final`, físico menos
+reserva) **mais o em trânsito**: pedidos ao fornecedor ainda sem entrada no CD, com no máximo
+180 dias e previsão de chegada dentro do período de proteção do item (previsão vencida conta
+como chegando agora). O que chega depois do horizonte fica fora, porque não serve a demanda
+que a compra de hoje precisa cobrir. Não há um "estoque atual" separado.
 
 > Para funcionar com dados reais, o ponto crítico é o ERP manter o **histórico diário** de
 > estoque (não só o saldo de hoje). É dele que vem a correção.
@@ -143,6 +156,11 @@ fila inteira.
 1. **Correção de censura (EM).** O dia em que o estoque acabou no meio não é uma observação de
    demanda, é um piso. Os dias totalmente sem estoque saem da conta; os de ruptura parcial
    recebem `E[D | D ≥ observado]`, reestimado em ciclo até convergir.
+   **Piso de histórico** (`dias_utilizaveis_minimo`, 30 dias): com menos dias utilizáveis do
+   que isso na janela, a correção não tem amostra e o item usa a média simples, com os dias sem
+   estoque valendo zero, marcado como *histórico insuficiente*. Sem o piso, uma venda isolada
+   num item quase sempre zerado vira uma taxa enorme (5 dias utilizáveis, 100 m² num deles =
+   25 m²/dia, R$ 68 mil de compra para um item vendido duas vezes em três anos).
 2. **Distribuição no horizonte.** Poisson quando a variância acompanha a média, Binomial
    Negativa quando a supera — a cauda gorda muda tudo. Horizonte = lead time + intervalo entre
    revisões: o período que **esta** compra precisa cobrir sozinha.

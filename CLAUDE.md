@@ -22,6 +22,10 @@ python scripts/rodar_pipeline.py --pular-dbt              # only recompute the P
 python scripts/rodar_pipeline.py --pular-carga --pular-dbt  # only recompute, skip dbt and CSV load
 
 uvicorn backend.main:app --reload --port 8000   # then open http://localhost:8000
+
+# pull the real data straight from the Elevato DW (needs .env with DW credentials), then run the pipeline
+python scripts/extrair_dw.py                    # 3 years, writes Parquet to data/fonte_dw/
+python scripts/extrair_dw.py --anos 1 --so raw_compras raw_ciclo_pagamento
 ```
 
 After changing a parameter, use **Salvar e recalcular** on the `/parametros` page instead of
@@ -54,9 +58,9 @@ model (`backend/modelo.py`) → `res_*` result tables written back to the wareho
 `res_*`/`mart_*` for every page. Nothing in `backend/` talks to source CSVs directly; everything
 goes through dbt-produced marts or `res_*` tables.
 
-**Two source formats coexist**, selected by the dbt var `base` (`sintetica` or `real`), and
+**Three source formats coexist**, selected by the dbt var `base` (`sintetica`, `exports` or `real`), and
 `scripts/rodar_pipeline.py::base_disponivel()` auto-detects which one to use by checking whether
-`data/fonte_verdadeira/` (the real ERP extract, preferred) or `data/fonte/` (synthetic simulation
+`data/fonte_verdadeira/` (the real ERP extract, preferred), `../dbt-elevato/exports/` (the DW export: one daily SKU file + `atributos_sku.csv`; override the folder with `EXPORTS_DIR`, base name `exports`) or `data/fonte/` (synthetic simulation
 CSVs) exists on disk — override with the `BASE` env var. The two extracts have genuinely
 different shapes (the real catalog has no cost/lead-time columns, the real sales table has no
 margin, etc.); translation between them happens entirely in the `staging` dbt layer

@@ -492,6 +492,7 @@ def entradas_na_compra(wh: Warehouse) -> list[dict]:
     f["peca_inicial"] = f.pecas_acum - f.quantidade + 1
     g = f.groupby("sku").agg(
         item=("item", "first"), familia=("familia", "first"),
+        classificacao=("classificacao", "first"), curva_abc=("curva_abc", "first"),
         entra_na_peca=("peca_inicial", "min"),
         pecas=("quantidade", "sum"),
         investimento=("custo", "sum"),
@@ -640,6 +641,83 @@ def escada_de_pecas(m: pd.Series, p: Parametros, pos: float,
             "vale": bool(valor > 0),
         })
     return fora
+
+
+def escada_por_loja(wh: Warehouse, m: pd.Series, p: Parametros, escada: list[dict],
+                    pos: float = 0.0, comprar: int = 0, janela: int = 365) -> dict:
+    """A mesma escada, vista pela demanda de UMA empresa do grupo.
+
+    O estoque e um so (o CD) e a compra e uma so, mas cada loja puxa uma fatia
+    da demanda. Para a curva de uma loja, a demanda do horizonte e a do CD
+    multiplicada pela participacao da loja na venda DESTE SKU na janela - o
+    mesmo rateio de `rateio_por_loja`. A distribuicao e afinada de forma
+    consistente: se cada peca demandada vai para a loja com probabilidade s,
+    uma Poisson(mu) vira Poisson(s*mu) e uma Binomial Negativa(r, mu) vira
+    Binomial Negativa(r, s*mu) - o mesmo r, media e variancia menores.
+
+    A posicao de estoque e a compra do plano tambem sao rateadas por s: a
+    k-esima peca "da loja" e a k-esima alem da fatia dela no estoque do CD.
+    Sem isso, o estoque inteiro do CD medido contra a demanda de uma loja so
+    daria chance zero em qualquer loja pequena, o que nao diz nada. O eixo
+    (`peca`, a n-esima a mais) e o mesmo da escada total, com o mesmo passo,
+    para as curvas ficarem sobrepostas e comparaveis.
+    """
+    if not escada or float(m.mu_periodo) <= 0:
+        return {"janela_dias": int(janela), "lojas": []}
+    seguro = str(m.sku).replace("'", "''")
+    fim = f"(select max(data) from {ref('mart_estoque_diario')})"
+    v = wh.query(f"""
+        with v as (
+            select loja_id, loja, pecas_vendidas
+            from {ref('stg_vendas')}
+            where sku = '{seguro}' and loja_id is not null
+              and data <= {fim} and data > {fim} - INTERVAL {int(janela)} DAY)
+        select loja_id, arg_max(loja, n) as loja, sum(pecas) as pecas
+        from (select loja_id, loja, sum(pecas_vendidas) pecas, count(*) n
+              from v group by 1, 2)
+        group by 1""")
+    total = float(v.pecas.sum()) if not v.empty else 0.0
+    if total <= 0:
+        return {"janela_dias": int(janela), "lojas": []}
+
+    mu, sd = float(m.mu_periodo), float(m.sd_periodo)
+    var = sd * sd
+    r = mu * mu / (var - mu) if var > mu * 1.05 else None
+    cu = float(m.custo_falta_unit)
+    perda = float(m.custo_manter_no_periodo) + float(m.custo_unitario) * p.perda_encalhe
+    horizonte = float(m.periodo_protecao_dias)
+
+    lojas = []
+    for row in v.sort_values("pecas", ascending=False).itertuples(index=False):
+        s = float(row.pecas) / total
+        if s <= 0:
+            continue
+        mu_l = s * mu
+        var_l = mu_l + (mu_l * mu_l / r if r else 0.0)
+        _, dist, _, _ = ajustar_distribuicao(mu_l, float(np.sqrt(var_l)))
+        base_l = int(max(0, round(pos * s)))
+        pontos = []
+        for e in escada:
+            k = base_l + int(e["peca"])
+            pv = float(1 - dist.cdf(k - 1))
+            ganho, enc = pv * cu, (1 - pv) * perda
+            valor = ganho - enc
+            pontos.append({
+                "peca": e["peca"], "unidade": k, "passo": e["passo"],
+                "p_vender": pv, "ganho": ganho, "custo_encalhe": enc, "valor": valor,
+                "nota": valor / (float(m.custo_unitario) * horizonte) if horizonte else 0.0,
+                "vale": bool(valor > 0),
+            })
+        lojas.append({
+            "loja_id": str(row.loja_id),
+            "loja": "".join(ch for ch in str(row.loja) if ch.isprintable()).strip()
+                    or f"Loja {row.loja_id}",
+            "pecas_janela": float(row.pecas), "participacao": s,
+            "mu_periodo": mu_l, "sd_periodo": float(np.sqrt(var_l)),
+            "posicao": base_l, "comprar": int(round(comprar * s)),
+            "escada": pontos,
+        })
+    return {"janela_dias": int(janela), "pecas_total_janela": total, "lojas": lojas}
 
 
 def comparar_produtos(wh: Warehouse, p: Parametros, n: int = 5) -> list[dict]:
@@ -829,11 +907,16 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
 
     pos_atual = float(pl.posicao_estoque) if pl is not None else 0.0
     escada = escada_de_pecas(m, p, pos_atual)
+    escada_lojas = escada_por_loja(
+        wh, m, p, escada, pos_atual,
+        int(pl.quantidade_a_comprar) if pl is not None else 0)
 
     return {
         "item": linha(m),
         "plano": linha(pl) if pl is not None else None,
         "escada": escada,
+        "escada_lojas": escada_lojas,
+        "projecao": projecao_item(wh, m, pl, p, dia),
         "economia": {
             "margem_se_vender": float(m.custo_falta_unit),
             "perda_se_encalhar": float(m.custo_manter_no_periodo)
@@ -862,7 +945,141 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
             "fator_perda_ruptura": p.fator_perda_ruptura,
             "limiar_giro_baixo": p.limiar_giro_baixo,
             "dias_por_ano": p.dias_por_ano,
+            "dias_utilizaveis_minimo": getattr(p, "dias_utilizaveis_minimo", 0),
         },
+    }
+
+
+# ----------------------------------------------------------------------
+# 6b. o futuro do item: consumo esperado, chegadas e prazos
+# ----------------------------------------------------------------------
+def pedidos_em_aberto(wh: Warehouse, sku: str, hoje, janela_dias: int = 180) -> list[dict]:
+    """Pedidos de compra do item ainda nao atendidos, com a data prevista.
+
+    Aberto = pediu mais do que recebeu E o pedido nao aparece no livro de
+    entradas do CD (`raw_ciclo_pagamento`). Pedidos com mais de `janela_dias`
+    ficam de fora: na pratica sao cancelados que o ERP nunca fechou. A
+    extracao traz a mesma linha repetida quando o pedido aparece em mais de
+    uma empresa - o distinct por pedido + quantidade + preco remove isso.
+    O que ja passou da previsao e marcado `atrasado` e desenhado em `hoje`.
+    """
+    seguro = str(sku).replace("'", "''")
+    c = wh.query(f"""
+        with c as (
+            select distinct idpedido, fornecedor,
+                   cast(dtmovimento as date)      as pedido_em,
+                   cast(previsaoentrega as date)  as previsto_para,
+                   cast(diasprevisaoentrega as integer) as prazo_previsto,
+                   cast(qtdsolicitada as double)  as solicitado,
+                   cast(qtdatendida as double)    as atendido,
+                   cast(valunitario as double)    as valor_unitario
+            from {ref('raw_compras')}
+            where cast(idsubproduto as varchar) = '{seguro}'
+              and cast(qtdatendida as double) < cast(qtdsolicitada as double)
+              and cast(dtmovimento as date) >= date '{str(hoje)[:10]}' - INTERVAL {int(janela_dias)} DAY)
+        select c.* from c
+        where not exists (select 1 from {ref('raw_ciclo_pagamento')} k
+                          where k.idpedido = c.idpedido
+                            and cast(k.idsubproduto as varchar) = '{seguro}')
+        order by previsto_para, idpedido""")
+    fora = []
+    for r in c.itertuples(index=False):
+        pend = float(r.solicitado) - float(r.atendido or 0.0)
+        if pend <= 0:
+            continue
+        prev = pd.Timestamp(r.previsto_para) if r.previsto_para is not None else None
+        if prev is None:
+            prev = pd.Timestamp(r.pedido_em) + pd.Timedelta(days=int(r.prazo_previsto or 0))
+        atrasado = bool(prev < pd.Timestamp(hoje))
+        fora.append({
+            "pedido": int(r.idpedido), "fornecedor": str(r.fornecedor or ""),
+            "pedido_em": str(r.pedido_em)[:10], "previsto_para": str(prev)[:10],
+            "chega_em": str(pd.Timestamp(hoje) if atrasado else prev)[:10],
+            "pecas": pend, "valor": pend * float(r.valor_unitario or 0.0),
+            "atrasado": atrasado,
+        })
+    return fora
+
+
+def projecao_item(wh: Warehouse, m: pd.Series, pl, p: Parametros, dia: pd.DataFrame) -> dict:
+    """O grafico de venda e estoque continuado para a frente.
+
+    Do ultimo dia com dado, dia a dia: a demanda esperada (a media corrigida
+    do modelo, `demanda_media_dia`), o saldo disponivel descontado dela e
+    somado ao que chega - os pedidos em aberto na data prevista e, se o plano
+    manda comprar, a compra deste ciclo chegando em `lead_time_dias`. A faixa
+    em volta do saldo e +-1 desvio da demanda acumulada (sd_dia * raiz(t), a
+    mesma hipotese de dias independentes do bloco 8 da revisao). Os marcos:
+    a recompra (proxima revisao, `periodo_revisao_dias`), o recebimento de
+    uma compra feita hoje (lead time) e o fim do periodo de protecao.
+
+    A projecao parte da posicao DISPONIVEL (sem a reserva), que e a que o
+    modelo usa - por isso pode comecar abaixo do saldo fisico do historico.
+    Atencao: o modelo decide a compra com em_transito = 0, ou seja, sem
+    contar os pedidos em aberto; aqui eles entram para mostrar o estoque que
+    de fato vai existir, e a diferenca e informacao, nao contradicao.
+    """
+    if dia.empty:
+        return {}
+    hoje = pd.Timestamp(dia.data.max())
+    mu_dia = float(m.demanda_media_dia)
+    sd_dia = float(m.desvio_padrao_dia)
+    lead = int(round(float(m.lead_time_dias)))
+    revisao = int(p.periodo_revisao_dias)
+    protecao = int(round(float(m.periodo_protecao_dias)))
+    comprar = int(pl.quantidade_a_comprar) if pl is not None else 0
+    # parte do DISPONIVEL, nao da posicao: o em transito que a posicao inclui
+    # entra aqui como chegada na data prevista, senao contaria duas vezes
+    pos = (float(pl.estoque_fisico) if pl is not None and "estoque_fisico" in pl.index
+           else float(pl.posicao_estoque) if pl is not None else float(dia.saldo_final.iloc[-1]))
+
+    abertos = pedidos_em_aberto(wh, str(m.sku), hoje)
+    ultima_chegada = max([pd.Timestamp(a["chega_em"]) for a in abertos], default=hoje)
+    # ate a proxima compra chegar, e um pouco alem, para ver o consumo depois
+    horizonte = max(protecao + lead, int((ultima_chegada - hoje).days) + 7, 30)
+    horizonte = min(horizonte, 180)
+
+    chega = {}
+    for a in abertos:
+        chega[a["chega_em"]] = chega.get(a["chega_em"], 0.0) + a["pecas"]
+    data_compra_chega = str(hoje + pd.Timedelta(days=lead))[:10]
+
+    futuro, saldo, saldo_c = [], pos, pos
+    for t in range(1, horizonte + 1):
+        d = hoje + pd.Timedelta(days=t)
+        chave = str(d)[:10]
+        entrada = chega.get(chave, 0.0)
+        saldo = saldo - mu_dia + entrada
+        saldo_c = saldo_c - mu_dia + entrada + (comprar if chave == data_compra_chega else 0)
+        desvio = float(sd_dia * np.sqrt(t))
+        futuro.append({
+            "data": chave,
+            "demanda_esperada": mu_dia,
+            "entrada": entrada,
+            "compra_plano": comprar if chave == data_compra_chega else 0,
+            "saldo": max(saldo, 0.0),
+            "saldo_bruto": saldo,
+            "saldo_baixo": max(saldo - desvio, 0.0),
+            "saldo_alto": max(saldo + desvio, 0.0),
+            "saldo_com_compra": max(saldo_c, 0.0),
+        })
+    zera = next((f["data"] for f in futuro if f["saldo_bruto"] <= 0), None)
+    return {
+        "hoje": str(hoje)[:10],
+        "posicao_inicial": pos,
+        "demanda_dia": mu_dia, "desvio_dia": sd_dia,
+        "lead_time_dias": lead, "revisao_dias": revisao, "protecao_dias": protecao,
+        "marcos": {
+            "recompra": str(hoje + pd.Timedelta(days=revisao))[:10],
+            "recebimento": data_compra_chega,
+            "fim_protecao": str(hoje + pd.Timedelta(days=protecao))[:10],
+        },
+        "compra_plano": comprar,
+        "em_transito_na_posicao": float(pl.em_transito) if pl is not None and "em_transito" in pl.index else 0.0,
+        "pedidos_abertos": abertos,
+        "pecas_em_aberto": float(sum(a["pecas"] for a in abertos)),
+        "zera_em": zera,
+        "dias": futuro,
     }
 
 
@@ -1122,3 +1339,151 @@ def retorno_do_capital(wh: Warehouse, p: Parametros) -> dict:
         "quadrantes": registros(q.sort_values("capital", ascending=False)),
         "itens": registros(itens.sort_values("lucro_liquido_ano", ascending=False)),
     }
+
+
+# ----------------------------------------------------------------------
+# ABC x XYZ por empresa (loja)
+# ----------------------------------------------------------------------
+def abc_xyz_por_loja(wh: Warehouse, p: Parametros, janela: int = 365) -> dict:
+    """Classifica cada item DENTRO de cada loja, so com a venda daquela loja.
+
+    ABC pela participacao no lucro da loja na janela, com os mesmos cortes do
+    modelo (corte_curva_a / corte_curva_b); XYZ pelo coeficiente de variacao
+    da venda DIARIA da loja, contando os dias sem venda como zero, com os
+    mesmos cortes (corte_xyz_x / corte_xyz_y).
+
+    Premissa a deixar clara: nao ha correcao de ruptura aqui. O estoque
+    diario que o modelo tem e o do CD, nao o de cada loja, entao um item que
+    faltou muito na loja parece mais erratico do que e. A classe "no CD" que
+    acompanha cada item e a do modelo (res_sku_modelo), essa sim corrigida.
+    """
+    fim = f"(select max(data) from {ref('mart_estoque_diario')})"
+    base = wh.query(f"""
+        with d as (
+            select loja_id, loja, sku, data,
+                   sum(pecas_vendidas) as pecas, sum(lucro) as lucro,
+                   sum(receita_liquida) as receita
+            from {ref('stg_vendas')}
+            where loja_id is not null
+              and data <= {fim} and data > {fim} - INTERVAL {int(janela)} DAY
+            group by 1, 2, 3, 4)
+        select loja_id, sku,
+               sum(pecas) as pecas, sum(lucro) as lucro, sum(receita) as receita,
+               sum(pecas * pecas) as soma_quadrados,
+               count(*) as dias_com_venda
+        from d group by 1, 2""")
+    nomes = wh.query(f"""
+        select loja_id, loja, count(*) n from {ref('stg_vendas')}
+        where loja_id is not null group by 1, 2""")
+    # o ERP grava a mesma loja com grafias diferentes e caracteres de
+    # controle no nome; fica a grafia mais frequente, limpa
+    nome_por_loja = {k: "".join(ch for ch in str(v) if ch.isprintable()).strip()
+                     for k, v in (nomes.sort_values("n", ascending=False)
+                                  .drop_duplicates("loja_id").set_index("loja_id")
+                                  .loja.to_dict()).items()}
+    cd = wh.query(f"select sku, item, familia, curva_abc, classe_xyz, classificacao "
+                  f"from {ref('res_sku_modelo')}")
+
+    n = float(janela)
+    # CV da venda diaria com os dias de zero: var = (soma(x^2) - n*media^2)/(n-1)
+    media = base.pecas / n
+    var = (base.soma_quadrados - n * media ** 2) / (n - 1)
+    base["cv"] = np.where(media > 0, np.sqrt(var.clip(lower=0)) / media, np.nan)
+    base["classe_xyz"] = np.where(base.cv < p.corte_xyz_x, "X",
+                          np.where(base.cv < p.corte_xyz_y, "Y", "Z"))
+
+    lojas, detalhe = [], {}
+    for loja_id, g in base.groupby("loja_id"):
+        g = g.sort_values("lucro", ascending=False).reset_index(drop=True)
+        total = float(g.lucro.clip(lower=0).sum())
+        acum = g.lucro.clip(lower=0).cumsum() / total if total > 0 else pd.Series(1.0, index=g.index)
+        g["curva_abc"] = np.where(acum <= p.corte_curva_a, "A",
+                          np.where(acum <= p.corte_curva_b, "B", "C"))
+        # lucro zero ou negativo nunca e A: fica no fim da fila
+        g.loc[g.lucro <= 0, "curva_abc"] = "C"
+        g["classificacao"] = g.curva_abc + g.classe_xyz
+        g = g.merge(cd.rename(columns={"curva_abc": "abc_cd", "classe_xyz": "xyz_cd",
+                                       "classificacao": "classe_cd"}), on="sku", how="left")
+        nA = int((g.curva_abc == "A").sum())
+        lojas.append(dict(
+            loja_id=str(loja_id), loja=nome_por_loja.get(loja_id, f"Loja {loja_id}"),
+            skus=int(len(g)), pecas=float(g.pecas.sum()), lucro=float(g.lucro.sum()),
+            itens_a=nA, pct_itens_a=nA / max(len(g), 1),
+            a_na_loja_c_no_cd=int(((g.curva_abc == "A") & (g.abc_cd == "C")).sum()),
+            a_na_loja_a_no_cd=int(((g.curva_abc == "A") & (g.abc_cd == "A")).sum()),
+        ))
+        celulas = (g.groupby(["curva_abc", "classe_xyz"])
+                   .agg(skus=("sku", "count"), lucro=("lucro", "sum"), pecas=("pecas", "sum"))
+                   .reset_index())
+        cruz = (g.dropna(subset=["abc_cd"]).groupby(["curva_abc", "abc_cd"])
+                .agg(skus=("sku", "count"), lucro=("lucro", "sum")).reset_index())
+        # quem nao tem classe no CD nunca teve estoque la; e contado a parte
+        divergentes = g[(g.curva_abc == "A") & g.abc_cd.notna() & (g.abc_cd != "A")].head(12)
+        detalhe[str(loja_id)] = dict(
+            celulas=registros(celulas), cruzamento=registros(cruz),
+            divergentes=registros(divergentes[["sku", "item", "familia", "classificacao",
+                                               "classe_cd", "lucro", "pecas", "cv"]]),
+            sem_classe_cd=int(g.abc_cd.isna().sum()),
+        )
+    lojas.sort(key=lambda x: -x["lucro"])
+    return dict(janela_dias=int(janela), cortes=dict(
+        abc_a=p.corte_curva_a, abc_b=p.corte_curva_b, xyz_x=p.corte_xyz_x, xyz_y=p.corte_xyz_y),
+        lojas=lojas, detalhe=detalhe)
+
+
+# ----------------------------------------------------------------------
+# Rateio da compra do ciclo por empresa
+# ----------------------------------------------------------------------
+def rateio_por_loja(wh: Warehouse, janela: int = 365) -> dict:
+    """Quanto da compra decidida cabe a cada empresa do grupo.
+
+    A compra e UMA, decidida pela demanda somada sobre o estoque do CD. O
+    rateio divide as pecas e o dinheiro de cada SKU pela participacao de cada
+    loja na demanda DAQUELE SKU na janela - a venda observada, sem correcao de
+    ruptura por loja. E aditivo: a soma das fatias fecha com o plano. Um SKU
+    comprado sem venda em nenhuma loja na janela fica em `sem_venda`.
+    """
+    fim = f"(select max(data) from {ref('mart_estoque_diario')})"
+    v = wh.query(f"""
+        select loja_id, sku, sum(pecas_vendidas) as pecas
+        from {ref('stg_vendas')}
+        where loja_id is not null
+          and data <= {fim} and data > {fim} - INTERVAL {int(janela)} DAY
+        group by 1, 2""")
+    nomes = wh.query(f"""
+        select loja_id, loja, count(*) n from {ref('stg_vendas')}
+        where loja_id is not null group by 1, 2""")
+    nome = {k: "".join(ch for ch in str(x) if ch.isprintable()).strip()
+            for k, x in (nomes.sort_values("n", ascending=False).drop_duplicates("loja_id")
+                         .set_index("loja_id").loja.to_dict()).items()}
+    plano = wh.query(f"""
+        select sku, quantidade_a_comprar as q, valor_da_compra as valor
+        from {ref('res_plano_compra')} where quantidade_a_comprar > 0""")
+
+    tot = v.groupby("sku").pecas.sum().rename("total")
+    v = v.merge(tot, on="sku")
+    v["participacao"] = v.pecas / v.total
+    r = v.merge(plano, on="sku", how="inner")
+    r["pecas_rateadas"] = r.q * r.participacao
+    r["valor_rateado"] = r.valor * r.participacao
+
+    com_venda = set(r.sku)
+    sem = plano[~plano.sku.isin(com_venda)]
+
+    lojas = (r.groupby("loja_id")
+             .agg(pecas=("pecas_rateadas", "sum"), valor=("valor_rateado", "sum"),
+                  itens=("sku", "count"))
+             .reset_index().sort_values("valor", ascending=False))
+    lojas["loja"] = lojas.loja_id.map(lambda k: nome.get(k, f"Loja {k}"))
+    detalhe = {}
+    for loja_id, g in r.groupby("loja_id"):
+        detalhe[str(loja_id)] = {
+            row.sku: dict(participacao=float(row.participacao),
+                          pecas=float(row.pecas_rateadas), valor=float(row.valor_rateado))
+            for row in g.itertuples(index=False)}
+    return dict(
+        janela_dias=int(janela),
+        total_valor=float(plano.valor.sum()), total_pecas=float(plano.q.sum()),
+        sem_venda=dict(itens=int(len(sem)), pecas=float(sem.q.sum()), valor=float(sem.valor.sum())),
+        lojas=registros(lojas[["loja_id", "loja", "itens", "pecas", "valor"]]),
+        detalhe=detalhe)

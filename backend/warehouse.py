@@ -98,12 +98,16 @@ class DuckDBWarehouse(Warehouse):
             con.unregister("_tmp_df")
 
     def carregar_csv(self, caminho, tabela: str) -> int:
+        """Carrega um CSV (.csv/.csv.gz), um Parquet ou uma PASTA de Parquets."""
         caminho_p = Path(caminho)
+        if caminho_p.is_dir():
+            leitura = f"read_parquet('{(caminho_p / '*.parquet').as_posix()}')"
+        elif caminho_p.suffix == ".parquet":
+            leitura = f"read_parquet('{caminho_p.as_posix()}')"
+        else:
+            leitura = f"read_csv_auto('{caminho_p.as_posix()}', header=true)"
         with self._con(escrita=True) as con:
-            con.execute(
-                f'create or replace table "{tabela}" as '
-                f"select * from read_csv_auto('{caminho_p.as_posix()}', header=true)"
-            )
+            con.execute(f'create or replace table "{tabela}" as select * from {leitura}')
             return con.execute(f'select count(*) from "{tabela}"').fetchone()[0]
 
     def existe(self, tabela: str) -> bool:

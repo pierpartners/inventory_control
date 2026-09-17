@@ -434,6 +434,43 @@ def _venda(wh: Warehouse) -> list[dict]:
                       if int(r.neg_sem_motivo) else
                       "Toda linha negativa tem motivo de devolução declarado."))
 
+    # ------------------------------------------------- venda sob encomenda
+    # TIPOENTREGA = 'ENCOMENDA' e venda fechada sem a peca na prateleira e
+    # comprada para o pedido. Nao passa pelo CD, entao nao entra no sinal que
+    # dimensiona a prateleira; esta linha mostra o tamanho do que saiu.
+    if tem_todas:
+        r = wh.query(f"""
+            select count(*) n,
+              sum(case when upper(trim(cast(TIPOENTREGA as varchar))) = 'ENCOMENDA'
+                       then 1 else 0 end) enc,
+              round(sum(case when upper(trim(cast(TIPOENTREGA as varchar))) = 'ENCOMENDA'
+                       then cast(QTDPRODUTO as double) else 0 end)) pecas_enc,
+              round(sum(cast(QTDPRODUTO as double))) pecas,
+              count(distinct case when upper(trim(cast(TIPOENTREGA as varchar))) = 'ENCOMENDA'
+                       then IDSUBPRODUTO end) skus
+            from {ref(fonte)} where cast(QTDPRODUTO as double) > 0""").iloc[0]
+        tipos = wh.query(f"""
+            select coalesce(cast(TIPOENTREGA as varchar), '(vazio)') tipo,
+                   count(*) linhas, round(sum(cast(QTDPRODUTO as double))) pecas,
+                   count(distinct IDSUBPRODUTO) skus
+            from {ref(fonte)} where cast(QTDPRODUTO as double) > 0
+            group by 1 order by 3 desc""")
+        frac = float(r.pecas_enc) / float(r.pecas) if r.pecas else 0.0
+        out.append(_v(G, "venda_encomenda",
+                      "venda sob encomenda fora do sinal de demanda",
+                      "ok" if frac < 0.20 else "aviso",
+                      _pct(frac), "das peças vendidas",
+                      "o tipo de entrega da linha (TIPOENTREGA) contra o total",
+                      f"{_num(r.enc)} linhas · {_num(r.pecas_enc)} peças em "
+                      f"{_num(r.skus)} SKUs marcadas ENCOMENDA, de {_num(r.pecas)} "
+                      f"peças vendidas",
+                      "Encomenda é venda fechada sem a peça na prateleira e comprada "
+                      "para o pedido: não saiu do CD, então não dimensiona a "
+                      "prateleira. O staging a exclui do sinal de demanda; se a "
+                      "empresa passar a atender encomenda do próprio estoque, "
+                      "esta regra precisa ser revista.",
+                      _reg(tipos), ["tipo", "linhas", "pecas", "skus"]))
+
     # -------------------------------------- preco unitario fora da faixa
     r = wh.query(f"""
         with l as (select sku, data, pecas_vendidas,

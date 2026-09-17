@@ -233,7 +233,8 @@
         '<span class="t4 mono">' + N.esc(m.sku) + "</span>" +
         '<span class="t4">·</span><span>' + N.esc(m.familia) + "</span>" +
         N.seloClasse(m.classificacao) + N.seloRegime(m.regime) +
-        (pl.decisao ? N.seloDecisao(pl.decisao) : "");
+        (pl.decisao ? N.seloDecisao(pl.decisao) : "") +
+        (m.historico_insuficiente ? '<span class="selo selo-am">histórico insuficiente</span>' : "");
 
       var h = "";
 
@@ -241,7 +242,9 @@
       var faixaPos = N.barraPosicao(pos, m.ponto_de_pedido, m.estoque_maximo);
       h += bloco("Situação agora", '<div class="gr gr-2" style="gap:0 22px">' +
         "<div>" +
-        kv("Posição de estoque", N.num(pos) + " un") +
+        kv("Posição de estoque", N.num(pos) + " un" + (pl.em_transito > 0
+          ? ' <span class="t4 pequeno">(' + N.num(pl.estoque_fisico) + " disponível + " +
+            N.num(pl.em_transito) + " a caminho)</span>" : "")) +
         kv("Ponto de pedido", N.num(m.ponto_de_pedido) + " un", "am") +
         kv("Estoque máximo", N.num(m.estoque_maximo) + " un") +
         kv("Cobertura atual", N.num(m.cobertura_dias, 0) + " dias") +
@@ -257,18 +260,105 @@
         "</div></div>" +
         '<div class="mt14">' + faixaPos + "</div>");
 
+      /* ------- 1b. a escada: chance de vender e lucro esperado de cada peça a mais */
+      var esc = d.escada || [], ec = d.economia || {};
+      if (esc.length) {
+        var compradas = esc.filter(function (r) { return r.peca <= (ec.comprar || 0); });
+        var primeiraE = esc[0], ultimaC = compradas.length ? compradas[compradas.length - 1] : null;
+        var vale = esc.filter(function (r) { return r.vale; });
+        var limiteP = (ec.margem_se_vender + ec.perda_se_encalhar) > 0
+          ? ec.perda_se_encalhar / (ec.margem_se_vender + ec.perda_se_encalhar) : 0;
+        var frase = "A próxima peça (a nº " + N.num(primeiraE.unidade) + " em estoque) tem <b>" +
+          N.pct(primeiraE.p_vender, 0) + "</b> de chance de vender no horizonte e devolve <b>R$ " +
+          N.moeda(primeiraE.valor, 2) + "</b> esperados. " +
+          (ultimaC
+            ? "A última que o plano compra (a nº " + N.num(ultimaC.unidade) + ") ainda tem <b>" +
+              N.pct(ultimaC.p_vender, 0) + "</b> e vale R$ " + N.moeda(ultimaC.valor, 2) + ". "
+            : "O plano não compra nenhuma neste ciclo. ") +
+          (vale.length
+            ? "A conta fica positiva até a peça nº <b>" + N.num(vale[vale.length - 1].unidade) +
+              "</b>; dali em diante a chance cai abaixo de " + N.pct(limiteP, 0) +
+              " e a peça encalha mais do que rende."
+            : "Nem a próxima peça se paga: a posição atual já cobre o horizonte.") +
+          (primeiraE.passo > 1
+            ? " <span class='t4'>(uma peça a cada " + primeiraE.passo + " no gráfico)</span>" : "");
+        var lojasEsc = (d.escada_lojas && d.escada_lojas.lojas) || [];
+        var seletorLoja = lojasEsc.length
+          ? '<div class="filtros mb10" style="width:100%">' +
+            '<span class="rotulo" style="flex:0 0 auto">Empresa</span>' +
+            '<select id="gv-esc-loja" class="cresce" style="max-width:340px">' +
+            '<option value="">Todas (estoque do CD)</option>' +
+            lojasEsc.map(function (l) {
+              return '<option value="' + N.esc(l.loja_id) + '">' + N.esc(l.loja) +
+                " · " + N.pct(l.participacao, 0) + "</option>"; }).join("") +
+            '</select><span class="pequeno t4" id="gv-esc-loja-nota"></span></div>'
+          : "";
+        h += bloco("Cada peça a mais: chance de vender e lucro esperado",
+          seletorLoja +
+          '<div class="gr gr-2" style="gap:0 22px">' +
+          '<div><div class="t4 pequeno mb6" style="letter-spacing:.09em;text-transform:uppercase;font-weight:700">' +
+          'Chance de vender a k-ésima peça</div><div id="gv-esc-p" class="gfx" style="height:200px"></div></div>' +
+          '<div><div class="t4 pequeno mb6" style="letter-spacing:.09em;text-transform:uppercase;font-weight:700">' +
+          'Lucro esperado da k-ésima peça</div><div id="gv-esc-v" class="gfx" style="height:200px"></div></div>' +
+          '</div>' +
+          '<div class="legenda mt8" style="font-size:10.5px">' +
+          '<span><i style="background:' + N.sombra(C.menta, .8) + '"></i>o plano compra</span>' +
+          '<span><i style="background:' + N.sombra(C.tinta4, .6) + '"></i>não compra</span>' +
+          '<span><i style="background:' + C.ambar + '"></i>limite para valer a pena</span></div>' +
+          '<div class="nota-lat mt10" style="margin-left:0">' + frase + "</div>",
+          "P(demanda ≥ k): só decai");
+      }
+
       /* ------- 2. histórico */
-      h += bloco("Histórico diário", '<div class="fita" id="gv-fita"></div>' +
+      var pr = d.projecao || {}, fut = pr.dias || [];
+      var notaProj = "";
+      if (fut.length) {
+        var ab = pr.pedidos_abertos || [];
+        var prox = ab.filter(function (a) { return !a.atrasado; })[0];
+        var atras = ab.filter(function (a) { return a.atrasado; });
+        notaProj = "Daqui para a frente o gráfico é <b>projeção</b>: a partir da posição disponível de <b>" +
+          N.num(pr.posicao_inicial) + " un</b>, consome <b>" + N.num(pr.demanda_dia, 2) +
+          " un/dia</b> (" + (m.historico_insuficiente ? "a média simples, histórico insuficiente" : "a demanda corrigida") + "). " +
+          (ab.length
+            ? "Há <b>" + N.num(pr.pecas_em_aberto) + " un</b> em " + ab.length +
+              (ab.length > 1 ? " pedidos" : " pedido") + " em aberto" +
+              (prox ? ", o próximo chega em " + N.data(prox.chega_em) : "") +
+              (atras.length ? " (" + atras.length + " já " + (atras.length > 1 ? "atrasados" : "atrasado") +
+                ", desenhado" + (atras.length > 1 ? "s" : "") + " em hoje)" : "") + ". "
+            : "Não há pedido de compra em aberto. ") +
+          (pr.zera_em ? "Sem nova compra, o estoque zera em <b>" + N.data(pr.zera_em) + "</b>. "
+                      : "O estoque não zera dentro do horizonte desenhado. ") +
+          (pr.compra_plano
+            ? "A compra deste ciclo (" + N.num(pr.compra_plano) + " un), feita hoje, chegaria em <b>" +
+              N.data(pr.marcos.recebimento) + "</b>."
+            : "Uma compra feita hoje chegaria em " + N.data(pr.marcos.recebimento) + ".") +
+          " <span class='t4'>" + (pr.em_transito_na_posicao > 0
+            ? "Das peças a caminho, " + N.num(pr.em_transito_na_posicao) +
+              " chegam dentro do período de proteção e já contam na posição que decidiu a compra."
+            : "Nenhuma peça a caminho chega dentro do período de proteção, então a posição que decidiu a compra é só o disponível.") +
+          "</span>";
+      }
+      h += bloco("Histórico diário" + (fut.length ? " e projeção" : ""),
+        '<div class="fita" id="gv-fita"></div>' +
         '<div class="legenda mt10" style="font-size:11px">' +
         '<span><i style="background:#2C5A4A"></i>' + rd.disponivel + " dias disponível</span>" +
         '<span><i style="background:' + C.ambar + '"></i>' + rd.ruptura_parcial + " acabou no meio do dia</span>" +
         '<span><i style="background:' + C.coral + '"></i>' + rd.sem_estoque + " sem estoque</span>" +
         "</div>" +
-        '<div id="gv-hist" class="gfx m mt14"></div>');
+        '<div id="gv-hist" class="gfx mt14" style="height:' + (fut.length ? 330 : 250) + 'px"></div>' +
+        (notaProj ? '<div class="nota-lat mt10" style="margin-left:0">' + notaProj + "</div>" : ""),
+        fut.length ? "arraste a barra embaixo para ampliar o período" : "");
 
       /* ------- 3. demanda */
-      var linhasDem =
-        kv("Demanda média corrigida", N.num(m.demanda_media_dia, 2) + " un/dia", "am") +
+      var linhasDem = (m.historico_insuficiente
+        ? '<div class="msg msg-am mb10" style="font-size:12px">Só <b>' + N.num(m.dias_utilizaveis) +
+          " dias com estoque</b> em " + N.num(m.dias_historico) + " (piso: " +
+          N.num(d.parametros.dias_utilizaveis_minimo) + "). A correção de ruptura não tem amostra: " +
+          "a demanda usada é a <b>média simples</b>, com os dias sem estoque valendo zero. " +
+          "A corrigida daria " + N.num(m.demanda_media_dia_em, 2) + " un/dia.</div>"
+        : "") +
+        kv(m.historico_insuficiente ? "Demanda média usada (simples)" : "Demanda média corrigida",
+           N.num(m.demanda_media_dia, 2) + " un/dia", "am") +
         kv("Se contasse falta como zero", N.num(m.demanda_media_dia_ingenua, 2) + " un/dia") +
         kv("Subestimação evitada", "+" + N.pct(m.subestimacao_ingenua_pct, 0),
           m.subestimacao_ingenua_pct > 0.05 ? "mt" : "") +
@@ -372,46 +462,207 @@
           " · vendeu " + N.num(x.vendido) + '"></i>';
       }).join("");
 
-      /* ---------------------------------------------------- histórico */
-      var dias = d.dias;
+      /* ---------------------------------------------------- escada */
+      if (esc.length) {
+        /* desenha a escada total ou a de uma empresa: mesma conta, mesma
+           regua no eixo (a n-esima peca a mais), so muda a demanda e a fatia
+           do estoque/compra que cabe a ela */
+        var desenharEscada = function (serie, comprar) {
+          var ultima = null;
+          for (var i = 0; i < serie.length; i++) if (serie[i].peca <= comprar) ultima = serie[i];
+          var dicaEsc = N.dica(function (ps) {
+            var r = serie[ps[0].dataIndex];
+            return N.dicaTit("A peça nº " + N.num(r.unidade) + " em estoque" +
+                (r.peca > 1 ? " (a " + N.num(r.peca) + "ª a mais)" : " (a próxima)")) +
+              N.dicaLin(C.violeta, "chance de vender", N.pct(r.p_vender, 1)) +
+              N.dicaLin(C.menta, "ganho se vender", "R$ " + N.moeda(r.ganho, 2)) +
+              N.dicaLin(C.coral, "perda se encalhar", "R$ " + N.moeda(r.custo_encalhe, 2)) +
+              N.dicaLin(r.vale ? C.menta : C.coral, "lucro esperado", "R$ " + N.moeda(r.valor, 2)) +
+              N.dicaLin(C.tinta4, "plano", r.peca <= comprar ? "compra" : "não compra");
+          });
+          var eixoEsc = N.eixoX({ data: serie.map(function (r) { return r.unidade; }),
+            name: "peça nº (contando o estoque atual)", nameLocation: "middle", nameGap: 25,
+            nameTextStyle: { color: C.tinta4, fontSize: 9.5 },
+            axisLabel: { color: C.tinta4, fontSize: 9.5,
+              interval: Math.max(0, Math.floor(serie.length / 8)) } });
+          var corEsc = function (r) {
+            return N.sombra(r.peca <= comprar ? C.menta : C.tinta4, .75); };
+          /* num eixo de categoria o ECharts le `xAxis` numerico como indice */
+          var marcaCorte = ultima ? [{ xAxis: serie.indexOf(ultima) }] : [];
+
+          N.grafico("gv-esc-p", {
+            grid: N.grade({ top: 14, right: 12, bottom: 4, left: 4 }),
+            tooltip: dicaEsc, xAxis: eixoEsc,
+            yAxis: N.eixoY({ min: 0, max: 1, axisLabel: { color: C.tinta4, fontSize: 9.5,
+              formatter: function (v) { return Math.round(v * 100) + "%"; } } }),
+            series: [{
+              type: "bar", barWidth: "78%",
+              data: serie.map(function (r) { return { value: r.p_vender, itemStyle: { color: corEsc(r) } }; }),
+              markLine: { silent: true, symbol: "none",
+                lineStyle: { color: C.ambar, type: [4, 4], width: 1.3 },
+                label: { color: C.ambar, fontSize: 9.5, position: "insideEndTop",
+                  formatter: "limite " + N.pct(limiteP, 0) },
+                data: [{ yAxis: limiteP }].concat(marcaCorte.map(function (x) {
+                  return Object.assign({}, x, { lineStyle: { color: C.menta, type: [2, 3], width: 1 },
+                    label: { color: C.menta, fontSize: 9.5, formatter: "última comprada",
+                      rotate: 0, position: "insideEndTop", distance: 4 } }); })) }
+            }]
+          });
+
+          N.grafico("gv-esc-v", {
+            grid: N.grade({ top: 14, right: 12, bottom: 4, left: 4 }),
+            tooltip: dicaEsc, xAxis: eixoEsc,
+            yAxis: N.eixoY({ axisLabel: { color: C.tinta4, fontSize: 9.5,
+              fontFamily: '"JetBrains Mono", monospace',
+              formatter: function (v) { return "R$ " + N.curto(v); } } }),
+            series: [{
+              type: "bar", barWidth: "78%",
+              data: serie.map(function (r) {
+                return { value: r.valor, itemStyle: { color: r.vale ? corEsc(r) : N.sombra(C.coral, .75) } }; }),
+              markLine: { silent: true, symbol: "none",
+                lineStyle: { color: C.tinta4, width: 1, type: [3, 3] },
+                label: { show: false }, data: [{ yAxis: 0 }].concat(marcaCorte.map(function (x) {
+                  return Object.assign({}, x, { lineStyle: { color: C.menta, type: [2, 3], width: 1 } }); })) }
+            }]
+          });
+        };
+
+        desenharEscada(esc, ec.comprar || 0);
+
+        var selLoja = document.getElementById("gv-esc-loja");
+        if (selLoja) selLoja.addEventListener("change", function () {
+          var nota = document.getElementById("gv-esc-loja-nota");
+          var l = lojasEsc.filter(function (x) { return x.loja_id === selLoja.value; })[0];
+          if (!l) { desenharEscada(esc, ec.comprar || 0); nota.innerHTML = ""; return; }
+          desenharEscada(l.escada, l.comprar || 0);
+          nota.innerHTML = N.pct(l.participacao, 1) + " da venda deste item em " +
+            d.escada_lojas.janela_dias + " dias (" + N.num(l.pecas_janela, 0) + " peças) · " +
+            "demanda no horizonte " + N.num(l.mu_periodo, 1) + " ± " + N.num(l.sd_periodo, 1) +
+            " un · fatia do estoque " + N.num(l.posicao) + " un" +
+            (l.comprar ? " · da compra " + N.num(l.comprar) + " un" : "");
+        });
+      }
+
+      /* ---------------------------------------------------- histórico + projeção */
+      var dias = d.dias, nH = dias.length, nF = fut.length;
+      var eixoDatas = dias.map(function (x) { return x.data; }).concat(fut.map(function (f) { return f.data; }));
+      var nulos = function (n) { var a = []; for (var i = 0; i < n; i++) a.push(null); return a; };
+      var ultimoSaldo = nH ? dias[nH - 1].saldo_final : null;
+      /* a projecao emenda no ultimo dia real, partindo da posicao DISPONIVEL */
+      var emenda = function (campo) {
+        return nulos(nH - 1).concat([pr.posicao_inicial]).concat(fut.map(function (f) { return f[campo]; })); };
+      var idx = function (data) { var i = eixoDatas.indexOf(data); return i < 0 ? null : i; };
+
+      var chegadas = [];
+      fut.forEach(function (f, i) {
+        if (f.entrada > 0) chegadas.push({ coord: [nH + i, f.saldo], value: "+" + N.num(f.entrada),
+          itemStyle: { color: C.ceu }, symbol: "pin", symbolSize: 34,
+          label: { color: "#fff", fontSize: 9, fontWeight: 700 } });
+        if (f.compra_plano > 0) chegadas.push({ coord: [nH + i, f.saldo_com_compra], value: "+" + N.num(f.compra_plano),
+          itemStyle: { color: C.menta }, symbol: "pin", symbolSize: 34,
+          label: { color: "#fff", fontSize: 9, fontWeight: 700 } });
+      });
+      var marcos = [{ yAxis: m.ponto_de_pedido, lineStyle: { color: C.ambarEsc, type: [4, 4], width: 1 },
+        label: { color: C.ambarEsc, fontSize: 9.5, formatter: "ponto de pedido", position: "insideStartTop" } }];
+      if (nF) {
+        /* cada marco com o rotulo numa altura diferente, para nao se sobreporem */
+        var mk = function (data, rotulo, cor, posicao) {
+          var i = idx(data); if (i === null) return null;
+          return { xAxis: i, lineStyle: { color: cor, type: [3, 3], width: 1 },
+            label: { color: cor, fontSize: 9.5, formatter: rotulo, position: posicao, rotate: 0, distance: 4,
+              backgroundColor: N.sombra(C.painel, .85), padding: [1, 3], borderRadius: 2 } };
+        };
+        marcos = marcos.concat([
+          { xAxis: nH - 1, lineStyle: { color: C.tinta4, type: "solid", width: 1 },
+            label: { color: C.tinta4, fontSize: 9.5, formatter: "hoje", position: "insideEndBottom", rotate: 0, distance: 4,
+              backgroundColor: N.sombra(C.painel, .85), padding: [1, 3], borderRadius: 2 } },
+          mk(pr.marcos.recompra, "recompra (" + pr.revisao_dias + "d)", C.violeta, "insideEndTop"),
+          mk(pr.marcos.recebimento, "recebimento (" + pr.lead_time_dias + "d)", C.menta, "insideMiddleTop"),
+          mk(pr.marcos.fim_protecao, "fim da proteção", C.tinta4, "insideStartTop")
+        ].filter(Boolean));
+      }
+
+      var series = [
+        { name: "Saldo", type: "line", data: dias.map(function (x) { return x.saldo_final; }).concat(nulos(nF)),
+          symbol: "none", smooth: 0.15, itemStyle: { color: C.ceu },
+          lineStyle: { color: C.ceu, width: 1.5 },
+          areaStyle: { color: N.area(C.ceu, 0.18) },
+          markLine: { silent: true, symbol: "none", data: marcos } },
+        { name: "Vendas", type: "bar", yAxisIndex: 1,
+          data: dias.map(function (x) {
+            return { value: x.vendido,
+              itemStyle: { color: x.estado === "Sem estoque" ? N.sombra(C.coral, .5)
+                : (x.estado === "Ruptura parcial" ? C.ambar : N.sombra(C.ambar, .45)) } };
+          }).concat(nulos(nF)), barWidth: "62%" }
+      ];
+      if (nF) {
+        series.push(
+          /* faixa +-1 desvio: base transparente + altura empilhada */
+          { name: "faixa-base", type: "line", stack: "faixa", silent: true, symbol: "none",
+            data: emenda("saldo_baixo"), lineStyle: { opacity: 0 }, tooltip: { show: false } },
+          { name: "Faixa ±1σ", type: "line", stack: "faixa", silent: true, symbol: "none",
+            data: nulos(nH - 1).concat([0]).concat(fut.map(function (f) { return f.saldo_alto - f.saldo_baixo; })),
+            lineStyle: { opacity: 0 }, areaStyle: { color: N.sombra(C.ceu, .13) }, itemStyle: { color: N.sombra(C.ceu, .3) } },
+          { name: "Saldo projetado", type: "line", data: emenda("saldo"), symbol: "none",
+            itemStyle: { color: C.ceu }, lineStyle: { color: C.ceu, width: 1.6, type: [5, 4] },
+            markPoint: { data: chegadas, silent: true } },
+          { name: "Venda esperada", type: "bar", yAxisIndex: 1, barWidth: "62%",
+            data: nulos(nH).concat(fut.map(function (f) { return f.demanda_esperada; })),
+            itemStyle: { color: N.sombra(C.violeta, .22) } });
+        if (pr.compra_plano > 0) series.push(
+          { name: "Com a compra do plano", type: "line", data: emenda("saldo_com_compra"), symbol: "none",
+            itemStyle: { color: C.menta }, lineStyle: { color: C.menta, width: 1.4, type: [2, 3] } });
+      }
+
+      /* abre mostrando os ultimos ~120 dias mais a projecao; o resto fica no zoom */
+      var ini0 = Math.max(0, nH - 120), pct0 = 100 * ini0 / eixoDatas.length;
       N.grafico("gv-hist", {
-        grid: N.grade({ top: 26, right: 12, bottom: 4, left: 4 }),
+        grid: N.grade({ top: nF ? 36 : 26, right: 12, bottom: nF ? 46 : 4, left: 4 }),
         legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 14, icon: "roundRect",
-          textStyle: { color: C.tinta3, fontSize: 10.5 } },
+          textStyle: { color: C.tinta3, fontSize: 10.5 },
+          data: series.map(function (s) { return s.name; }).filter(function (n) { return n !== "faixa-base"; }) },
         tooltip: N.dica(function (ps) {
-          var x = dias[ps[0].dataIndex];
-          return N.dicaTit(N.dataLonga(x.data)) +
-            N.dicaLin(C.ceu, "saldo no fim do dia", N.num(x.saldo_final)) +
-            N.dicaLin(C.ambar, "peças vendidas", N.num(x.vendido)) +
-            (x.imputado != null ? N.dicaLin(C.menta, "demanda estimada (imputada)",
-              N.num(x.imputado, 1)) : "") +
-            N.dicaLin(C.tinta4, "estado", x.estado);
+          var i = ps[0].dataIndex;
+          if (i < nH) {
+            var x = dias[i];
+            return N.dicaTit(N.dataLonga(x.data)) +
+              N.dicaLin(C.ceu, "saldo no fim do dia", N.num(x.saldo_final)) +
+              N.dicaLin(C.ambar, "peças vendidas", N.num(x.vendido)) +
+              (x.imputado != null ? N.dicaLin(C.menta, "demanda estimada (imputada)",
+                N.num(x.imputado, 1)) : "") +
+              N.dicaLin(C.tinta4, "estado", x.estado);
+          }
+          var f = fut[i - nH];
+          var abertosDia = (pr.pedidos_abertos || []).filter(function (a) { return a.chega_em === f.data; });
+          return N.dicaTit(N.dataLonga(f.data) + " · projeção") +
+            N.dicaLin(C.ceu, "saldo esperado", N.num(f.saldo, 0) +
+              (f.saldo_bruto < 0 ? " (faltariam " + N.num(-f.saldo_bruto, 0) + ")" : "")) +
+            N.dicaLin(N.sombra(C.ceu, .5), "faixa ±1σ", N.num(f.saldo_baixo, 0) + " – " + N.num(f.saldo_alto, 0)) +
+            N.dicaLin(C.violeta, "venda esperada", N.num(f.demanda_esperada, 2)) +
+            (f.entrada > 0 ? N.dicaLin(C.ceu, "chega de pedido em aberto", "+" + N.num(f.entrada) +
+              (abertosDia.length ? " (" + abertosDia.map(function (a) {
+                return "nº " + a.pedido + (a.atrasado ? ", atrasado" : ""); }).join("; ") + ")" : "")) : "") +
+            (f.compra_plano > 0 ? N.dicaLin(C.menta, "chega a compra do plano", "+" + N.num(f.compra_plano)) : "") +
+            (pr.compra_plano > 0 ? N.dicaLin(C.menta, "saldo com a compra", N.num(f.saldo_com_compra, 0)) : "");
         }),
-        xAxis: N.eixoX({ data: dias.map(function (x) { return x.data; }),
+        xAxis: N.eixoX({ data: eixoDatas,
           axisLabel: { color: C.tinta4, fontSize: 9.5,
-            formatter: function (v) { return N.data(v); },
-            interval: Math.floor(dias.length / 7) } }),
-        yAxis: [N.eixoY({ axisLabel: { color: C.tinta4, fontSize: 9.5,
+            formatter: function (v) { return N.data(v); } } }),
+        yAxis: [N.eixoY({ min: 0, axisLabel: { color: C.tinta4, fontSize: 9.5,
           fontFamily: '"JetBrains Mono", monospace',
           formatter: function (v) { return N.curto(v); } } }),
           N.eixoY({ show: false })],
-        series: [
-          { name: "Saldo", type: "line", data: dias.map(function (x) { return x.saldo_final; }),
-            symbol: "none", smooth: 0.15, itemStyle: { color: C.ceu },
-            lineStyle: { color: C.ceu, width: 1.5 },
-            areaStyle: { color: N.area(C.ceu, 0.18) },
-            markLine: { silent: true, symbol: "none",
-              lineStyle: { color: C.ambarEsc, type: [4, 4], width: 1 },
-              label: { color: C.ambarEsc, fontSize: 9.5, formatter: "ponto de pedido",
-                position: "insideStartTop" },
-              data: [{ yAxis: m.ponto_de_pedido }] } },
-          { name: "Vendas", type: "bar", yAxisIndex: 1,
-            data: dias.map(function (x) {
-              return { value: x.vendido,
-                itemStyle: { color: x.estado === "Sem estoque" ? N.sombra(C.coral, .5)
-                  : (x.estado === "Ruptura parcial" ? C.ambar : N.sombra(C.ambar, .45)) } };
-            }), barWidth: "62%" }
-        ]
+        dataZoom: nF ? [
+          { type: "inside", start: pct0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
+          { type: "slider", start: pct0, end: 100, height: 22, bottom: 6,
+            borderColor: "transparent", backgroundColor: N.sombra(C.tinta4, .06),
+            fillerColor: N.sombra(C.ceu, .14), handleSize: 14,
+            dataBackground: { lineStyle: { color: N.sombra(C.ceu, .4) }, areaStyle: { color: N.sombra(C.ceu, .12) } },
+            selectedDataBackground: { lineStyle: { color: C.ceu }, areaStyle: { color: N.sombra(C.ceu, .2) } },
+            textStyle: { color: C.tinta4, fontSize: 9.5 },
+            labelFormatter: function (i, v) { return N.data(v); } }
+        ] : undefined,
+        series: series
       });
 
       /* ---------------------------------------------------- distribuição */
