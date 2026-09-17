@@ -749,6 +749,41 @@ def _cadastro(wh: Warehouse) -> list[dict]:
                   _reg(ex), ["sku", "item", "custo_hoje", "ultimo_lancado",
                              "mediana", "razao"]))
 
+    # custo simbolico: o ERP guarda R$ 0,005, R$ 0,02 ou R$ 1,00 como custo
+    # medio de itens que custam centenas de reais. O staging troca pelo preco
+    # pago ao fornecedor quando ha compra; sem compra, fica a pista contra o
+    # preco de venda (custo abaixo de 5% do preco praticado)
+    r = wh.query(f"""select
+          sum(case when custo_origem = 'compra' then 1 else 0 end) corrigidos,
+          sum(case when custo_origem = 'simbolico' then 1 else 0 end) restantes,
+          sum(case when custo_origem = 'sem custo' and custo_compra_mediano > 0
+                   then 1 else 0 end) zero_com_compra
+        from {ref('stg_catalogo')}""").iloc[0]
+    ex = wh.query(f"""select sku, item, round(custo_ultimo_lancado, 3) custo_erp,
+          round(custo_compra_mediano, 2) preco_pago,
+          round(preco_tabela, 2) preco_venda, custo_origem,
+          round(custo_unitario, 2) custo_usado
+        from {ref('stg_catalogo')}
+        where custo_origem in ('compra', 'simbolico')
+        order by custo_origem, preco_tabela desc limit 60""")
+    out.append(_v(G, "custo_simbolico",
+                  "custo simbólico no ERP (centavos para item de centenas de reais)",
+                  "aviso" if int(r.restantes or 0) else "ok",
+                  _num(r.corrigidos or 0), "itens corrigidos pelo preço pago",
+                  "o custo médio do ERP contra o preço pago ao fornecedor "
+                  "(raw_compras) e contra o preço de venda",
+                  f"{_num(r.corrigidos or 0)} itens com custo abaixo de ⅓ do preço pago, "
+                  f"trocados pelo preço pago · {_num(r.restantes or 0)} com custo abaixo "
+                  f"de 5% do preço de venda e sem compra para corrigir, zerados e fora "
+                  f"da compra · "
+                  f"{_num(r.zero_com_compra or 0)} sem custo no estoque mas com preço pago",
+                  "Custo de centavos faz o lucro por peça virar o preço inteiro e a "
+                  "nota explodir: o item vai ao topo da fila por artefato. Os "
+                  "corrigidos já usam o preço pago; os zerados saem da compra até o "
+                  "acerto no cadastro do ERP ou um ajuste manual de custo por item.",
+                  _reg(ex), ["sku", "item", "custo_erp", "preco_pago", "preco_venda",
+                             "custo_origem", "custo_usado"]))
+
     # custo do cadastro contra o custo do que foi de fato vendido: duas fontes
     # que nao se falam - o estoque diario e a nota de venda
     r = wh.query(f"""

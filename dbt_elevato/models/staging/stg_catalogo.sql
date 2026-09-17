@@ -87,6 +87,24 @@ prazo as (
     )
 ),
 
+compra as (
+    -- O PRECO PAGO ao fornecedor, mediano por item. E a segunda leitura do
+    -- custo, independente do estoque diario, e serve de contraprova: em 90%
+    -- do catalogo o custo medio do ERP fica entre 0,77x e 1,36x deste preco.
+    -- Quando o custo do ERP e menor que um terco do preco pago, nao e custo,
+    -- e cadastro simbolico (R$ 0,005, R$ 0,02, R$ 1,00) - portas Rohden
+    -- compradas a R$ 974 constavam a meio centavo, davam lucro igual ao preco
+    -- inteiro e nota de 9.856, e iam para o topo da fila por artefato. Nesses
+    -- o preco pago e o custo. A trava contra a mediana (acima) nao pega esse
+    -- caso porque a mediana e igualmente simbolica. O pedido ainda nao
+    -- atendido conta: o preco combinado com o fornecedor ja e evidencia.
+    select cast(idsubproduto as varchar) as sku,
+           median(cast(valunitario as double)) as preco_compra
+    from {{ source('raw', 'raw_compras') }}
+    where cast(valunitario as double) > 0
+    group by 1
+),
+
 lote as (
     -- o menor pedido que o fornecedor de fato aceitou. Usar a mediana do
     -- pedido inflaria o lote minimo e obrigaria o modelo a comprar mais do
@@ -136,11 +154,34 @@ select
     coalesce(cad.familia, 'Sem classificacao')   as familia,
     coalesce(cad.unidade, 'UN')                  as unidade,
     coalesce(cad.origem, 'Nao informado')        as origem,
-    coalesce(custo.custo_unitario, 0.0)          as custo_unitario,
-    -- as duas leituras cruas ficam a vista, para a conferencia por item poder
+    -- item sem custo no estoque fica em zero de proposito: nunca teve peca no
+    -- CD, o modelo nao dimensiona a prateleira dele (a coluna custo_origem
+    -- diz quantos sao, e `compra` guarda o preco pago para quem quiser usar)
+    -- Sem compra para corrigir, custo abaixo de 5% do preco de venda e a
+    -- mesma pista de cadastro simbolico - e sem contraprova nao ha o que por
+    -- no lugar. Vai a zero e o item sai da compra, como os sem custo: o
+    -- modelo nao compra o que nao sabe precificar. custo_origem = 'simbolico'
+    -- lista quais sao para o acerto no ERP ou o ajuste manual por item.
+    case when custo.custo_unitario > 0 and compra.preco_compra > 0
+              and custo.custo_unitario < compra.preco_compra / 3
+         then compra.preco_compra
+         when custo.custo_unitario > 0 and compra.preco_compra is null
+              and preco.preco_tabela > 0
+              and custo.custo_unitario < preco.preco_tabela * 0.05
+         then 0.0
+         else coalesce(custo.custo_unitario, 0.0) end as custo_unitario,
+    -- as leituras cruas ficam a vista, para a conferencia por item poder
     -- mostrar de onde o custo veio e quando ele divergiu
     coalesce(custo.custo_ultimo_dia_com_estoque, 0.0) as custo_ultimo_lancado,
     coalesce(custo.custo_mediano, 0.0)           as custo_mediano,
+    coalesce(compra.preco_compra, 0.0)           as custo_compra_mediano,
+    case when custo.custo_unitario > 0 and compra.preco_compra > 0
+              and custo.custo_unitario < compra.preco_compra / 3 then 'compra'
+         when custo.custo_unitario > 0 and compra.preco_compra is null
+              and preco.preco_tabela > 0
+              and custo.custo_unitario < preco.preco_tabela * 0.05 then 'simbolico'
+         when custo.custo_unitario > 0 then 'estoque'
+         else 'sem custo' end                    as custo_origem,
     coalesce(preco.preco_tabela,
              custo.custo_unitario * 1.3, 0.0)    as preco_tabela,
     0.0                                          as peso_unit_kg,
@@ -154,6 +195,7 @@ from universo u
 cross join mediana_prazo mp
 left join cad   on cad.sku   = u.sku
 left join custo on custo.sku = u.sku
+left join compra on compra.sku = u.sku
 left join prazo on prazo.sku = u.sku
 left join lote  on lote.sku  = u.sku
 left join preco on preco.sku = u.sku
@@ -203,6 +245,8 @@ select
                   then a.custo_mediano else a.custo_ultimo end, 0.0) as custo_unitario,
     coalesce(a.custo_ultimo, 0.0)                    as custo_ultimo_lancado,
     coalesce(a.custo_mediano, 0.0)                   as custo_mediano,
+    0.0                                              as custo_compra_mediano,
+    case when a.custo_ultimo > 0 then 'estoque' else 'sem custo' end as custo_origem,
     coalesce(preco.preco_tabela, a.custo_ultimo * 1.3, 0.0) as preco_tabela,
     0.0                                              as peso_unit_kg,
     coalesce(cast(round(a.prazo) as integer), mp.m)  as lead_time_dias,
@@ -224,6 +268,8 @@ select
     cast(custo_unitario as double)      as custo_unitario,
     cast(custo_unitario as double)      as custo_ultimo_lancado,
     cast(custo_unitario as double)      as custo_mediano,
+    0.0                                 as custo_compra_mediano,
+    'cadastro'                          as custo_origem,
     cast(preco_tabela as double)        as preco_tabela,
     cast(peso_unit_kg as double)        as peso_unit_kg,
     cast(lead_time_dias as integer)     as lead_time_dias,

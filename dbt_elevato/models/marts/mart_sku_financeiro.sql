@@ -33,6 +33,8 @@ select
     c.custo_unitario,
     c.custo_ultimo_lancado,
     c.custo_mediano,
+    c.custo_compra_mediano,
+    c.custo_origem,
     c.preco_tabela,
     c.lead_time_dias,
     -- desvio do prazo de entrega. Zero na base sintetica (prazo fixo);

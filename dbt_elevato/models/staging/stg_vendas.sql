@@ -64,6 +64,18 @@ custo_medio as (
     from custo_dia group by 1
 ),
 
+compra as (
+    -- a mesma contraprova de stg_catalogo: custo do ERP abaixo de um terco do
+    -- preco pago ao fornecedor e cadastro simbolico, e o lucro da venda sairia
+    -- igual ao preco inteiro. Sem isto, corrigir o custo so no cadastro
+    -- deixaria o lucro por peca (que vem daqui) inflado do mesmo jeito.
+    select cast(idsubproduto as varchar) as sku,
+           median(cast(valunitario as double)) as preco_compra
+    from {{ source('raw', 'raw_compras') }}
+    where cast(valunitario as double) > 0
+    group by 1
+),
+
 v as (
     select
         -- empresa + pedido + sequencia + produto + data. Menos que isso
@@ -110,6 +122,20 @@ v as (
         cast(IDCLIFOR as varchar)             as cliente_id,
         cast(NOMEVENDEDOR as varchar)         as vendedor
     from {{ source('raw', 'raw_vendas_todas') }}
+),
+
+vc as (
+    -- o custo da linha: o do dia, senao a mediana do item, trocado pelo preco
+    -- pago quando o do ERP e simbolico (ver `compra`)
+    select v.*,
+           case when coalesce(cd.custo, cm.custo) > 0 and pc.preco_compra > 0
+                     and coalesce(cd.custo, cm.custo) < pc.preco_compra / 3
+                then pc.preco_compra
+                else coalesce(cd.custo, cm.custo, 0.0) end as custo_ok
+    from v
+    left join custo_dia   cd on cd.sku = v.sku and cd.data = v.data
+    left join custo_medio cm on cm.sku = v.sku
+    left join compra      pc on pc.sku = v.sku
 )
 
 select
@@ -126,14 +152,14 @@ select
     0.0                                               as desconto_pct,
     v.receita_bruta,
     v.receita_liquida,
-    coalesce(cd.custo, cm.custo, 0.0)                 as custo_unitario,
-    v.pecas_vendidas * coalesce(cd.custo, cm.custo, 0.0) as cmv,
+    v.custo_ok                                        as custo_unitario,
+    v.pecas_vendidas * v.custo_ok                     as cmv,
     v.valor_do_frete,
     0.0                                               as frete_cobrado_cliente,
     0.0                                               as impostos_sobre_venda,
     -- o lucro que interessa a decisao de compra: o que entra a mais se a peca
     -- vender. Devolucao e cancelamento ja estao descontados na venda liquida.
-    v.receita_liquida - v.pecas_vendidas * coalesce(cd.custo, cm.custo, 0.0) as lucro,
+    v.receita_liquida - v.pecas_vendidas * v.custo_ok as lucro,
     v.receita_liquida                                 as total,
     coalesce(v.loja, 'Loja ' || v.loja_id)            as canal,
     v.loja_id,
@@ -153,9 +179,7 @@ select
     v.vendedor                                        as regiao,
     coalesce(v.tipo_entrega, 'NORMAL')                as modalidade_frete,
     0.0                                               as peso_total_kg
-from v
-left join custo_dia  cd on cd.sku = v.sku and cd.data = v.data
-left join custo_medio cm on cm.sku = v.sku
+from vc v
 -- a linha de devolucao vem com quantidade negativa (22.960 linhas, -72.020
 -- pecas no extrato completo, com MOTIVODEVCAN preenchido). Ela pertence ao
 -- financeiro, nao ao sinal de demanda: manter aqui inverteria o sinal do dia e

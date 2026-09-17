@@ -245,7 +245,8 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     # topo da fila com nota 51x a do segundo. Nenhum teste de identidade pega
     # isso, porque a conta estava certa e o insumo errado.
     cat = wh.query(f"""
-        select sku, item, custo_unitario, custo_ultimo_lancado, custo_mediano
+        select sku, item, custo_unitario, custo_ultimo_lancado, custo_mediano,
+               custo_compra_mediano, custo_origem
         from {ref('stg_catalogo')}""")
 
     # 1. nenhum custo saiu de um dia sem estoque. A consulta refaz a leitura
@@ -291,7 +292,10 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     # 2. o custo publicado esta na faixa da mediana historica do proprio item.
     #    Custo sobe com o tempo, entao a faixa e larga de proposito: o que se
     #    procura e a ordem de grandeza, nao a variacao.
-    v = cat[cat.custo_mediano > 0].copy()
+    #    So vale para o custo que VEIO do estoque: o corrigido pelo preco pago
+    #    e o simbolico zerado saem da faixa por construcao (a mediana deles e
+    #    o proprio lixo de centavos) e sao conferidos logo abaixo.
+    v = cat[(cat.custo_mediano > 0) & (cat.custo_origem == "estoque")].copy()
     v["razao"] = v.custo_unitario / v.custo_mediano
     fora = v[(v.razao < 0.25) | (v.razao > 4.0)]
     r.afirma(B, "custo publicado na faixa da mediana do item",
@@ -301,6 +305,30 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
              ("" if not len(fora) else " · fora: " +
               str(fora.nsmallest(3, 'razao')[['item', 'custo_unitario',
                                               'custo_mediano']].to_dict('records'))))
+
+    # 2b. o custo simbolico do ERP (centavos para item de centenas de reais).
+    #     Quem tem preco pago ao fornecedor usa o preco pago; quem nao tem vai
+    #     a zero e sai da compra. A regra e refeita aqui a partir das colunas
+    #     cruas, e tem de bater com o que o staging publicou.
+    c = cat[cat.custo_origem == "compra"].copy()
+    # o custo que o estoque daria, ja com a trava da mediana (0,25x a 4x) que
+    # o staging aplica ANTES de confrontar com o preco pago
+    c["custo_estoque"] = np.where(
+        (c.custo_ultimo_lancado < c.custo_mediano * 0.25)
+        | (c.custo_ultimo_lancado > c.custo_mediano * 4),
+        c.custo_mediano, c.custo_ultimo_lancado)
+    ok_c = (np.isclose(c.custo_unitario, c.custo_compra_mediano)
+            & (c.custo_estoque < c.custo_compra_mediano / 3)).all() if len(c) else True
+    z = cat[cat.custo_origem == "simbolico"]
+    ok_z = ((z.custo_unitario == 0) & (z.custo_compra_mediano == 0)).all() if len(z) else True
+    r.afirma(B, "custo simbolico do ERP corrigido pelo preco pago ou zerado",
+             bool(ok_c and ok_z),
+             f"{len(c)} itens com custo do ERP abaixo de 1/3 do preco pago usam o preco "
+             f"pago · {len(z)} sem compra e com custo abaixo de 5% do preco de venda "
+             f"estao zerados e fora da compra" +
+             ("" if not len(c) else " · ex.: " + str(
+                 c.nsmallest(2, 'custo_ultimo_lancado')[['item', 'custo_ultimo_lancado',
+                                                        'custo_compra_mediano']].to_dict('records'))))
 
     # 3. o cruzamento independente: o custo do cadastro contra o custo medio
     #    do que foi de fato vendido. Sao duas fontes que nao se falam - o
