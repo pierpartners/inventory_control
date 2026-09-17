@@ -43,8 +43,10 @@
        "P = 1 − " + N.num(r.cdf_ate_k_menos_1, 6) +
        " = <b>" + N.num(r.p_vender, 6) + "</b>  (" + N.pct(r.p_vender, 2) + ")"],
       ["Margem e perda por peça",
-       "M = lucro por peça × fator de perda na ruptura\n" +
-       "M = " + N.moeda(r.lucro_por_peca, 2) + " × " + N.num(r.fator_perda_ruptura, 2) +
+       "M = s × lucro_e × fator_e + (1 − s) × lucro_l × fator_l\n" +
+       "M = " + N.pct(r.share_ecommerce, 0) + " × " + N.moeda(r.lucro_por_peca_ecommerce, 2) + " × " +
+       N.num(r.fator_perda_ruptura_ecommerce, 2) + " + " + N.pct(1 - r.share_ecommerce, 0) + " × " +
+       N.moeda(r.lucro_por_peca_lojas, 2) + " × " + N.num(r.fator_perda_ruptura_lojas, 2) +
        " = <b>R$ " + N.moeda(r.margem_unit, 2) + "</b>\n\n" +
        "L = carregar no horizonte + obsolescência\n" +
        "L = " + N.moeda(r.custo_manter_no_periodo, 2) + " + " +

@@ -21,6 +21,12 @@ class Parametros:
     taxa_manutencao_ano: float = 0.25
     custo_por_pedido: float = 185.0
     fator_perda_ruptura: float = 0.85
+    # Perda na ruptura POR CANAL. No site o cliente nao espera e nao ha
+    # vendedor para substituir; na loja ha. O custo de ruptura de cada item e
+    # a media dos dois, ponderada pela participacao do canal na demanda dele.
+    # `fator_perda_ruptura` acima fica para a politica atual de referencia.
+    fator_perda_ruptura_ecommerce: float = 0.85
+    fator_perda_ruptura_lojas: float = 0.85
     nivel_servico_min: float = 0.80
     nivel_servico_max: float = 0.995
     dias_por_ano: int = 365
@@ -99,9 +105,16 @@ CAMPOS = [
     ("taxa_manutencao_ano", "Custo de manter estoque", "% a.a.", "pct", 0, 2,
      "Capital parado + armazenagem + seguro + obsolescência, sobre o custo do item. "
      "É um dos três números que mais mexem no resultado.", "Economia"),
-    ("fator_perda_ruptura", "Perda quando falta o item", "%", "pct", 0, 1,
-     "Fração da margem que se perde na ruptura. 0% = o cliente sempre espera; "
-     "100% = a venda está sempre perdida. Em item de obra, tende a ser alto.", "Economia"),
+    ("fator_perda_ruptura_ecommerce", "Perda quando falta no e-commerce", "%", "pct", 0, 1,
+     "Fração da margem do e-commerce que se perde quando a peça falta. No site o cliente "
+     "não espera nem aceita substituto: tende a ser maior que nas lojas.", "Economia"),
+    ("fator_perda_ruptura_lojas", "Perda quando falta nas lojas", "%", "pct", 0, 1,
+     "Fração da margem das lojas que se perde na ruptura. O vendedor pode reservar ou "
+     "oferecer outro item; costuma ser menor que no e-commerce. O custo de ruptura de cada "
+     "item é a média dos dois fatores ponderada pela participação de cada canal nele.", "Economia"),
+    ("fator_perda_ruptura", "Perda na ruptura (referência agregada)", "%", "pct", 0, 1,
+     "Usado só na política atual de comparação. O modelo usa os dois fatores por canal acima.",
+     "Economia"),
     ("perda_encalhe", "Perda se a peça encalhar", "% do custo", "pct", 0, 1,
      "Quanto do custo você perde por uma peça que não vendeu dentro do horizonte: "
      "remarcação, tonalidade fora de linha, descontinuação. Item de linha que sempre "

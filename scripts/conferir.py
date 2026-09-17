@@ -56,7 +56,8 @@ def refazer(r) -> dict:
 
     cdf = float(dist.cdf(r.unidade_de - 1))
     P = 1 - cdf
-    M = r.lucro_por_peca * r.fator_perda_ruptura
+    M = (r.share_ecommerce * r.lucro_por_peca_ecommerce * r.fator_perda_ruptura_ecommerce
+         + (1 - r.share_ecommerce) * r.lucro_por_peca_lojas * r.fator_perda_ruptura_lojas)
     obsolescencia = r.custo_unitario * r.perda_encalhe_pct
     L = r.custo_manter_no_periodo + obsolescencia
     q = r.quantidade

@@ -592,14 +592,21 @@ def bloco4(r: Relatorio, wh, p, ctx) -> None:
     D = m.demanda_media_dia * p.dias_por_ano
     c = m.custo_unitario
     h_dec = c * (p.taxa_manutencao_ano + lam)
-    Cu = m.lucro_por_peca * p.fator_perda_ruptura
+    # o custo de ruptura e a media por canal: a margem e a perda do e-commerce
+    # sao outras, e a participacao dele no item pondera as duas
+    share = (m.share_ecommerce.fillna(0.0) if "share_ecommerce" in m.columns
+             else pd.Series(0.0, index=m.index))
+    le = m.lucro_por_peca_ecommerce if "lucro_por_peca_ecommerce" in m.columns else m.lucro_por_peca
+    ll = m.lucro_por_peca_lojas if "lucro_por_peca_lojas" in m.columns else m.lucro_por_peca
+    Cu = (share * le * getattr(p, "fator_perda_ruptura_ecommerce", p.fator_perda_ruptura)
+          + (1 - share) * ll * getattr(p, "fator_perda_ruptura_lojas", p.fator_perda_ruptura))
     Co = c * (p.taxa_manutencao_ano + lam) * m.periodo_protecao_dias / p.dias_por_ano
 
     r.compara(B, "custo de manter na decisao = c x (taxa + lambda)",
               h_dec.to_numpy(), m.custo_manter_unit_decisao.to_numpy())
     r.compara(B, "custo de manter real = c x taxa",
               (c * p.taxa_manutencao_ano).to_numpy(), m.custo_manter_unit_real.to_numpy())
-    r.compara(B, "margem perdida na ruptura = lucro x fator",
+    r.compara(B, "margem perdida na ruptura = media por canal de lucro x fator",
               Cu.to_numpy(), m.custo_falta_unit.to_numpy())
     r.compara(B, "custo de manter no horizonte", Co.to_numpy(),
               m.custo_manter_no_periodo.to_numpy())
@@ -866,7 +873,8 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
             d, nome = stats.nbinom(rr, rr / (rr + mu)), "Binomial Negativa"
         cdf = float(d.cdf(x.unidade_de - 1))
         P = 1 - cdf
-        M = x.lucro_por_peca * x.fator_perda_ruptura
+        M = (x.share_ecommerce * x.lucro_por_peca_ecommerce * x.fator_perda_ruptura_ecommerce
+             + (1 - x.share_ecommerce) * x.lucro_por_peca_lojas * x.fator_perda_ruptura_lojas)
         obs = x.custo_unitario * x.perda_encalhe_pct
         L = x.custo_manter_no_periodo + obs
         q = x.quantidade
@@ -890,7 +898,7 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
         ("sigma = raiz(H x Var(d) + d^2 x Var(L))", "sd", "sd_periodo"),
         ("F(k-1) da distribuicao", "cdf", "cdf_ate_k_menos_1"),
         ("P = 1 - F(k-1)", "P", "p_vender"),
-        ("M = lucro x fator de ruptura", "M", "margem_unit"),
+        ("M = s x lucro_e x fator_e + (1-s) x lucro_l x fator_l", "M", "margem_unit"),
         ("obsolescencia = c x % encalhe", "obs", "custo_obsolescencia"),
         ("L = carregar + obsolescencia", "L", "perda_unit"),
         ("limite = L/(M+L)", "lim", "limite_marginal_compra"),

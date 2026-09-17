@@ -185,7 +185,15 @@ def modelar(base: pd.DataFrame, p: Parametros, lam: float) -> pd.DataFrame:
     c = b.custo_unitario
     h_decisao = c * (p.taxa_manutencao_ano + lam)
     h_real = c * p.taxa_manutencao_ano
-    Cu = b.lucro_por_peca * p.fator_perda_ruptura
+    # custo de ruptura = media por canal da margem perdida, ponderada pela
+    # participacao do canal na demanda do item. Sem coluna de canal (base sem
+    # loja) a participacao e zero e tudo cai no fator das lojas.
+    share = (b["share_ecommerce"].fillna(0.0) if "share_ecommerce" in b.columns
+             else pd.Series(0.0, index=b.index))
+    lucro_e = b["lucro_por_peca_ecommerce"] if "lucro_por_peca_ecommerce" in b.columns else b.lucro_por_peca
+    lucro_l = b["lucro_por_peca_lojas"] if "lucro_por_peca_lojas" in b.columns else b.lucro_por_peca
+    Cu = (share * lucro_e * p.fator_perda_ruptura_ecommerce
+          + (1.0 - share) * lucro_l * p.fator_perda_ruptura_lojas)
     P = b.periodo_protecao_dias
     Co = c * (p.taxa_manutencao_ano + lam) * P / p.dias_por_ano
     limite = np.where((Cu + Co) > 0, Co / (Cu + Co), 1.0)
@@ -550,7 +558,13 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "lucro_por_peca_historico": float(
                 getattr(r, "lucro_por_peca_historico", r.lucro_por_peca)),
             "preco_liquido_peca": float(getattr(r, "preco_liquido_peca", 0.0)),
-            "fator_perda_ruptura": float(p.fator_perda_ruptura),
+            # a margem capturada e a media por canal: os cinco insumos ficam
+            # na linha para a conta poder ser refeita a mao
+            "share_ecommerce": float(np.nan_to_num(getattr(r, "share_ecommerce", 0.0))),
+            "lucro_por_peca_ecommerce": float(getattr(r, "lucro_por_peca_ecommerce", r.lucro_por_peca)),
+            "lucro_por_peca_lojas": float(getattr(r, "lucro_por_peca_lojas", r.lucro_por_peca)),
+            "fator_perda_ruptura_ecommerce": float(p.fator_perda_ruptura_ecommerce),
+            "fator_perda_ruptura_lojas": float(p.fator_perda_ruptura_lojas),
             "margem_unit": Cu,
             "custo_unitario": float(r.custo_unitario),
             "taxa_manutencao_ano": float(p.taxa_manutencao_ano),
@@ -889,7 +903,8 @@ def alocacao_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd
     # Ponto de partida do risco: a margem que se perde se NADA for comprado.
     # E a origem da fronteira - cada peca comprada desconta dela.
     falta0 = falta_esperada(df)
-    margem_un = (df.lucro_por_peca * p.fator_perda_ruptura).to_numpy(float)
+    # a mesma margem que a fila usa (custo_falta_unit, ja ponderada por canal)
+    margem_un = df.custo_falta_unit.to_numpy(float)
     risco_inicial = float((falta0 * margem_un).sum())
     falta_inicial = float(falta0.sum())
 
@@ -1214,6 +1229,27 @@ def _margem_coerente(wh: Warehouse, fin: pd.DataFrame, ate: str | None,
     fin["margem_pct"] = np.where(fin.preco_liquido_peca > 0,
                                  fin.lucro_por_peca / fin.preco_liquido_peca,
                                  0.0)
+
+    # A margem por canal pelo MESMO caminho: preco praticado do canal na
+    # janela menos o custo de hoje. O e-commerce tem frete e preco proprios,
+    # e e a margem dele que se perde quando falta no site. Canal sem venda na
+    # janela herda a margem agregada - frequente, porque o e-commerce e um
+    # decimo da saida do CD.
+    for canal in ("ecommerce", "lojas"):
+        col = f"lucro_por_peca_{canal}"
+        fin[f"lucro_por_peca_historico_{canal}"] = (
+            fin[col].astype(float) if col in fin.columns else fin.lucro_por_peca_historico)
+    jan_c = wh.query(f"""
+        select sku, canal_demanda, sum(receita_liquida) as receita, sum(pecas_vendidas) as pecas
+        from {ref('stg_vendas')} {onde} group by 1, 2""")
+    for canal in ("ecommerce", "lojas"):
+        j = jan_c[jan_c.canal_demanda == canal][["sku", "receita", "pecas"]].copy()
+        j["preco"] = j.receita.astype(float) / j.pecas.astype(float).replace(0.0, np.nan)
+        preco_c = fin[["sku"]].merge(j[["sku", "preco"]], on="sku", how="left").preco
+        preco_c.index = fin.index
+        fin[f"lucro_por_peca_{canal}"] = (
+            preco_c - fin.custo_unitario.astype(float)).where(preco_c.notna(), fin.lucro_por_peca)
+
     fin = fin.drop(columns=["preco_janela"])
     return fin
 
