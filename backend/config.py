@@ -91,7 +91,14 @@ class Parametros:
             return p
         dados = json.loads(ARQ.read_text(encoding="utf-8"))
         validos = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in dados.items() if k in validos})
+        campos = {k: v for k, v in dados.items() if k in validos}
+        # arquivo antigo, de antes da quebra por canal: a perda na ruptura que
+        # ele guardou vale para os dois canais - herdar mantem a hipotese
+        # economica do usuario em vez de voltar calado ao default da classe
+        if "fator_perda_ruptura" in campos:
+            for k in ("fator_perda_ruptura_ecommerce", "fator_perda_ruptura_lojas"):
+                campos.setdefault(k, campos["fator_perda_ruptura"])
+        return cls(**campos)
 
 
 # Metadados da tela de parametros: rotulo, unidade, tipo, limites e grupo.

@@ -758,7 +758,10 @@ def caminhar(fila: pd.DataFrame, regra: dict,
     # a fatia so morde quando e rigida E o caixa limita; flexivel, os dois
     # saldos sao infinitos e viram so leitura acumulada
     teto_e = float(regra.get("teto_ecommerce", 0.0))
-    rigida = bool(regra.get("fatia_rigida", False)) and bool(regra["caixa_limita"])
+    # fatia zero e "sem fatia declarada", nao "zero de caixa para o e-commerce":
+    # sem o teto_e > 0 a fatia rigida barraria toda peca com custo no canal
+    rigida = (bool(regra.get("fatia_rigida", False)) and bool(regra["caixa_limita"])
+              and teto_e > 0)
     restante_e = teto_e if rigida else np.inf
     restante_l = (teto - teto_e) if rigida else np.inf
     gasto_e = 0.0

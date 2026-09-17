@@ -32,7 +32,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
 from backend.config import Parametros  # noqa: E402
-from backend.modelo import ajustar_distribuicao, modelar  # noqa: E402
+from backend.modelo import ajustar_distribuicao, caminhar, modelar  # noqa: E402
 from backend.warehouse import abrir, ref  # noqa: E402
 
 TOL = 1e-9          # igualdade numerica exata (mesma conta, mesma ordem)
@@ -878,6 +878,88 @@ def bloco5(r: Relatorio, wh, p, ctx) -> None:
                      f"({gasto_e / gasto if gasto else 0:.1%}) · fatia declarada R$ {teto_e:,.0f}")
     else:
         r.falha(B, "fila traz o custo por canal", "faltam custo_ecommerce / caixa_acumulado_ecommerce")
+
+    # --- a caminhada dos dois caixas conferida contra uma fila sintetica ---
+    # Nao depende do dado carregado: cinco pecas com numeros redondos, a conta
+    # de cada caso feita a mao no comentario para o leitor conferir sem rodar.
+    # custo total das cinco = 450, teto = 400, fatia declarada = 100.
+    sint = pd.DataFrame({
+        "sku": ["A", "A", "B", "C", "D"],
+        "bloco": [0, 1, 0, 0, 0],
+        "quantidade": [1, 1, 1, 1, 1],
+        "custo": [100.0, 100.0, 100.0, 100.0, 50.0],
+        "custo_ecommerce": [80.0, 80.0, 80.0, 10.0, 50.0],
+        "valor_esperado": [10.0, 9.0, 8.0, 7.0, 6.0],
+        "reducao_risco": [1.0, 1.0, 1.0, 1.0, 1.0],
+        "reducao_falta": [1.0, 1.0, 1.0, 1.0, 1.0],
+        "nota": [5.0, 4.0, 3.0, 2.0, 1.0],
+        "p_vender": [0.9, 0.8, 0.7, 0.6, 0.5],
+    })
+    regra_base = dict(criterios=["caixa"], criterio="caixa", piso_retorno=0.0,
+                      piso_chance=0.0, alvo_risco=None, teto=400.0, caixa_limita=True)
+
+    def _anda(**extra):
+        return caminhar(sint, {**regra_base, **extra}, 0.0, 0.0)
+
+    def _motivos(x):
+        return dict(pd.Series(list(x["motivo"])).value_counts())
+
+    # (a) rigida com fatia 100. Saldos iniciais: total 400, e-commerce 100,
+    # lojas 300.
+    #   linha 0 (A, 80e/20l): cabe nos tres -> compra; sobra 300 / 20 / 280
+    #   linha 1 (A, 80e/20l): 80 > 20 na fatia -> "nao coube na fatia do e-commerce"
+    #   linha 2 (B, 80e/20l): 80 > 20 na fatia -> idem
+    #   linha 3 (C, 10e/90l): 10 <= 20 e 90 <= 280 -> compra; sobra 200 / 10 / 190
+    #   linha 4 (D, 50e/ 0l): 50 > 10 na fatia -> "nao coube na fatia do e-commerce"
+    # gasto do e-commerce 80+10 = 90; das lojas 20+90 = 110 (total 200).
+    a = _anda(teto_ecommerce=100.0, fatia_rigida=True)
+    r.afirma(B, "caminhada sintetica: a fatia rigida barra quem a estoura",
+             list(a["comprar"]) == [True, False, False, True, False]
+             and a["motivo"][1] == "nao coube na fatia do e-commerce"
+             and a["motivo"][4] == "nao coube na fatia do e-commerce"
+             and abs(float(a["caixa_acumulado_ecommerce"][-1]) - 90.0) < 1e-9
+             and abs(float(a["caixa_acumulado_lojas"][-1]) - 110.0) < 1e-9,
+             f"{_motivos(a)} · e-commerce {float(a['caixa_acumulado_ecommerce'][-1]):.0f}"
+             f" · lojas {float(a['caixa_acumulado_lojas'][-1]):.0f}")
+
+    # (b) flexivel, mesma fatia declarada: os dois saldos por canal sao
+    # infinitos e so o caixa de 400 morde.
+    #   linhas 0..3: 100+100+100+100 = 400, o caixa fecha exatamente
+    #   linha 4 (D, 50): 50 > 0 do restante -> "nao coube no caixa restante"
+    # fatia lida do e-commerce: 80+80+80+10 = 250.
+    b = _anda(teto_ecommerce=100.0, fatia_rigida=False)
+    r.afirma(B, "caminhada sintetica: fatia flexivel so le, quem limita e o caixa",
+             list(b["comprar"]) == [True, True, True, True, False]
+             and b["motivo"][4] == "nao coube no caixa restante"
+             and abs(float(b["caixa_acumulado_ecommerce"][-1]) - 250.0) < 1e-9,
+             f"{_motivos(b)} · e-commerce {float(b['caixa_acumulado_ecommerce'][-1]):.0f}")
+
+    # (c) rigida com fatia 0: fatia zero e "fatia nao declarada", nao "caixa
+    # zero para o e-commerce" - tem de dar exatamente o resultado de (b).
+    c = _anda(teto_ecommerce=0.0, fatia_rigida=True)
+    r.afirma(B, "caminhada sintetica: fatia zero nao e fatia, e ausencia de fatia",
+             list(c["comprar"]) == list(b["comprar"])
+             and list(c["motivo"]) == list(b["motivo"]),
+             f"{_motivos(c)}")
+
+    # (d) regra antiga, sem as chaves novas: o default (fatia 0, nao rigida)
+    # tem de reproduzir (b) peca por peca.
+    d = caminhar(sint, dict(regra_base), 0.0, 0.0)
+    r.afirma(B, "caminhada sintetica: regra sem as chaves de canal age como antes",
+             list(d["comprar"]) == list(b["comprar"])
+             and list(d["motivo"]) == list(b["motivo"]),
+             f"{_motivos(d)}")
+
+    # (e) rigida com fatia 160: agora a segunda peca de A cabe.
+    #   linha 0 (A, 80e): fatia 160 -> 80; compra
+    #   linha 1 (A, 80e): 80 <= 80; compra e zera a fatia (restante 0)
+    #   linha 2 (B, 80e): 80 > 0 -> "nao coube na fatia do e-commerce"
+    # (se a linha 1 nao entrasse, um bloco posterior de A viria "bloqueada")
+    e = _anda(teto_ecommerce=160.0, fatia_rigida=True)
+    r.afirma(B, "caminhada sintetica: fatia maior deixa passar o bloco seguinte do item",
+             bool(e["comprar"][1]) and e["motivo"][2] == "nao coube na fatia do e-commerce"
+             and abs(float(e["caixa_acumulado_ecommerce"][-1]) - 160.0) < 1e-9,
+             f"{_motivos(e)} · e-commerce {float(e['caixa_acumulado_ecommerce'][-1]):.0f}")
 
 
 # ----------------------------------------------------------------------

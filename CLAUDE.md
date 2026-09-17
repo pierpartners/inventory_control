@@ -30,7 +30,10 @@ python scripts/extrair_dw.py --anos 1 --so raw_compras raw_ciclo_pagamento
 
 After changing a parameter, use **Salvar e recalcular** on the `/parametros` page instead of
 rerunning the pipeline from the terminal — it only reruns the Python model. `dbt build` (inside
-`rodar_pipeline.py`) is only needed when the source CSVs themselves change.
+`rodar_pipeline.py`) is only needed when the source CSVs themselves change — and after a schema
+change in the dbt models (this branch added `pecas_ecommerce`/`pecas_lojas` and the
+`*_ecommerce`/`*_lojas` financial columns; `--pular-dbt` against a warehouse built before them
+fails in `ler_base`).
 
 **Tests / verification** (there is no pytest suite — verification is two standalone scripts that
 recompute results independently and diff against what's stored):

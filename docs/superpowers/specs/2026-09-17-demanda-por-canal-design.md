@@ -122,3 +122,5 @@ no `to-do.txt` e não entram aqui.
 - Na base `exports` tudo é `ecommerce` (o export é só a venda do e-commerce); na `sintetica`, tudo é `lojas`.
 - `mart_demanda_estatistica` não mudou: as estatísticas por canal vivem em `res_sku_modelo`.
 - `fator_perda_ruptura` (agregado) só é usado na "Política atual" de referência. O custo de ruptura do modelo usa sempre os dois fatores por canal.
+- `/item`: o gráfico diário continua com uma série de venda; a demanda por canal aparece no bloco «Demanda por canal» do dossiê (média, desvio, participação, margem, covariância), não como duas séries.
+- `/plano`: as colunas `valor_da_compra_ecommerce`/`_lojas` vão ao contexto da tabela mas não são renderizadas por linha; a quebra por canal aparece no herói e na faixa «Quem demanda esta compra».

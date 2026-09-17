@@ -523,7 +523,9 @@ def conferencia_csv(sku: str = "", decisao: str = "", q: str = ""):
 def api_rateio():
     """Quanto da compra do ciclo cabe a cada empresa, pela demanda dela em cada item."""
     p = Parametros.carregar()
-    d = analitico.rateio_por_loja(wh())
+    # a janela da participacao observada e a mesma que estimou a demanda -
+    # senao a fatia por loja fala de um periodo e o share_ecommerce de outro
+    d = analitico.rateio_por_loja(wh(), janela=int(p.janela_estimacao_dias))
     d["teto_ecommerce"] = float(p.teto_compra_ecommerce)
     d["fatia_rigida"] = bool(p.fatia_ecommerce_rigida)
     return JSONResponse(d)
