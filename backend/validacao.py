@@ -324,6 +324,8 @@ def _futuro(diario: pd.DataFrame, corte: pd.Timestamp) -> dict:
             # diaria comecar exatamente no dia seguinte ao corte para todo
             # item - e item criado no meio do periodo nao comeca ali.
             g.data.to_numpy("datetime64[D]"),
+            g.pecas_ecommerce.to_numpy(float) if "pecas_ecommerce" in g.columns else np.zeros(len(g)),
+            g.pecas_lojas.to_numpy(float) if "pecas_lojas" in g.columns else g.pecas_vendidas.to_numpy(float),
         )
     return saida
 
@@ -503,6 +505,9 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
         # lados tiverem o mesmo dinheiro para colocar em ordem de compra. Sem
         # pedido registrado na janela cai para o recebimento, que e a leitura
         # que existia antes - senao o plano sairia vazio por ausencia de dado.
+        # nao existe caixa historico do e-commerce: a compra real e toda da
+        # empresa 26. A fatia fica desligada e o teto e o total real da data.
+        base["fatia_ecommerce_rigida"] = False
         teto = ctx["pedido_ciclo_valor"] or ctx["compra_real_valor"]
         if teto > 0:
             base["teto_compra_ciclo"] = teto
@@ -519,7 +524,7 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
 
     diario = wh.query(
         f"select sku, data, saldo_final, disponivel_final, pecas_vendidas, "
-        f"estado_estoque from {ref('mart_estoque_diario')} "
+        f"pecas_ecommerce, pecas_lojas, estado_estoque from {ref('mart_estoque_diario')} "
         f"where 1 = 1 {_so(skus, 'sku')} order by sku, data")
     diario["data"] = pd.to_datetime(diario.data)
     fut = _futuro(diario, T)
@@ -541,7 +546,7 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
         H = int(r.periodo_protecao_dias)
         if r.sku not in fut:
             continue
-        v, ok, cens, fis, disp, dias = fut[r.sku]
+        v, ok, cens, fis, disp, dias, ve, vl = fut[r.sku]
         if H > len(v):
             fora.append({"sku": r.sku, "item": r.item, "horizonte": H,
                          "comprar": int(r.quantidade_a_comprar)})
@@ -624,6 +629,12 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
             # --- o que a plataforma mandaria
             mandaria_comprar=int(Q),
             investimento=float(r.valor_da_compra),
+            # --- a quebra por canal: o que o plano atribuiu e o que vendeu
+            share_ecommerce=float(np.nan_to_num(getattr(r, "share_ecommerce", 0.0))),
+            investimento_ecommerce=float(getattr(r, "valor_da_compra_ecommerce", 0.0) or 0.0),
+            investimento_lojas=float(getattr(r, "valor_da_compra_lojas", 0.0) or 0.0),
+            vendeu_ecommerce=float(ve[:H].sum()),
+            vendeu_lojas=float(vl[:H].sum()),
             previsto=float(r.mu_periodo),
             # --- o que a empresa comprou de fato na mesma janela
             comprou_de_verdade=float(
@@ -679,6 +690,14 @@ def rodar(wh: Warehouse, corte: str, ajustes: dict | None = None,
     rel = pd.DataFrame(linhas)
     if rel.empty:
         return {"erro": "nenhum item com horizonte que caiba na janela restante"}
+
+    # a falta e do estoque compartilhado; cada canal leva a parte dele pela
+    # participacao REALIZADA no horizonte (a prevista, se nada vendeu)
+    rel["share_realizada"] = np.where(rel.vendeu_observado > 0,
+                                      rel.vendeu_ecommerce / rel.vendeu_observado.replace(0, np.nan),
+                                      rel.share_ecommerce)
+    rel["faltou_com_plano_ecommerce"] = rel.faltou_com_plano * rel.share_realizada
+    rel["faltou_com_plano_lojas"] = rel.faltou_com_plano - rel.faltou_com_plano_ecommerce
 
     comprados = rel[rel.mandaria_comprar > 0]
     return {
@@ -770,6 +789,27 @@ def _resumo(rel: pd.DataFrame, c: pd.DataFrame) -> dict:
         "taxa_modelo_nao_comprados": float(rel[rel.mandaria_comprar == 0].taxa_modelo.mean()),
         "taxa_recente_nao_comprados": float(
             rel[rel.mandaria_comprar == 0].taxa_recente.mean(skipna=True)),
+        # a quebra por canal, nos itens que o modelo compraria
+        "canais": {
+            "ecommerce": {
+                "investimento": float(c.investimento_ecommerce.sum()),
+                "vendeu": float(c.vendeu_ecommerce.sum()),
+                "faltou_com_plano": float(c.faltou_com_plano_ecommerce.sum()),
+                "share_prevista": (float(c.investimento_ecommerce.sum() / c.investimento.sum())
+                                   if c.investimento.sum() else 0.0),
+                "share_realizada": (float(c.vendeu_ecommerce.sum() / c.vendeu_observado.sum())
+                                    if c.vendeu_observado.sum() else 0.0),
+            },
+            "lojas": {
+                "investimento": float(c.investimento_lojas.sum()),
+                "vendeu": float(c.vendeu_lojas.sum()),
+                "faltou_com_plano": float(c.faltou_com_plano_lojas.sum()),
+                "share_prevista": (float(c.investimento_lojas.sum() / c.investimento.sum())
+                                   if c.investimento.sum() else 0.0),
+                "share_realizada": (float(c.vendeu_lojas.sum() / c.vendeu_observado.sum())
+                                    if c.vendeu_observado.sum() else 0.0),
+            },
+        },
         "comparativo": _comparativo(rel),
     }
 
