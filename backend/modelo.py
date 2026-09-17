@@ -1042,7 +1042,10 @@ with v as (
            sum(cmv)                  as cmv,
            sum(valor_do_frete)       as frete_custo,
            sum(impostos_sobre_venda) as impostos,
-           sum(lucro)                as lucro
+           sum(lucro)                as lucro,
+           sum(case when canal_demanda = 'ecommerce' then pecas_vendidas else 0 end) as pecas_ecommerce,
+           sum(case when canal_demanda = 'ecommerce' then receita_liquida else 0 end) as receita_ecommerce,
+           sum(case when canal_demanda = 'ecommerce' then lucro else 0 end)          as lucro_ecommerce
     from {vendas}
     where data <= DATE '{ate}'
     group by sku
@@ -1061,7 +1064,18 @@ select c.sku, c.item, c.familia, c.unidade, c.origem, c.custo_unitario,
        case when coalesce(v.pecas_vendidas, 0) > 0
             then v.lucro / v.pecas_vendidas else 0 end as lucro_por_peca,
        case when coalesce(v.total_faturado, 0) > 0
-            then v.lucro / v.total_faturado else 0 end as margem_pct
+            then v.lucro / v.total_faturado else 0 end as margem_pct,
+       coalesce(v.pecas_ecommerce, 0)                                  as pecas_vendidas_ecommerce,
+       coalesce(v.pecas_vendidas, 0) - coalesce(v.pecas_ecommerce, 0)  as pecas_vendidas_lojas,
+       coalesce(v.receita_ecommerce, 0)                                as receita_liquida_ecommerce,
+       coalesce(v.receita_liquida, 0) - coalesce(v.receita_ecommerce, 0) as receita_liquida_lojas,
+       coalesce(v.lucro_ecommerce, 0)                                  as lucro_observado_ecommerce,
+       coalesce(v.lucro, 0) - coalesce(v.lucro_ecommerce, 0)           as lucro_observado_lojas,
+       case when coalesce(v.pecas_ecommerce, 0) > 0
+            then v.lucro_ecommerce / v.pecas_ecommerce else 0 end      as lucro_por_peca_ecommerce,
+       case when coalesce(v.pecas_vendidas, 0) - coalesce(v.pecas_ecommerce, 0) > 0
+            then (v.lucro - v.lucro_ecommerce) / (v.pecas_vendidas - v.pecas_ecommerce)
+            else 0 end                                                 as lucro_por_peca_lojas
 from {catalogo} c
 left join v on v.sku = c.sku
 """

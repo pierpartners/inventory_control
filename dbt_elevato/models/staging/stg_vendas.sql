@@ -137,6 +137,10 @@ select
     v.receita_liquida                                 as total,
     coalesce(v.loja, 'Loja ' || v.loja_id)            as canal,
     v.loja_id,
+    -- O canal que o MODELO separa: o e-commerce (empresa 33) contra as demais
+    -- lojas somadas. Sao dinamicas de venda diferentes, e a mistura escondia
+    -- isso. `canal`, logo acima, e o NOME da loja e continua existindo.
+    case when v.loja_id = '33' then 'ecommerce' else 'lojas' end as canal_demanda,
     coalesce(v.loja, 'Loja ' || v.loja_id)            as loja,
     v.local_estoque,
     coalesce(v.tipo_entrega, 'NAO INFORMADO')         as tipo_entrega,
@@ -208,6 +212,7 @@ select
     'E-commerce'                                      as canal,
     -- a tela de acompanhamento separa e-commerce (33) das lojas por loja_id
     '33'                                              as loja_id,
+    'ecommerce'                                       as canal_demanda,
     'E-commerce'                                      as tipo_cliente,
     cast(null as varchar)                             as cliente_id,
     cast(null as varchar)                             as uf,
@@ -240,6 +245,7 @@ select
     cast(total as double)                 as total,
     cast(canal as varchar)                as canal,
     cast(null as varchar)                 as loja_id,
+    'lojas'                               as canal_demanda,
     cast(tipo_cliente as varchar)         as tipo_cliente,
     cast(cliente_id as varchar)           as cliente_id,
     cast(uf as varchar)                   as uf,

@@ -317,6 +317,34 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
                   [['item', 'custo_unitario', 'custo_vendido']].head(3)
                   .to_dict('records'))))
 
+    # --- os dois canais fecham com o total, dia a dia e no agregado ---
+    # A grade traz a venda por canal em formato LARGO porque a censura e do
+    # estoque compartilhado: um dia de ruptura censura os dois canais. A
+    # identidade abaixo vale por construcao (int_demanda_diaria) e e o que
+    # permite estimar cada canal com as mesmas mascaras de dia do total.
+    if {"pecas_ecommerce", "pecas_lojas"} <= set(dia.columns):
+        r.compara(B, "pecas e-commerce + lojas = pecas vendidas (dia a dia)",
+                  (dia.pecas_ecommerce + dia.pecas_lojas).to_numpy(),
+                  dia.pecas_vendidas.to_numpy(), contexto="grade SKU x dia")
+        r.afirma(B, "pecas por canal nao negativas",
+                 bool((dia.pecas_ecommerce >= 0).all() and (dia.pecas_lojas >= 0).all()),
+                 f"e-commerce {int(dia.pecas_ecommerce.sum()):,} pecas · "
+                 f"lojas {int(dia.pecas_lojas.sum()):,} pecas na janela")
+    else:
+        r.falha(B, "grade diaria traz pecas por canal",
+                "faltam pecas_ecommerce / pecas_lojas em mart_estoque_diario")
+    fin = ctx["financeiro"]
+    if {"pecas_vendidas_ecommerce", "lucro_observado_ecommerce"} <= set(fin.columns):
+        r.compara(B, "financeiro: pecas por canal fecham com o total",
+                  (fin.pecas_vendidas_ecommerce + fin.pecas_vendidas_lojas).to_numpy(),
+                  fin.pecas_vendidas.to_numpy())
+        r.compara(B, "financeiro: lucro por canal fecha com o total",
+                  (fin.lucro_observado_ecommerce + fin.lucro_observado_lojas).to_numpy(),
+                  fin.lucro_observado.to_numpy(), tol=TOL_FROUXA)
+    else:
+        r.falha(B, "financeiro traz colunas por canal",
+                "faltam *_ecommerce / *_lojas em mart_sku_financeiro")
+
 
 # ----------------------------------------------------------------------
 # 2. correcao de censura (EM)
@@ -1074,15 +1102,13 @@ def main() -> None:
         # `ler_base` traz so as colunas do motor; os testes precisam tambem de
         # saldo_inicial. Mesma janela, colunas completas.
         "dia": wh.query(
-            f"select sku, data, saldo_inicial, saldo_final, disponivel_final, "
-            f"pecas_vendidas, estado_estoque from {ref('mart_estoque_diario')} "
+            f"select * from {ref('mart_estoque_diario')} "
             f"where data > (select max(data) from {ref('mart_estoque_diario')})"
             f" - INTERVAL {int(getattr(p, 'janela_estimacao_dias', 0) or 99999)} DAY "
             f"order by sku, data"),
         "dia_completo": wh.query(
-            f"select sku, data, saldo_inicial, saldo_final, disponivel_final, "
-            f"pecas_vendidas, estado_estoque from {ref('mart_estoque_diario')} "
-            f"order by sku, data"),
+            f"select * from {ref('mart_estoque_diario')} order by sku, data"),
+        "financeiro": wh.query(f"select * from {ref('mart_sku_financeiro')}"),
     }
 
     print("=" * 78)

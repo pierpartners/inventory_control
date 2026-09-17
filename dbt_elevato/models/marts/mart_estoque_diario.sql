@@ -6,6 +6,8 @@ select
     saldo_final,
     disponivel_final,
     pecas_vendidas,
+    pecas_ecommerce,
+    pecas_lojas,
     estado_estoque,
     dia_utilizavel,
     dia_censurado
