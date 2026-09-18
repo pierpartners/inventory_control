@@ -100,3 +100,200 @@ def classificar_faixas(df: pd.DataFrame, dias_sem_giro: int = DIAS_SEM_GIRO_PADR
         ["comprar", "transferir", "revisar", "liquidar", "segurar"],
         default="manter")
     return d
+
+
+# ----------------------------------------------------------------------
+# leitura
+# ----------------------------------------------------------------------
+COLUNAS_PLANO = [
+    "sku", "item", "familia", "curva_abc", "classe_xyz", "regime", "custo_unitario",
+    "demanda_media_dia", "mu_periodo", "ponto_de_pedido", "estoque_maximo", "estoque_medio",
+    "estoque_fisico", "em_transito", "posicao_estoque", "quantidade_a_comprar",
+    "cobertura_dias", "risco_de_faltar", "lucro_perdido_ruptura", "lucro_por_peca",
+    "lead_time_dias", "giro_ano",
+]
+COLUNAS_POSICAO = [
+    "sku", "fornecedor", "comprador", "data_posicao", "saldo_cd", "custo_medio_erp",
+    "saldo_lojas", "lojas_com_saldo", "valor_lojas_erp", "ultima_venda", "ultima_entrada",
+    "idade_fifo_dias", "entrada_mais_antiga_em_estoque", "entradas_cobrem_saldo",
+]
+COLUNAS_ITEM = [
+    "sku", "item", "familia", "fornecedor", "comprador", "curva_abc", "classe_xyz", "faixa",
+    "acao", "estoque_fisico", "em_transito", "saldo_lojas", "lojas_com_saldo",
+    "ponto_de_pedido", "estoque_maximo", "cobertura_dias", "risco_de_faltar",
+    "demanda_media_dia", "dias_sem_venda", "ultima_venda", "idade_fifo_dias", "faixa_idade",
+    "entradas_cobrem_saldo", "custo_unitario", "custo_medio_erp", "capital_modelo",
+    "capital_erp", "excesso_pecas", "excesso_valor", "lucro_perdido_ruptura",
+    "quantidade_a_comprar",
+]
+
+
+def carregar(wh: Warehouse, dias_sem_giro: int = DIAS_SEM_GIRO_PADRAO) -> pd.DataFrame:
+    """res_plano_compra (politica) x mart_estoque_posicao (foto), classificado."""
+    plano = wh.query(f"select {', '.join(COLUNAS_PLANO)} from {ref('res_plano_compra')}")
+    posicao = wh.query(f"select {', '.join(COLUNAS_POSICAO)} from {ref('mart_estoque_posicao')}")
+    df = plano.merge(posicao, on="sku", how="left")
+    df["data_posicao"] = pd.to_datetime(df.data_posicao).fillna(pd.Timestamp(posicao.data_posicao.max()))
+    for c in ("saldo_lojas", "lojas_com_saldo", "valor_lojas_erp"):
+        df[c] = df[c].fillna(0)
+    df["fornecedor"] = df.fornecedor.fillna("Nao informado")
+    df["comprador"] = df.comprador.fillna("Nao informado")
+    return classificar_faixas(df, dias_sem_giro)
+
+
+# ----------------------------------------------------------------------
+# leituras agregadas (puras)
+# ----------------------------------------------------------------------
+def _f(v) -> float:
+    v = float(v)
+    return v if np.isfinite(v) else 0.0
+
+
+def _pond(valores: pd.Series, pesos: pd.Series, teto: float = 400.0) -> float:
+    p = pesos.fillna(0).clip(lower=0).to_numpy(dtype=float)
+    v = valores.clip(0, teto).fillna(0).to_numpy(dtype=float)
+    return float(np.average(v, weights=p)) if p.sum() > 0 else 0.0
+
+
+def resumo_geral(df: pd.DataFrame) -> dict:
+    cap = df.capital_modelo
+    dem = df.demanda_media_dia.replace(0, np.nan)
+    cobertura_real = df.estoque_fisico / dem          # dias de estoque a taxa corrigida
+    faixas = []
+    for f in FAIXAS:
+        s = df[df.faixa == f]
+        faixas.append({"faixa": f, "itens": int(len(s)),
+                       "capital_modelo": _f(s.capital_modelo.sum()),
+                       "capital_erp": _f(s.capital_erp.sum(skipna=True)),
+                       "excesso_valor": _f(s.excesso_valor.sum())})
+    cob_real = _pond(cobertura_real, cap)
+    cob_otima = _pond(df.cobertura_dias, df.capital_otimo)
+    return {
+        "data_posicao": str(pd.Timestamp(df.data_posicao.max()).date()),
+        "congelado": bool(df.attrs.get("congelado", False)),
+        "itens": int(len(df)),
+        "capital_modelo": _f(cap.sum()),
+        "capital_erp": _f(df.capital_erp.sum(skipna=True)),
+        "itens_sem_custo_erp": int((df.capital_erp.isna() & (df.estoque_fisico > 0)).sum()),
+        "capital_otimo": _f(df.capital_otimo.sum()),
+        "diferenca_real_otimo": _f(cap.sum() - df.capital_otimo.sum()),
+        "cobertura_real_dias": cob_real,
+        "cobertura_otima_dias": cob_otima,
+        "giro_real": 365.0 / cob_real if cob_real > 0 else 0.0,
+        "giro_otimo": 365.0 / cob_otima if cob_otima > 0 else 0.0,
+        "lucro_perdido_ruptura": _f(df.lucro_perdido_ruptura.sum()),
+        "faixas": faixas,
+    }
+
+
+def _por_faixa(s: pd.DataFrame) -> dict:
+    g = s.groupby("faixa").capital_modelo.sum()
+    return {f: _f(g.get(f, 0.0)) for f in FAIXAS}
+
+
+def por_idade(df: pd.DataFrame) -> list[dict]:
+    out = []
+    for fi in FAIXAS_IDADE:
+        s = df[df.faixa_idade == fi]
+        out.append({"faixa_idade": fi, "itens": int(len(s)),
+                    "capital_modelo": _f(s.capital_modelo.sum()),
+                    "por_faixa": _por_faixa(s)})
+    return out
+
+
+DIMENSOES = ("fornecedor", "comprador", "familia")
+
+
+def agregar(df: pd.DataFrame, por: str) -> list[dict]:
+    if por not in DIMENSOES:
+        raise ValueError(f"agregar: `por` deve ser um de {DIMENSOES}, veio {por!r}")
+    out = []
+    for chave, s in df.groupby(df[por].fillna("Nao informado"), sort=False):
+        out.append({
+            "chave": str(chave), "itens": int(len(s)),
+            "capital_modelo": _f(s.capital_modelo.sum()),
+            "capital_erp": _f(s.capital_erp.sum(skipna=True)),
+            "capital_otimo": _f(s.capital_otimo.sum()),
+            "excesso_valor": _f(s.excesso_valor.sum()),
+            "sem_giro_valor": _f(s.loc[s.faixa == "Sem giro", "capital_modelo"].sum()),
+            "itens_risco": int((s.faixa == "Risco").sum()),
+            "itens_zerados": int((s.faixa == "Zerado com demanda").sum()),
+            "lucro_perdido_ruptura": _f(s.lucro_perdido_ruptura.sum()),
+            "por_faixa": _por_faixa(s),
+        })
+    out.sort(key=lambda x: -x["capital_modelo"])
+    return out
+
+
+def _registros(df: pd.DataFrame, cols: list[str]) -> list[dict]:
+    from .analitico import registros
+    cols = [c for c in cols if c in df.columns]
+    d = df[cols].copy()
+    if "dias_sem_venda" in d:
+        d["dias_sem_venda"] = d.dias_sem_venda.replace(np.inf, np.nan)
+    return registros(d)
+
+
+def rede(df: pd.DataFrame, limite: int = 60) -> dict:
+    em_falta = df[df.faixa.isin(FAIXAS[:2]) & (df.saldo_lojas >= df.mu_periodo) & (df.saldo_lojas > 0)]
+    em_falta = em_falta.sort_values("lucro_perdido_ruptura", ascending=False).head(limite)
+    positivos = df.loc[df.valor_lojas_erp > 0, "valor_lojas_erp"]
+    p90 = float(positivos.quantile(0.9)) if len(positivos) else np.inf
+    parado = df[(df.valor_lojas_erp >= p90) & df.faixa.isin(["Excesso", "Sem giro"])]
+    parado = parado.sort_values("valor_lojas_erp", ascending=False).head(limite)
+    cols = COLUNAS_ITEM + ["valor_lojas_erp", "mu_periodo"]
+    return {"transferir": _registros(em_falta, cols), "parado_em_loja": _registros(parado, cols),
+            "p90_valor_loja": (None if not np.isfinite(p90) else p90)}
+
+
+def itens(df: pd.DataFrame, faixa: str = "", por: str = "", chave: str = "",
+          busca: str = "", limite: int = 5000) -> list[dict]:
+    s = df
+    if faixa:
+        s = s[s.faixa == faixa]
+    if por and chave:
+        if por not in DIMENSOES:
+            raise ValueError(f"itens: `por` deve ser um de {DIMENSOES}")
+        s = s[s[por].fillna("Nao informado").astype(str) == chave]
+    if busca:
+        q = busca.lower()
+        s = s[s.sku.astype(str).str.lower().str.contains(q, regex=False)
+              | s.item.astype(str).str.lower().str.contains(q, regex=False)]
+    s = s.sort_values("capital_modelo", ascending=False).head(limite)
+    return _registros(s, COLUNAS_ITEM)
+
+
+# ----------------------------------------------------------------------
+# confianca por bloco
+# ----------------------------------------------------------------------
+# que grupos da bateria de qualidade sustentam cada bloco da pagina
+BLOCOS_QUALIDADE = {
+    "geral":    ("estoque", "cadastro"),
+    "idade":    ("compra", "estoque"),
+    "agregado": ("cadastro",),
+    "rede":     ("estoque",),
+    "itens":    ("venda", "estoque", "cadastro"),
+}
+_PESO = {"ok": 0, "aviso": 1, "erro": 2}
+
+
+def confianca(qualidade: dict | None, sinalizados: pd.DataFrame, df: pd.DataFrame) -> dict:
+    """Por bloco: o pior nivel entre as checagens dos grupos que o sustentam,
+    e quantos itens com sinal de outlier estao no recorte. `qualidade` e o
+    JSON de qualidade.verificar() (ou None se o cache esta frio)."""
+    out = {"qualidade_disponivel": qualidade is not None, "blocos": {}}
+    por_grupo: dict[str, str] = {}
+    if qualidade:
+        for c in qualidade.get("checagens", []):
+            g = c["grupo"]
+            if _PESO.get(c["nivel"], 0) >= _PESO.get(por_grupo.get(g, "ok"), 0):
+                por_grupo[g] = c["nivel"]
+    n_out = 0
+    if sinalizados is not None and len(sinalizados) and "n_motivos" in sinalizados:
+        marcados = set(sinalizados.loc[sinalizados.n_motivos > 0, "sku"].astype(str))
+        n_out = int(df.sku.astype(str).isin(marcados).sum())
+    for bloco, grupos in BLOCOS_QUALIDADE.items():
+        niveis = [por_grupo.get(g, "ok") for g in grupos] if qualidade else []
+        pior = max(niveis, key=lambda n: _PESO[n]) if niveis else None
+        out["blocos"][bloco] = {"nivel": pior, "grupos": list(grupos), "outliers": n_out}
+    return out
