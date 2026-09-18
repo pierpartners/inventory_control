@@ -87,6 +87,22 @@ prazo as (
     )
 ),
 
+pagamento as (
+    -- Quando o dinheiro SAI: dias da entrada no estoque ao vencimento do
+    -- titulo ao fornecedor (media das parcelas ponderada pelo valor, ja
+    -- calculada no extrator). Mediana por item; a contagem de notas diz se
+    -- da para confiar nela (menos de 3 herda a mediana do catalogo, como o
+    -- prazo de entrega). Entra no ciclo financeiro da nota: e o que abate
+    -- dos dias em que o dinheiro fica preso.
+    select cast(idsubproduto as varchar) as sku,
+           median(cast(prazo_titulo_dias as double)) as prazo_pagamento_dias,
+           count(*)                                  as prazo_pagamento_notas
+    from {{ source('raw', 'raw_ciclo_pagamento') }}
+    where prazo_titulo_dias is not null
+      and cast(prazo_titulo_dias as double) between -365 and 365
+    group by 1
+),
+
 compra as (
     -- O PRECO PAGO ao fornecedor, mediano por item. E a segunda leitura do
     -- custo, independente do estoque diario, e serve de contraprova: em 90%
@@ -146,6 +162,11 @@ mediana_prazo as (
     select cast(round(median(lead_time_dias)) as integer) as m,
            median(lead_time_desvio_dias) as sd
     from prazo
+),
+
+mediana_pagamento as (
+    -- so itens com 3 notas ou mais: a mediana de uma nota so nao e mediana
+    select median(prazo_pagamento_dias) as m from pagamento where prazo_pagamento_notas >= 3
 )
 
 select
@@ -190,13 +211,20 @@ select
     coalesce(prazo.lead_time_dias, mp.m)         as lead_time_dias,
     coalesce(prazo.lead_time_desvio_dias, mp.sd) as lead_time_desvio_dias,
     coalesce(prazo.lead_time_pedidos, 0)         as lead_time_pedidos,
+    -- prazo ao fornecedor: o do item quando ha 3 notas ou mais, senao a
+    -- mediana do catalogo; `prazo_pagamento_notas` denuncia qual foi
+    case when pg.prazo_pagamento_notas >= 3 then pg.prazo_pagamento_dias
+         else mpg.m end                           as prazo_pagamento_dias,
+    coalesce(pg.prazo_pagamento_notas, 0)        as prazo_pagamento_notas,
     coalesce(lote.lote_minimo_compra, 1)         as lote_minimo_compra
 from universo u
 cross join mediana_prazo mp
+cross join mediana_pagamento mpg
 left join cad   on cad.sku   = u.sku
 left join custo on custo.sku = u.sku
 left join compra on compra.sku = u.sku
 left join prazo on prazo.sku = u.sku
+left join pagamento pg on pg.sku = u.sku
 left join lote  on lote.sku  = u.sku
 left join preco on preco.sku = u.sku
 
@@ -252,6 +280,8 @@ select
     coalesce(cast(round(a.prazo) as integer), mp.m)  as lead_time_dias,
     0.0                                              as lead_time_desvio_dias,
     coalesce(a.n_pedidos, 0)                         as lead_time_pedidos,
+    cast(null as double)                             as prazo_pagamento_dias,
+    0                                                as prazo_pagamento_notas,
     greatest(coalesce(cast(round(a.lote) as integer), 1), 1) as lote_minimo_compra
 from a
 cross join mediana_prazo mp
@@ -278,6 +308,9 @@ select
     -- mantem os resultados dessa base identicos ao que eram.
     0.0                                 as lead_time_desvio_dias,
     0                                   as lead_time_pedidos,
+    -- sem ciclo de pagamento na base sintetica: o motor usa o parametro
+    cast(null as double)                as prazo_pagamento_dias,
+    0                                   as prazo_pagamento_notas,
     cast(lote_minimo_compra as integer) as lote_minimo_compra
 from {{ source('raw', 'raw_catalogo') }}
 

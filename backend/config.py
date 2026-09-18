@@ -20,13 +20,24 @@ class Parametros:
     periodo_revisao_dias: int = 7
     taxa_manutencao_ano: float = 0.25
     custo_por_pedido: float = 185.0
-    fator_perda_ruptura: float = 0.85
-    # Perda na ruptura POR CANAL. No site o cliente nao espera e nao ha
-    # vendedor para substituir; na loja ha. O custo de ruptura de cada item e
-    # a media dos dois, ponderada pela participacao do canal na demanda dele.
-    # `fator_perda_ruptura` acima fica para a politica atual de referencia.
-    fator_perda_ruptura_ecommerce: float = 0.85
-    fator_perda_ruptura_lojas: float = 0.85
+    # Perda na ruptura POR CANAL: fracao da margem que a falta destroi de
+    # verdade (o resto o cliente espera ou aceita substituto). No site o
+    # cliente nao espera e nao ha vendedor para substituir; na loja ha. O
+    # custo de ruptura de cada item e a media dos dois, ponderada pela
+    # participacao do canal na demanda dele.
+    #
+    # Fontes. E-commerce: estimativa com o painel diario da Elevato
+    # (scripts/estimar_substituicao.py, 2026-09): substituicao de ~2-6% nos
+    # episodios de ruptura, IC90 de -17% a +25%, coerente com a literatura de
+    # varejo remoto (Anderson, Fitzsimons e Simester, 2006). Lojas: o mesmo
+    # painel nao identifica (ruido 3x o sinal, rupturas correlacionadas por
+    # marca); o valor vem da literatura de comportamento na ruptura em loja
+    # fisica (Gruen, Corsten e Bharadwaj, 2002: 40-50% de venda perdida para o
+    # varejista, o resto substitui ou adia). O 0,85 anterior nao tinha fonte.
+    # `fator_perda_ruptura` e a mistura dos dois para a politica de referencia.
+    fator_perda_ruptura: float = 0.55
+    fator_perda_ruptura_ecommerce: float = 0.90
+    fator_perda_ruptura_lojas: float = 0.50
     nivel_servico_min: float = 0.80
     nivel_servico_max: float = 0.995
     dias_por_ano: int = 365
@@ -132,13 +143,19 @@ CAMPOS = [
      "É um dos três números que mais mexem no resultado.", "Economia"),
     ("fator_perda_ruptura_ecommerce", "Perda quando falta no e-commerce", "%", "pct", 0, 1,
      "Fração da margem do e-commerce que se perde quando a peça falta. No site o cliente "
-     "não espera nem aceita substituto: tende a ser maior que nas lojas.", "Economia"),
+     "não espera nem aceita substituto. Fonte: painel diário da Elevato, substituição de "
+     "2% a 6% nos episódios de ruptura (scripts/estimar_substituicao.py), em linha com a "
+     "literatura de varejo remoto. Faixa defensável: 90% a 95%.", "Economia"),
     ("fator_perda_ruptura_lojas", "Perda quando falta nas lojas", "%", "pct", 0, 1,
      "Fração da margem das lojas que se perde na ruptura. O vendedor pode reservar ou "
-     "oferecer outro item; costuma ser menor que no e-commerce. O custo de ruptura de cada "
-     "item é a média dos dois fatores ponderada pela participação de cada canal nele.", "Economia"),
+     "oferecer outro item. Fonte: literatura de comportamento na ruptura em loja física "
+     "(Gruen, Corsten e Bharadwaj, 2002): 40% a 50% da venda se perde para o varejista, o "
+     "resto substitui ou adia. Nossos dados não identificam o número para as lojas. O custo "
+     "de ruptura de cada item é a média dos dois fatores ponderada pela participação de "
+     "cada canal nele.", "Economia"),
     ("fator_perda_ruptura", "Perda na ruptura (referência agregada)", "%", "pct", 0, 1,
-     "Usado só na política atual de comparação. O modelo usa os dois fatores por canal acima.",
+     "Usado só na política atual de comparação: mistura dos dois fatores por canal. "
+     "O modelo usa os dois fatores acima.",
      "Economia"),
     ("perda_encalhe", "Perda se a peça encalhar", "% do custo", "pct", 0, 1,
      "Quanto do custo você perde por uma peça que não vendeu dentro do horizonte: "
@@ -147,16 +164,21 @@ CAMPOS = [
      "É o que segura a compra de não virar empilhamento.", "Economia"),
     ("prazo_recebimento_ecommerce_dias", "Prazo de recebimento · e-commerce", "dias", "int", 0, 365,
      "Quantos dias depois da venda o dinheiro do e-commerce entra no caixa (cartão parcelado, "
-     "repasse de marketplace). Soma aos dias em que a peça prende o dinheiro: a nota passa a "
-     "dividir por horizonte + recebimento − prazo do fornecedor. Zero = o dinheiro volta na venda.",
+     "repasse de marketplace). Soma aos dias em que a peça prende o dinheiro: a nota divide por "
+     "horizonte + recebimento − prazo do fornecedor. Com os títulos a receber carregados, o modelo "
+     "lê o prazo de cada item (mediana dos títulos dele, ou do canal); este número é só o reserva "
+     "quando não há dado. Zero = o dinheiro volta na venda.",
      "Economia"),
     ("prazo_recebimento_lojas_dias", "Prazo de recebimento · lojas", "dias", "int", 0, 365,
-     "O mesmo para as lojas (dinheiro, débito, crediário). O prazo de cada item é a média dos "
-     "dois canais ponderada pela participação do e-commerce na demanda dele.", "Economia"),
+     "O mesmo para as lojas (dinheiro, débito, crediário), também só reserva sem dado. O prazo de "
+     "cada item é a média dos dois canais ponderada pela participação do e-commerce na demanda "
+     "dele.", "Economia"),
     ("prazo_pagamento_fornecedor_dias", "Prazo de pagamento ao fornecedor", "dias", "int", 0, 365,
      "Quantos dias depois de receber a mercadoria a empresa paga o fornecedor. Encurta o ciclo "
-     "financeiro da peça — dinheiro que ainda não saiu não está preso. Não muda a chance de "
-     "vender nem o custo de carregar; só os dias no denominador da nota.", "Economia"),
+     "financeiro da peça — dinheiro que ainda não saiu não está preso. Com o ciclo de pagamento "
+     "carregado, cada item usa a mediana das próprias notas (ou a do catálogo); este número vale "
+     "só sem dado. Não muda a chance de vender nem o custo de carregar; só os dias da nota.",
+     "Economia"),
 
     ("nivel_servico_min", "Nível de serviço mínimo", "%", "pct", 0.5, 0.99,
      "Piso do nível de serviço no regime EOQ, mesmo para itens de margem magra.",

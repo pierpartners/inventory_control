@@ -46,8 +46,9 @@ FONTES = {
         ("compras_3anos.csv", "raw_compras"),
         ("ciclo_pagamento_fornecedor.csv", "raw_ciclo_pagamento"),
     ]),
-    # extracao direta do DW (scripts/extrair_dw.py): as MESMAS seis tabelas do
-    # extrato real, em Parquet (uma pasta por tabela). Usa o staging `real`.
+    # extracao direta do DW (scripts/extrair_dw.py): as seis tabelas do extrato
+    # real mais o ciclo de recebimento da venda, em Parquet (uma pasta por
+    # tabela). Usa o staging `real`.
     "dw": ("fonte_dw", [
         ("raw_produtos", "raw_produtos"),
         ("raw_vendas_todas", "raw_vendas_todas"),
@@ -55,6 +56,7 @@ FONTES = {
         ("raw_estoque_diario_erp", "raw_estoque_diario_erp"),
         ("raw_compras", "raw_compras"),
         ("raw_ciclo_pagamento", "raw_ciclo_pagamento"),
+        ("raw_ciclo_recebimento", "raw_ciclo_recebimento"),
     ]),
     # exportacao do DW (repo dbt-elevato/exports): UM arquivo diario por SKU
     # (venda do e-commerce + entradas/saidas/saldo do CD Gravatai, 365 dias) e

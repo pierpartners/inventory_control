@@ -981,7 +981,8 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
         "distribuicao": dist,
         "marginal": marginal,
         "seguranca": seguranca,
-        "prazos": {"pedidos": prazos_item(wh, sku), "catalogo": distribuicao_prazo(wh)},
+        "prazos": {"pedidos": prazos_item(wh, sku), "catalogo": distribuicao_prazo(wh),
+                   "recebimento": distribuicao_recebimento(wh)},
         "parametros": {
             "periodo_revisao_dias": p.periodo_revisao_dias,
             "taxa_manutencao_ano": p.taxa_manutencao_ano,
@@ -1010,8 +1011,8 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
     Histograma semanal do prazo REALIZADO (do pedido a entrada no estoque) e do
     COMBINADO (o que o cadastro do pedido dizia), com mediana e p90 de cada um;
     e, na outra ponta do ciclo, o PAGAMENTO ao fornecedor (dias da entrada ao
-    vencimento do titulo), que e o que `prazo_pagamento_fornecedor_dias`
-    resume num numero so.
+    vencimento do titulo), que o motor le item a item (mediana das notas do
+    item; `prazo_pagamento_fornecedor_dias` e so o reserva sem dado).
     E a evidencia por tras de `lead_time_desvio_dias`: se a cauda do realizado
     for longa, o desvio do prazo tem de entrar no estoque de seguranca. Base
     sem `raw_ciclo_pagamento` (sintetica/exports) devolve {} e as telas omitem
@@ -1104,6 +1105,84 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
         "mediana_combinado": limpo(cab.mediana_combinado), "p90_combinado": limpo(cab.p90_combinado),
         "atrasou": limpo(cab.atrasou), "adiantou": limpo(cab.adiantou),
     }
+
+
+def distribuicao_recebimento(wh: Warehouse) -> dict:
+    """A ponta de ENTRADA do ciclo financeiro: quantos dias depois da venda o
+    dinheiro entra, titulo a titulo, separado por canal.
+
+    E-commerce e lojas sao meios de pagamento diferentes (gateway em D+30
+    contra dinheiro, debito e cartao parcelado), por isso o histograma e um
+    por canal - e e por canal que o motor le o prazo de cada item. Base sem
+    `raw_ciclo_recebimento` devolve {} e as telas omitem o painel.
+    """
+    if not wh.existe("raw_ciclo_recebimento"):
+        return {}
+    n_faixas = PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS + 1
+    r = wh.query(f"""
+        with t as (
+            select case when cast(idempresa as integer) = 33 then 'ecommerce' else 'lojas' end canal,
+                   cast(dias_recebimento as double) dias, cast(valtitulo as double) valor, tipocartao
+            from {ref('raw_ciclo_recebimento')}
+            where dias_recebimento is not null
+              and cast(dias_recebimento as double) between 0 and {PRAZO_MAX_DIAS}),
+        faixa as (
+            select canal, least(floor(dias / {PRAZO_PASSO_DIAS}), {n_faixas - 1}) f, count(*) n
+            from t group by 1, 2),
+        resumo as (
+            select canal, count(*) titulos, median(dias) mediana, quantile_cont(dias, 0.9) p90,
+                   sum(dias * valor) / nullif(sum(valor), 0) media_ponderada,
+                   avg(case when tipocartao = 'C' then 1.0 else 0.0 end) credito,
+                   avg(case when tipocartao = 'D' then 1.0 else 0.0 end) debito,
+                   avg(case when dias <= 1 then 1.0 else 0.0 end) no_dia
+            from t group by 1)
+        select f.canal, f.f, f.n, r.titulos, r.mediana, r.p90, r.media_ponderada,
+               r.credito, r.debito, r.no_dia
+        from faixa f join resumo r on r.canal = f.canal
+        order by 1, 2""")
+    if r.empty:
+        return {}
+    fora = {"passo": PRAZO_PASSO_DIAS,
+            "inicio": [i * PRAZO_PASSO_DIAS for i in range(n_faixas)]}
+    for canal in ("ecommerce", "lojas"):
+        parte = r[r.canal == canal]
+        if parte.empty:
+            continue
+        hist = np.zeros(n_faixas)
+        for t in parte.itertuples(index=False):
+            hist[int(t.f)] = t.n
+        tot = float(hist.sum()) or 1.0
+        cab = parte.iloc[0]
+        fora[canal] = {
+            "hist": [float(v) / tot for v in hist],
+            "titulos": int(cab.titulos), "mediana": limpo(cab.mediana), "p90": limpo(cab.p90),
+            "media_ponderada": limpo(cab.media_ponderada),
+            "credito": limpo(cab.credito), "debito": limpo(cab.debito), "no_dia": limpo(cab.no_dia),
+        }
+    return fora
+
+
+def prazos_usados(wh: Warehouse) -> dict:
+    """O que o motor de fato usou, item a item, no ciclo financeiro: a mediana
+    dos prazos usados e a fracao de itens em que o prazo veio do proprio item
+    (e nao do catalogo, do canal ou do parametro). Resultado gravado antes do
+    ciclo por item nao tem as colunas e devolve {}."""
+    if not wh.existe("res_sku_modelo"):
+        return {}
+    try:
+        r = wh.query(f"""
+            select median(prazo_pagamento_dias) pagamento_mediana,
+                   avg(case when prazo_pagamento_origem = 'item' then 1.0 else 0.0 end) pagamento_item,
+                   median(prazo_recebimento_ecommerce_usado) recebimento_ecommerce_mediana,
+                   median(prazo_recebimento_lojas_usado) recebimento_lojas_mediana,
+                   median(prazo_recebimento_dias) recebimento_mediana,
+                   avg(case when prazo_recebimento_origem like 'item/%' then 1.0 else 0.0 end) recebimento_ecommerce_item,
+                   avg(case when prazo_recebimento_origem like '%/item' then 1.0 else 0.0 end) recebimento_lojas_item,
+                   median(dias_capital) dias_capital_mediana, median(periodo_protecao_dias) horizonte_mediana
+            from {ref('res_sku_modelo')} where custo_unitario > 0""")
+    except Exception:
+        return {}
+    return {k: limpo(v) for k, v in r.iloc[0].to_dict().items()}
 
 
 def prazos_item(wh: Warehouse, sku: str) -> list[dict]:

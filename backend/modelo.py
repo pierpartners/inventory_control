@@ -445,6 +445,9 @@ def plano_compra(modelo: pd.DataFrame, posicoes: pd.DataFrame, p: Parametros) ->
 # produtos, sem precisar de nenhuma regra artificial de diversificacao.
 # ----------------------------------------------------------------------
 MAX_UNIDADES_POR_ITEM = 6000
+# titulos (ou notas) por item abaixo dos quais a mediana dele nao e mediana e
+# o item herda a do canal/catalogo - a mesma regra do prazo de entrega
+MIN_TITULOS_PRAZO = 3
 
 
 def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
@@ -458,7 +461,10 @@ def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         dias_capital = protecao + prazo de recebimento - prazo ao fornecedor
 
     O prazo de recebimento do item e a media dos dois canais ponderada pela
-    participacao do e-commerce na demanda dele. Piso de 1 dia: um fornecedor
+    participacao do e-commerce na demanda dele; cada canal vem dos titulos a
+    receber do proprio item, da mediana do canal ou do parametro, nessa
+    ordem (`prazo_recebimento_origem` diz qual). O prazo ao fornecedor vem
+    das notas do item (`prazo_pagamento_origem`). Piso de 1 dia: um fornecedor
     que financia mais do que o ciclo inteiro nao pode dar denominador nulo
     nem negativo. So a NOTA (retorno por real por dia) usa isto; mu, sigma e
     a chance de vender continuam no periodo de protecao, porque a peca tem
@@ -466,9 +472,43 @@ def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
     """
     share = (b["share_ecommerce"].fillna(0.0) if "share_ecommerce" in b.columns
              else pd.Series(0.0, index=b.index))
-    b["prazo_recebimento_dias"] = (share * float(p.prazo_recebimento_ecommerce_dias)
-                                   + (1.0 - share) * float(p.prazo_recebimento_lojas_dias))
-    b["prazo_pagamento_dias"] = float(p.prazo_pagamento_fornecedor_dias)
+
+    def coluna(nome: str) -> pd.Series:
+        return (pd.to_numeric(b[nome], errors="coerce") if nome in b.columns
+                else pd.Series(np.nan, index=b.index, dtype=float))
+
+    # Recebimento da venda, por canal, em tres degraus: o dado do ITEM (a
+    # mediana dos titulos dos pedidos em que ele apareceu, quando ha pelo
+    # menos MIN_TITULOS_PRAZO), senao a mediana do CANAL no catalogo (o meio
+    # de pagamento e do canal, nao do produto), senao o PARAMETRO - que e o
+    # unico degrau nas bases sem `raw_ciclo_recebimento`.
+    def por_canal(col: str, ncol: str, parametro: float):
+        item = coluna(col).where(coluna(ncol).fillna(0) >= MIN_TITULOS_PRAZO)
+        mediana = float(np.nanmedian(item)) if item.notna().any() else np.nan
+        origem = np.where(item.notna(), "item",
+                          "canal" if np.isfinite(mediana) else "parametro")
+        usado = item.fillna(mediana if np.isfinite(mediana) else float(parametro))
+        return usado, origem
+
+    receb_e, orig_e = por_canal("prazo_recebimento_ecommerce_dias", "titulos_ecommerce",
+                                p.prazo_recebimento_ecommerce_dias)
+    receb_l, orig_l = por_canal("prazo_recebimento_lojas_dias", "titulos_lojas",
+                                p.prazo_recebimento_lojas_dias)
+    b["prazo_recebimento_ecommerce_usado"] = receb_e
+    b["prazo_recebimento_lojas_usado"] = receb_l
+    b["prazo_recebimento_origem"] = np.char.add(np.char.add(orig_e.astype(str), "/"), orig_l.astype(str))
+    b["prazo_recebimento_dias"] = share * receb_e + (1.0 - share) * receb_l
+
+    # Pagamento ao fornecedor: stg_catalogo ja entrega o do item (3 notas ou
+    # mais) ou a mediana do catalogo; nulo e base sem ciclo de pagamento, e
+    # ai vale o parametro.
+    pag = coluna("prazo_pagamento_dias")
+    notas = coluna("prazo_pagamento_notas").fillna(0)
+    b["prazo_pagamento_origem"] = np.where(
+        pag.notna() & (notas >= MIN_TITULOS_PRAZO), "item",
+        np.where(pag.notna(), "catalogo", "parametro"))
+    b["prazo_pagamento_dias"] = pag.fillna(float(p.prazo_pagamento_fornecedor_dias))
+
     b["dias_capital"] = np.maximum(
         1.0, b.periodo_protecao_dias + b.prazo_recebimento_dias - b.prazo_pagamento_dias)
     return b
@@ -1188,6 +1228,9 @@ with v as (
 )
 select c.sku, c.item, c.familia, c.unidade, c.origem, c.custo_unitario,
        c.preco_tabela, c.lead_time_dias, c.lote_minimo_compra,
+       c.prazo_pagamento_dias, c.prazo_pagamento_notas,
+       r.prazo_recebimento_ecommerce_dias, coalesce(r.titulos_ecommerce, 0) as titulos_ecommerce,
+       r.prazo_recebimento_lojas_dias, coalesce(r.titulos_lojas, 0) as titulos_lojas,
        coalesce(v.pecas_vendidas, 0)  as pecas_vendidas,
        coalesce(v.linhas_de_venda, 0) as linhas_de_venda,
        coalesce(v.pedidos, 0)         as pedidos,
@@ -1214,6 +1257,7 @@ select c.sku, c.item, c.familia, c.unidade, c.origem, c.custo_unitario,
             else 0 end                                                 as lucro_por_peca_lojas
 from {catalogo} c
 left join v on v.sku = c.sku
+left join {recebimento} r on r.sku = c.sku
 """
 
 
@@ -1260,7 +1304,7 @@ def ler_base(wh: Warehouse, ate: str | None = None,
         corte = min(str(ate)[:10], fim_estoque)
         fin = wh.query(SQL_FINANCEIRO_ATE.format(
             vendas=ref('stg_vendas'), catalogo=ref('stg_catalogo'),
-            ate=corte))
+            recebimento=ref('int_prazo_recebimento_sku'), ate=corte))
     return _margem_coerente(wh, fin, ate, janela), diario
 
 

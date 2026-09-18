@@ -666,9 +666,16 @@ def api_metodologia_prazo():
     """Distribuicao do prazo de recebimento das compras no catalogo inteiro:
     realizado contra combinado, pedido a pedido. Evidencia da parcela de
     desvio do prazo no estoque de seguranca."""
-    d = analitico.distribuicao_prazo(wh())
+    w = wh()
+    d = analitico.distribuicao_prazo(w)
     if d:
-        d["pagamento_parametro"] = Parametros.carregar().prazo_pagamento_fornecedor_dias
+        p = Parametros.carregar()
+        d["pagamento_parametro"] = p.prazo_pagamento_fornecedor_dias
+        d["recebimento_parametro"] = {"ecommerce": p.prazo_recebimento_ecommerce_dias,
+                                      "lojas": p.prazo_recebimento_lojas_dias}
+        # a ponta de entrada do ciclo (venda -> caixa) e o que o motor usou
+        d["recebimento"] = analitico.distribuicao_recebimento(w)
+        d["modelo"] = analitico.prazos_usados(w)
     return JSONResponse(d)
 
 

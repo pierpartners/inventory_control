@@ -42,6 +42,15 @@ select
     -- e e o motor que decide o que fazer com isso.
     c.lead_time_desvio_dias,
     c.lead_time_pedidos,
+    -- ciclo financeiro da peca: quando o fornecedor e pago (por item, do
+    -- ciclo de pagamento) e quando a venda vira caixa (por item e canal, dos
+    -- titulos a receber). Nulo = sem dado; o motor cai no parametro.
+    c.prazo_pagamento_dias,
+    c.prazo_pagamento_notas,
+    r.prazo_recebimento_ecommerce_dias,
+    coalesce(r.titulos_ecommerce, 0) as titulos_ecommerce,
+    r.prazo_recebimento_lojas_dias,
+    coalesce(r.titulos_lojas, 0)     as titulos_lojas,
     c.lote_minimo_compra,
     coalesce(v.pecas_vendidas, 0)  as pecas_vendidas,
     coalesce(v.linhas_de_venda, 0) as linhas_de_venda,
@@ -72,3 +81,4 @@ select
          else 0 end                                                 as lucro_por_peca_lojas
 from {{ ref('stg_catalogo') }} c
 left join v on v.sku = c.sku
+left join {{ ref('int_prazo_recebimento_sku') }} r on r.sku = c.sku

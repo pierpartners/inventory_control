@@ -193,10 +193,18 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     # NaN / infinito: duas colunas tem NaN por definicao (nao se aplicam), e o
     # teste tem de saber disso - senao ou ele grita a cada execucao ou, pior,
     # alguem "conserta" preenchendo com zero um campo que nao existe.
+    # o prazo de recebimento por canal e nulo quando o item nao tem NENHUM
+    # titulo naquele canal: e "sem dado", nao zero, e o motor ja resolveu isso
+    # em `prazo_recebimento_*_usado` (item -> canal -> parametro)
+    def sem_titulo(df):
+        return {"prazo_recebimento_ecommerce_dias": df.get("titulos_ecommerce", pd.Series(0, index=df.index)).fillna(0) == 0,
+                "prazo_recebimento_lojas_dias": df.get("titulos_lojas", pd.Series(0, index=df.index)).fillna(0) == 0}
     esperado_nulo = {
+        "res_sku_modelo": sem_titulo(m),
         "res_plano_compra": {
             "ultima_unidade": plano.quantidade_a_comprar == 0,
             "p_vender_ultima": plano.quantidade_a_comprar == 0,
+            **sem_titulo(plano),
         },
         "res_fila_marginal": {
             "nb_r": ctx["fila"].distribuicao == "Poisson",

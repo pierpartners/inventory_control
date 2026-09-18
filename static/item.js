@@ -237,15 +237,25 @@
       '<div id="gv-prazo" class="gfx" style="height:118px"></div>' +
       '<div class="pequeno t3" style="line-height:1.45">' + nota +
       (n ? " Verde: chegou dentro do combinado; coral: atrasou." : "") + "</div>" +
-      (pz.catalogo.pagamentos ? faixaPagamento(pz, m) : "") + "</div>";
+      (pz.catalogo.pagamentos ? faixaPagamento(pz, m) : "") +
+      (pz.recebimento && (pz.recebimento.ecommerce || pz.recebimento.lojas) ? faixaRecebimento(pz, m) : "") +
+      "</div>";
   }
 
   /* A outra ponta do ciclo: quantos dias depois da entrada o titulo ao
      fornecedor vence. Pontos do item sobre a distribuicao do catalogo, com o
-     prazo unico que o modelo usa (prazo_pagamento_dias) marcado. */
+     prazo que o modelo usa PARA ESTE ITEM (prazo_pagamento_dias) marcado - a
+     mediana das notas dele, a do catalogo quando ha menos de 3, ou o
+     parametro quando a base nao tem ciclo de pagamento. */
   function faixaPagamento(pz, m) {
     var pags = (pz.pedidos || []).filter(function (r) { return r.pagamento != null; });
-    var usado = m.prazo_pagamento_dias || 0;
+    var usado = m.prazo_pagamento_dias || 0, origem = m.prazo_pagamento_origem || "parametro";
+    var de = origem === "item"
+      ? "a <b>mediana das " + N.num(m.prazo_pagamento_notas || pags.length) + " notas deste item</b>, " + N.num(usado, 0) + " dias"
+      : origem === "catalogo"
+      ? "a <b>mediana do catálogo</b>, " + N.num(usado, 0) + " dias — este item tem " +
+        (m.prazo_pagamento_notas ? "só " + N.num(m.prazo_pagamento_notas) : "nenhuma") + " nota com título, menos de 3"
+      : "o parâmetro único de <b>" + N.num(usado, 0) + " dias</b>" + (usado === 0 ? " — zero, como se pagasse na entrada" : "");
     return '<div class="pequeno t3 mt14" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">' +
       "Pagamento ao fornecedor · da entrada no estoque ao vencimento do título</div>" +
       '<div id="gv-pagto" class="gfx" style="height:92px"></div>' +
@@ -253,8 +263,74 @@
       (pags.length
         ? "Cada ponto é o vencimento de uma nota deste item (" + N.num(pags.length) + "), em dias após a entrada; "
         : "Nenhuma nota com título registrada para este item; ") +
-      "o fundo é o catálogo. O modelo abate dos dias com o dinheiro preso um prazo único de <b>" +
-      N.num(usado, 0) + " dias</b>" + (usado === 0 ? " — zero, como se pagasse na entrada." : ".") + "</div>";
+      "o fundo é o catálogo. O modelo abate dos dias com o dinheiro preso " + de + ".</div>";
+  }
+
+  /* A ponta de ENTRADA do ciclo: quantos dias depois da venda o dinheiro
+     entra. Um histograma por canal (o meio de pagamento e do canal: gateway
+     em D+30 no site; dinheiro, debito e parcelado na loja) e, sobre cada um,
+     o prazo que o motor usou para este item naquele canal. */
+  function faixaRecebimento(pz, m) {
+    var rc = pz.recebimento, s = m.share_ecommerce || 0;
+    var oe = (m.prazo_recebimento_origem || "parametro/parametro").split("/");
+    function texto(canal, usado, titulos, origem) {
+      return "<b>" + canal + "</b>: " + N.num(usado || 0, 0) + " dias" +
+        (origem === "item" ? " (mediana dos " + N.num(titulos) + " títulos deste item)"
+         : origem === "canal" ? " (mediana do canal — " + (titulos ? "só " + N.num(titulos) : "nenhum") + " título deste item)"
+         : " (parâmetro)");
+    }
+    return '<div class="pequeno t3 mt14" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">' +
+      "Recebimento da venda · da venda ao dinheiro em caixa, por canal</div>" +
+      '<div id="gv-receb" class="gfx" style="height:100px"></div>' +
+      '<div class="pequeno t3" style="line-height:1.45">' +
+      texto("E-commerce", m.prazo_recebimento_ecommerce_usado, m.titulos_ecommerce, oe[0]) + " · " +
+      texto("Lojas", m.prazo_recebimento_lojas_usado, m.titulos_lojas, oe[1]) + ". " +
+      "Ponderado pela participação do e-commerce (" + N.pct(s, 0) + "), o item recebe em <b>" +
+      N.num(m.prazo_recebimento_dias || 0, 0) + " dias</b>; com o pagamento ao fornecedor, o dinheiro fica preso <b>D = " +
+      N.num(m.dias_capital || m.periodo_protecao_dias, 0) + " dias</b> (H = " + N.num(m.periodo_protecao_dias, 0) + "). " +
+      "O fundo é o catálogo: " + (rc.ecommerce ? "e-commerce metade em " + N.num(rc.ecommerce.mediana, 0) + "d" : "") +
+      (rc.ecommerce && rc.lojas ? ", " : "") + (rc.lojas ? "lojas metade em " + N.num(rc.lojas.mediana, 0) + "d (" +
+        N.pct(rc.lojas.credito, 0) + " no crédito parcelado)" : "") + ".</div>";
+  }
+
+  function desenharRecebimento(pz, m) {
+    var el = document.getElementById("gv-receb");
+    var rc = pz && pz.recebimento;
+    if (!el || !rc || !(rc.ecommerce || rc.lojas)) return;
+    var fim = rc.inicio[rc.inicio.length - 1] + rc.passo;
+    var maxUso = Math.max(m.prazo_recebimento_ecommerce_usado || 0, m.prazo_recebimento_lojas_usado || 0);
+    fim = Math.max(fim, Math.ceil((maxUso + 5) / rc.passo) * rc.passo);
+    function area(c, cor) {
+      if (!c) return null;
+      var d = rc.inicio.map(function (x, i) { return [x, c.hist[i]]; });
+      d.push([fim, c.hist[c.hist.length - 1]]);
+      return { type: "line", step: "end", symbol: "none", silent: true, z: 1, lineStyle: { width: 1, color: cor },
+        areaStyle: { color: N.sombra(cor, .22) }, data: d };
+    }
+    var pico = Math.max.apply(null, [].concat(rc.ecommerce ? rc.ecommerce.hist : [0], rc.lojas ? rc.lojas.hist : [0])) || 1;
+    var marcas = [];
+    if (rc.ecommerce) marcas.push({ xAxis: Math.min(fim, m.prazo_recebimento_ecommerce_usado || 0), lineStyle: { color: C.violeta },
+      label: { color: C.violeta, formatter: "e-com · " + N.num(m.prazo_recebimento_ecommerce_usado || 0, 0) + "d", position: "insideEndTop" } });
+    if (rc.lojas) marcas.push({ xAxis: Math.min(fim, m.prazo_recebimento_lojas_usado || 0), lineStyle: { color: C.menta },
+      label: { color: C.menta, formatter: "lojas · " + N.num(m.prazo_recebimento_lojas_usado || 0, 0) + "d", position: "insideEndBottom" } });
+    var series = [area(rc.ecommerce, C.violeta), area(rc.lojas, C.menta)].filter(Boolean);
+    series[0].markLine = { silent: true, symbol: "none", lineStyle: { width: 1.5 },
+      label: { fontSize: 10, distance: 4, rotate: 0 }, data: marcas };
+    N.grafico("gv-receb", {
+      grid: N.grade({ top: 18, right: 14, bottom: 22, left: 4 }),
+      tooltip: N.dica(function (ps) {
+        if (!Array.isArray(ps)) ps = [ps];
+        var x = ps[0].value[0];
+        return N.dicaTit("Recebimento " + N.num(x) + "–" + N.num(x + rc.passo - 1) + " dias após a venda") +
+          ps.map(function (q) { return N.dicaLin(q.color, q.seriesIndex === 0 && rc.ecommerce ? "e-commerce" : "lojas",
+            N.pct(q.value[1], 1) + " dos títulos"); }).join("");
+      }),
+      xAxis: N.eixoX({ type: "value", min: 0, max: fim, boundaryGap: [0, 0],
+        axisLabel: { color: C.tinta4, fontSize: 9.5, formatter: function (v) { return v + "d"; } },
+        splitLine: { show: false } }),
+      yAxis: N.eixoY({ show: false, min: 0, max: pico * 1.15 }),
+      series: series
+    });
   }
 
   function desenharPagamento(pz, m) {
@@ -874,6 +950,7 @@
       /* ---------------------------------------------------- prazo */
       desenharPrazo(d.prazos, m);
       desenharPagamento(d.prazos, m);
+      desenharRecebimento(d.prazos, m);
 
       /* ---------------------------------------------------- regime */
       if (discreto && d.marginal.length) {

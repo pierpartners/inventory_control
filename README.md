@@ -184,12 +184,20 @@ fila inteira.
    carregar a peça pelo horizonte mais a fração do custo que se perde no encalhe.
 
    **Ciclo financeiro.** O dinheiro não volta na venda: volta quando a venda vira caixa, e só
-   sai quando o fornecedor é pago. `D` conta esses dias — o prazo de recebimento do item é a
-   média dos dois canais (`prazo_recebimento_ecommerce_dias`, `prazo_recebimento_lojas_dias`)
-   ponderada pela participação do e-commerce nele, e `prazo_pagamento_fornecedor_dias` encurta
-   o ciclo. Só a nota usa `D`: μ, σ e a chance de vender continuam no horizonte, porque a peça
-   tem de sair antes da reposição independente de quando o dinheiro entra. Com os três prazos
-   em zero (padrão) `D = horizonte` e o ranking é o de antes.
+   sai quando o fornecedor é pago. `D` conta esses dias, item a item:
+   - *recebimento* — mediana de `dias_recebimento` dos títulos a receber dos pedidos em que o
+     item apareceu (`raw_ciclo_recebimento`: títulos de caixa, origem PRE, com as parcelas do
+     cartão somadas como mensais), separada em e-commerce e lojas porque o meio de pagamento é
+     do canal (gateway em D+30 contra à vista, débito e parcelado). Item com menos de 3 títulos
+     num canal herda a mediana do canal; sem a tabela vale o parâmetro
+     (`prazo_recebimento_*_dias`). A média dos dois canais é ponderada pela participação do
+     e-commerce no item;
+   - *pagamento* — mediana de `prazo_titulo_dias` das notas do item (`raw_ciclo_pagamento`),
+     com 3 notas ou mais; senão a mediana do catálogo; sem dado, `prazo_pagamento_fornecedor_dias`.
+
+   `prazo_recebimento_origem` e `prazo_pagamento_origem` em `res_sku_modelo` dizem de qual
+   degrau cada número veio. Só a nota usa `D`: μ, σ e a chance de vender continuam no horizonte,
+   porque a peça tem de sair antes da reposição independente de quando o dinheiro entra.
 
    **Dois canais, um estoque.** A venda de cada SKU é separada em e-commerce (empresa 33) e
    lojas (as demais). Os dois fluxos são estimados com as mesmas máscaras de ruptura do CD,

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Extrai do DW da Elevato (Postgres `dwanalitico`) as seis tabelas que a base
+Extrai do DW da Elevato (Postgres `dwanalitico`) as sete tabelas que a base
 `real` do staging espera, e grava em Parquet em data/fonte_dw/.
 
     python scripts/extrair_dw.py                 # 3 anos ate hoje
@@ -315,6 +315,60 @@ left join titulos t on t.idplanilha = e.idplanilha
 order by e.dt_entrada_estoque, e.idpedido
 """
 
+# Venda -> caixa. db2.contas_receber com origemmovimento = 'PRE' e o titulo
+# gerado no caixa por pedido de venda (99,96%% trazem "Pedido: N / Nota: M"
+# em obstitulo, e o valor bate com gold.vendas do mesmo pedido: razao mediana
+# 1,00). As outras origens NAO entram: 'TES' (74 mil titulos/ano) e o
+# fechamento automatico da administradora de cartao - o mesmo dinheiro dos
+# titulos PRE, visto do lado do adquirente e sem pedido.
+#
+# dias_recebimento = quantos dias depois da VENDA o dinheiro entra:
+#   * dtvencimento - dtmovimento e o vencimento do titulo. No cartao de
+#     credito e sempre a PRIMEIRA parcela (30 dias, mediana e p90 iguais para
+#     qualquer numero de parcelas), entao as demais sao somadas como parcelas
+#     mensais: + 30 x (parcelas - 1) / 2. Debito e dinheiro vencem no dia.
+#   * dtultimopagamento nao serve: no cartao o ERP marca pago na autorizacao
+#     (mediana 0 dias), nao quando o adquirente repassa.
+# Medido em 12 meses: e-commerce mediana 30 dias (98,7%% sem bandeira - o
+# repasse do gateway/marketplace em D+30); lojas mediana 0 e media ponderada
+# pelo valor 45 dias (25%% credito parcelado, 11%% debito, 64%% a vista).
+SQL_RECEBIMENTO = f"""
+with {UNIVERSO},
+pedidos as (
+    select distinct v.idempresa, cast(v.idorcamento as bigint) as idorcamento
+    from gold.vendas v
+    join universo u on v.idsubproduto ~ '^[0-9]+$'
+                    and u.idsubproduto = cast(v.idsubproduto as integer)
+    where v.data between %(dt_ini)s and %(dt_fim)s
+      and v.idorcamento ~ '^[0-9]+$'
+),
+titulos as (
+    select t.*,
+           nullif(substring(t.obstitulo from 'Pedido: ([0-9]+)'), '')::bigint as pedido
+    from db2.contas_receber t
+    where t.origemmovimento = 'PRE'
+      and t.dtmovimento between %(dt_ini)s and %(dt_fim)s
+      and t.dtvencimento is not null
+)
+select
+    t.idempresa, t.pedido, t.idplanilha, t.idtitulo, t.digitotitulo,
+    t.dtmovimento                                  as dt_venda,
+    t.dtvencimento                                 as dt_vencimento,
+    t.dtultimopagamento                            as dt_ultimo_pagamento,
+    t.valtitulo,
+    t.tipocartao,
+    t.numparcelasadministradora                    as numparcelas,
+    t.flagbaixada,
+    (t.dtvencimento - t.dtmovimento)               as dias_vencimento,
+    (t.dtvencimento - t.dtmovimento)
+      + case when t.tipocartao = 'C' and coalesce(t.numparcelasadministradora, 0) > 1
+             then 30.0 * (t.numparcelasadministradora - 1) / 2.0 else 0.0 end
+                                                   as dias_recebimento
+from titulos t
+join pedidos p on p.idempresa = t.idempresa and p.idorcamento = t.pedido
+order by t.dtmovimento, t.idempresa, t.pedido
+"""
+
 TABELAS = {
     "raw_produtos":           ("simples", SQL_PRODUTOS),
     "raw_vendas_todas":       ("simples", SQL_VENDAS.replace("{filtro_empresa}", "")),
@@ -323,6 +377,7 @@ TABELAS = {
     "raw_estoque_diario_erp": ("por_ano", SQL_ESTOQUE),
     "raw_compras":            ("simples", SQL_COMPRAS),
     "raw_ciclo_pagamento":    ("simples", SQL_CICLO),
+    "raw_ciclo_recebimento":  ("simples", SQL_RECEBIMENTO),
 }
 
 

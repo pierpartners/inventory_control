@@ -199,7 +199,16 @@
             <div id="g-pagto" class="gfx p"></div>
             <div class="legenda mt10">
               <span><i style="background:#55B4F2"></i>vencimento do título ao fornecedor</span>
-              <span><i style="background:#F2A93B"></i>prazo de pagamento usado pelo modelo</span>
+              <span><i style="background:#F2A93B"></i>prazo de pagamento usado pelo modelo (mediana dos itens)</span>
+            </div>
+          </div>
+          <div id="b-receb" hidden>
+            <div class="pequeno t3 mt18" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">
+              E quando o dinheiro da venda entra · da venda ao caixa, por canal</div>
+            <div id="g-receb" class="gfx p"></div>
+            <div class="legenda mt10">
+              <span><i style="background:#9B7BF2"></i>e-commerce · repasse do gateway</span>
+              <span><i style="background:#3FBF9A"></i>lojas · dinheiro, débito e cartão parcelado</span>
             </div>
           </div>
         </div>
@@ -528,9 +537,9 @@
             <tr><td class="nome forte">Período de revisão</td><td class="n">{{ p.periodo_revisao_dias }} dias</td>
               <td><a href="#e2">2 · horizonte</a></td><td>H = revisão + prazo do fornecedor. Entra em μ, σ, em L (dias carregando) e em D, os dias presos da nota.</td></tr>
             <tr><td class="nome forte">Prazo de recebimento (e-commerce / lojas)</td><td class="n">{{ p.prazo_recebimento_ecommerce_dias }} / {{ p.prazo_recebimento_lojas_dias }} dias</td>
-              <td><a href="#e5">5 · nota</a></td><td>Quantos dias depois da venda o dinheiro entra. O prazo do item é a média dos dois canais ponderada pela participação do e-commerce. Soma a D = H + recebimento − pagamento; não muda μ, σ, M nem L.</td></tr>
+              <td><a href="#e5">5 · nota</a></td><td>Reserva: quantos dias depois da venda o dinheiro entra quando não há título a receber do item nem do canal. Com os títulos carregados, cada item usa a mediana dos seus, por canal, ponderada pela participação do e-commerce. Soma a D = H + recebimento − pagamento; não muda μ, σ, M nem L.</td></tr>
             <tr><td class="nome forte">Prazo de pagamento ao fornecedor</td><td class="n">{{ p.prazo_pagamento_fornecedor_dias }} dias</td>
-              <td><a href="#e5">5 · nota</a></td><td>Dinheiro que ainda não saiu não está preso: subtrai de D. Piso de 1 dia.</td></tr>
+              <td><a href="#e5">5 · nota</a></td><td>Reserva sem ciclo de pagamento; com ele, cada item usa a mediana das próprias notas (ou a do catálogo). Dinheiro que ainda não saiu não está preso: subtrai de D. Piso de 1 dia.</td></tr>
             <tr><td class="nome forte">Custo de manter estoque</td><td class="n">{{ '%.0f'|format(p.taxa_manutencao_ano*100) }}% a.a.</td>
               <td><a href="#e4">4 · L</a> e <a href="#e7">7</a></td><td>Na fila: custo × (taxa + λ) × H ÷ 365 = custo de carregar uma peça pelo horizonte. Na política: h = custo × (taxa + λ) por peça-ano, no lote econômico e no nível de serviço; custo × taxa × estoque médio na conta anual.</td></tr>
             <tr><td class="nome forte">Perda quando falta no e-commerce</td><td class="n">{{ '%.0f'|format(p.fator_perda_ruptura_ecommerce*100) }}%</td>
@@ -1095,6 +1104,8 @@
       "fica em <b>" + N.num(pz.desvio, 0) + " dias</b>. É por isso que o prazo entra em σ como " +
       "variável, item a item — cada produto usa a mediana e o desvio dos <em>seus</em> pedidos, " +
       "e quem tem menos de 3 herda os do catálogo.</p>";
+    var mod = pz.modelo || {};
+    var pagUsado = mod.pagamento_mediana != null ? mod.pagamento_mediana : (pz.pagamento_parametro || 0);
     if (pz.pagamentos) {
       id("b-pagto").hidden = false;
       var rotP = rot.slice(); rotP[0] = "≤" + N.num(pz.passo - 1);
@@ -1119,9 +1130,9 @@
             data: [
               { xAxis: faixaDe(pz.mediana_pagamento), lineStyle: { color: C.ceu },
                 label: { color: C.ceu, formatter: "metade em " + N.num(pz.mediana_pagamento, 0) + "d" } },
-              { xAxis: faixaDe(pz.pagamento_parametro || 0),
-                label: { formatter: "modelo usa " + N.num(pz.pagamento_parametro || 0, 0) + "d",
-                  align: faixaDe(pz.pagamento_parametro || 0) === 0 ? "left" : "center" } }
+              { xAxis: faixaDe(pagUsado),
+                label: { formatter: "modelo usa " + N.num(pagUsado, 0) + "d",
+                  align: faixaDe(pagUsado) === 0 ? "left" : "center" } }
             ] }
         }]
       });
@@ -1129,9 +1140,52 @@
         "<p>Na outra ponta, o dinheiro só sai quando o título vence: em <b>" + N.num(pz.pagamentos) +
         " notas</b>, metade vence até <b>" + N.num(pz.mediana_pagamento, 0) + " dias</b> depois da entrada " +
         "(9 em 10 até " + N.num(pz.p90_pagamento, 0) + "). Esse prazo abate os dias com o dinheiro preso, " +
-        "e o modelo o resume num parâmetro único de <b>" + N.num(pz.pagamento_parametro || 0, 0) +
-        " dias</b>" + ((pz.pagamento_parametro || 0) === 0
-          ? " — hoje zero, ou seja, como se a Elevato pagasse na entrada." : ".") + "</p>";
+        (mod.pagamento_mediana != null
+          ? "<b>item a item</b>: cada produto usa a mediana das próprias notas (" +
+            N.pct(mod.pagamento_item || 0, 0) + " dos itens têm 3 ou mais) e os demais herdam a do catálogo; " +
+            "a mediana do prazo usado é <b>" + N.num(mod.pagamento_mediana, 0) + " dias</b>."
+          : "e o modelo o resume num parâmetro único de <b>" + N.num(pz.pagamento_parametro || 0, 0) +
+            " dias</b>" + ((pz.pagamento_parametro || 0) === 0
+              ? " — hoje zero, ou seja, como se a Elevato pagasse na entrada." : ".")) + "</p>";
+    }
+    var rc = pz.recebimento;
+    if (rc && (rc.ecommerce || rc.lojas)) {
+      id("b-receb").hidden = false;
+      var rotR = rot.slice(); rotR[0] = "≤" + N.num(pz.passo - 1);
+      var canais = [["ecommerce", "e-commerce", "#9B7BF2"], ["lojas", "lojas", "#3FBF9A"]].filter(function (c) { return rc[c[0]]; });
+      N.grafico("g-receb", {
+        grid: N.grade({ top: 24, right: 14, bottom: 8, left: 4 }),
+        tooltip: N.dica(function (ps) {
+          var i = ps[0].dataIndex;
+          return N.dicaTit((i === ult ? "Mais de " + N.num(rc.inicio[i] - 1)
+              : i === 0 ? "Até " + N.num(rc.passo - 1) : "Entre " + rot[i]) + " dias após a venda") +
+            ps.map(function (q) { return N.dicaLin(q.color, q.seriesName, N.pct(q.value, 1) + " dos títulos"); }).join("");
+        }),
+        xAxis: N.eixoX({ data: rotR, axisLabel: { color: C.tinta4, fontSize: 9.5, interval: 1 } }),
+        yAxis: N.eixoY({ show: false }),
+        series: canais.map(function (c, k) {
+          var st = { type: "bar", name: c[1], barWidth: "38%", data: rc[c[0]].hist.map(function (v) {
+            return { value: v, itemStyle: { color: N.sombra(c[2], .8) } }; }) };
+          var usado = mod["recebimento_" + c[0] + "_mediana"];
+          if (usado != null) st.markLine = { silent: true, symbol: "none", lineStyle: { color: c[2], width: 1.4 },
+            label: { color: c[2], fontSize: 10.5, rotate: 0, distance: 5, position: k === 0 ? "insideEndTop" : "insideEndBottom",
+              formatter: c[1] + " · modelo usa " + N.num(usado, 0) + "d" },
+            data: [{ xAxis: faixaDe(usado) }] };
+          return st;
+        })
+      });
+      var fr = function (c) { return rc[c] ? "<b>" + N.num(rc[c].titulos) + " títulos</b>, metade em até <b>" +
+        N.num(rc[c].mediana, 0) + " dias</b> (9 em 10 até " + N.num(rc[c].p90, 0) + ")" : ""; };
+      id("x2-prazo").innerHTML +=
+        "<p>E na entrada, a venda não vira caixa no dia. No e-commerce (" + fr("ecommerce") +
+        ") é o repasse do gateway em D+30; nas lojas (" + fr("lojas") + (rc.lojas ? ", " +
+        N.pct(rc.lojas.no_dia, 0) + " no dia e " + N.pct(rc.lojas.credito, 0) + " no crédito parcelado" : "") +
+        ") a média ponderada pelo valor chega a <b>" + N.num(rc.lojas ? rc.lojas.media_ponderada : 0, 0) +
+        " dias</b>. O motor lê o prazo de cada item nos títulos dos pedidos em que ele apareceu, por canal, " +
+        "e pondera pela participação do e-commerce naquele item" +
+        (mod.dias_capital_mediana != null ? " — o dinheiro fica preso, na mediana dos itens, <b>D = " +
+          N.num(mod.dias_capital_mediana, 0) + " dias</b> contra um horizonte de " +
+          N.num(mod.horizonte_mediana, 0) + "." : ".") + "</p>";
     }
     id("prazo-percentis").innerHTML = [
       [N.pct(pz.adiantou, 0), "dos pedidos chegaram antes do combinado"],

@@ -6,6 +6,13 @@ models:
     columns:
       - name: sku
         tests: [unique, not_null]
+  - name: int_prazo_recebimento_sku
+    description: >
+      Dias da venda ao caixa por item e canal (mediana dos titulos dos pedidos
+      em que o item apareceu) e a contagem de titulos que a sustenta.
+    columns:
+      - name: sku
+        tests: [unique]
   - name: mart_sku_disponibilidade
     description: Dias utilizaveis, dias sem estoque e rupturas parciais por item.
     columns:

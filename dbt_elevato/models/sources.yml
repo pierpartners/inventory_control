@@ -54,6 +54,14 @@ sources:
           de 2026-09-18) e quantos dias depois da entrada o titulo ao
           fornecedor vence - media das parcelas ponderada pelo valor, via
           db2.contas_pagar pela mesma idplanilha; mediana 33 dias.
+      - name: raw_ciclo_recebimento
+        description: >
+          Um titulo a receber por pedido de venda (db2.contas_receber, origem
+          PRE, ligado a gold.vendas por empresa + pedido), tres anos.
+          `dias_recebimento` = dias da venda ate o dinheiro entrar: vencimento
+          do titulo mais, no cartao de credito, as parcelas mensais seguintes
+          (30 x (parcelas - 1) / 2). Extracao do DW a partir de 2026-09-18.
+          So existe na base `dw`; int_prazo_recebimento_sku sai vazio sem ela.
 
       # ---- exportacao do DW dwanalitico (var base=exports) ----
       # Dois arquivos gerados em dbt-elevato/exports. O diario e a fonte de
