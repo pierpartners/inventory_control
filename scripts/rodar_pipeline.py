@@ -15,6 +15,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -55,6 +56,7 @@ FONTES = {
         ("raw_estoque_diario_erp", "raw_estoque_diario_erp"),
         ("raw_compras", "raw_compras"),
         ("raw_ciclo_pagamento", "raw_ciclo_pagamento"),
+        ("raw_estoque_posicao_lojas", "raw_estoque_posicao_lojas"),
     ]),
     # exportacao do DW (repo dbt-elevato/exports): UM arquivo diario por SKU
     # (venda do e-commerce + entradas/saidas/saldo do CD Gravatai, 365 dias) e
@@ -111,7 +113,9 @@ def rodar_dbt(base: str) -> None:
     # o resto da aplicacao (que roda com cwd=app/).
     env["DUCKDB_PATH"] = "../data/elevato.duckdb"
     print("  - dbt build em", dbt_dir)
-    r = subprocess.run(["dbt", "build", "--vars", f"base: {STAGING[base]}"],
+    # a foto da posicao das lojas so existe na extracao direta do DW
+    vars_dbt = {"base": STAGING[base], "posicao_lojas": base == "dw"}
+    r = subprocess.run(["dbt", "build", "--vars", json.dumps(vars_dbt)],
                        cwd=dbt_dir, env=env, capture_output=True, text=True)
     print(r.stdout[-4000:])
     if r.returncode != 0:

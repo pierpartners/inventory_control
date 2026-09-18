@@ -55,6 +55,16 @@ sources:
           fornecedor vence - media das parcelas ponderada pelo valor, via
           db2.contas_pagar pela mesma idplanilha; mediana 33 dias.
 
+      - name: raw_estoque_posicao_lojas
+        description: >
+          Foto da posicao ATUAL de estoque fora do CD: um registro por
+          (empresa, local, SKU) com a ultima linha de db2.estoque_sintetico
+          nos 120 dias anteriores a extracao, so para SKUs do universo do CD e
+          so com saldo diferente de zero. Exclui o proprio CD (26/124) e o
+          transito fiscal do e-commerce (33/185). Nao e serie diaria: alimenta
+          o diagnostico do estoque (saldo na rede por SKU). So existe na base
+          `dw` (var posicao_lojas=true).
+
       # ---- exportacao do DW dwanalitico (var base=exports) ----
       # Dois arquivos gerados em dbt-elevato/exports. O diario e a fonte de
       # estoque E de venda (o e-commerce nao vem linha a linha, so agregado por

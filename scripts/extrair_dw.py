@@ -315,6 +315,35 @@ left join titulos t on t.idplanilha = e.idplanilha
 order by e.dt_entrada_estoque, e.idpedido
 """
 
+# Foto da posicao ATUAL nas lojas, um registro por (empresa, local, SKU).
+# Nao e grade diaria de proposito: as lojas somam ~R$ 7,5 mi contra R$ 33 mi
+# do CD (medido 2026-09-18), pulverizados em 169 locais - o historico
+# multiplicaria os 21 milhoes de linhas do estoque do CD por pouco ganho. O
+# diagnostico so precisa saber QUANTO ha na rede hoje, para apontar
+# transferencia em vez de compra e excesso parado em loja. A ultima linha de
+# cada local nos ultimos 120 dias e a posicao; local sem movimento ha mais de
+# 120 dias fica fora (saldo velho demais para valer como posicao).
+SQL_POSICAO_LOJAS = f"""
+with {UNIVERSO},
+ult as (
+    select distinct on (e.idempresa, e.idlocalestoque, e.idsubproduto)
+           e.idempresa, e.idlocalestoque, e.idsubproduto,
+           e.dtmovimento, e.qtdatualestoque, e.valcustomedio
+    from db2.estoque_sintetico e
+    join universo u on u.idsubproduto = e.idsubproduto
+    where e.dtmovimento >= %(dt_fim)s::date - interval '120 days'
+      and not (e.idempresa = {EMPRESA_CD} and e.idlocalestoque = {LOCAL_CD})
+      and not (e.idempresa = {EMPRESA_ECOMMERCE} and e.idlocalestoque = 185)
+    order by e.idempresa, e.idlocalestoque, e.idsubproduto, e.dtmovimento desc
+)
+select idempresa, idlocalestoque, idsubproduto,
+       dtmovimento::date as dtmovimento,
+       qtdatualestoque, valcustomedio
+from ult
+where qtdatualestoque <> 0
+order by idempresa, idlocalestoque, idsubproduto
+"""
+
 TABELAS = {
     "raw_produtos":           ("simples", SQL_PRODUTOS),
     "raw_vendas_todas":       ("simples", SQL_VENDAS.replace("{filtro_empresa}", "")),
@@ -323,6 +352,7 @@ TABELAS = {
     "raw_estoque_diario_erp": ("por_ano", SQL_ESTOQUE),
     "raw_compras":            ("simples", SQL_COMPRAS),
     "raw_ciclo_pagamento":    ("simples", SQL_CICLO),
+    "raw_estoque_posicao_lojas": ("simples", SQL_POSICAO_LOJAS),
 }
 
 
