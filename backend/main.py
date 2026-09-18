@@ -9,6 +9,7 @@ Telas:
   /metodologia  o caminho de um item pelo modelo, com os numeros dele
   /parametros   as premissas economicas e os interruptores metodologicos
   /outliers     itens com entrada suspeita (venda, prazo, custo) e o ajuste manual por SKU
+  /diagnostico  o estoque de hoje por faixa (zerado, risco, sem giro, excesso), idade e rede
   /dados        navegacao pelas tabelas do warehouse
 
 Rodar:
@@ -33,7 +34,7 @@ from fastapi.templating import Jinja2Templates
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from backend import acompanhamento, ajustes, analitico, outliers, qualidade  # noqa: E402
+from backend import acompanhamento, ajustes, analitico, diagnostico, outliers, qualidade  # noqa: E402
 from backend import modelo as motor  # noqa: E402
 from backend import validacao  # noqa: E402
 from backend.config import (Parametros, CAMPOS, CHAVES,  # noqa: E402
@@ -167,6 +168,9 @@ _cache_qualidade: dict = {}
 # a mesma reconciliacao dia a dia, de novo: 1,3 milhao de linhas viram
 # item-dia com pandas. Fica em cache pelo mesmo motivo.
 _cache_ranking: dict = {}
+# o diagnostico cruza 19 mil itens do plano com a foto do estoque e classifica:
+# ~1s. Fica em cache por limiar de "sem giro" e data; cai com os demais.
+_cache_diagnostico: dict = {}
 
 
 def invalidar_caches() -> None:
@@ -181,6 +185,7 @@ def invalidar_caches() -> None:
     _cache_validacao.clear()
     _cache_qualidade.clear()
     _cache_ranking.clear()
+    _cache_diagnostico.clear()
 
 
 def sem_dados(request: Request):
@@ -1066,6 +1071,98 @@ def api_outliers_remover(sku: str):
     ok = ajustes.remover(sku)
     invalidar_caches()
     return JSONResponse({"ok": ok, "sku": sku})
+
+
+# ======================================================================
+# DIAGNOSTICO DO ESTOQUE ATUAL
+# ======================================================================
+def _diag(dias_sem_giro: int, ate: str = "") -> pd.DataFrame:
+    chave = (int(dias_sem_giro), ate or "")
+    if chave not in _cache_diagnostico:
+        _cache_diagnostico[chave] = diagnostico.carregar(wh(), int(dias_sem_giro), ate or None)
+    return _cache_diagnostico[chave]
+
+
+@app.get("/diagnostico")
+def diagnostico_pagina(request: Request, ate: str = "",
+                       dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    w = wh()
+    if not pronto(w) or not w.existe("mart_estoque_posicao"):
+        return sem_dados(request)
+    return tpl.TemplateResponse(request, "diagnostico.html", contexto(
+        request, "diagnostico", dias_sem_giro=int(dias_sem_giro), ate=ate,
+        faixas=diagnostico.FAIXAS, faixas_idade=diagnostico.FAIXAS_IDADE))
+
+
+@app.get("/api/diagnostico/geral")
+def api_diag_geral(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    return JSONResponse(diagnostico.resumo_geral(_diag(dias_sem_giro, ate)))
+
+
+@app.get("/api/diagnostico/idade")
+def api_diag_idade(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    return JSONResponse({"faixas": diagnostico.por_idade(_diag(dias_sem_giro, ate))})
+
+
+@app.get("/api/diagnostico/agregado")
+def api_diag_agregado(por: str = "fornecedor", ate: str = "",
+                      dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    if por not in diagnostico.DIMENSOES:
+        return JSONResponse({"erro": f"por deve ser um de {list(diagnostico.DIMENSOES)}"},
+                            status_code=400)
+    return JSONResponse({"por": por, "grupos": diagnostico.agregar(_diag(dias_sem_giro, ate), por)})
+
+
+@app.get("/api/diagnostico/rede")
+def api_diag_rede(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    return JSONResponse(diagnostico.rede(_diag(dias_sem_giro, ate)))
+
+
+@app.get("/api/diagnostico/itens")
+def api_diag_itens(faixa: str = "", por: str = "", chave: str = "", q: str = "", ate: str = "",
+                   dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    df = _diag(dias_sem_giro, ate)
+    lista = diagnostico.itens(df, faixa=faixa, por=por, chave=chave, busca=q)
+    return JSONResponse({"itens": lista, "total": len(lista)})
+
+
+@app.get("/api/diagnostico/confianca")
+def api_diag_confianca(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    """Grau de confianca por bloco da pagina, a partir da bateria de qualidade
+    (se o cache estiver quente - nunca roda os 13s aqui) e dos outliers."""
+    q = _cache_qualidade.get("d")
+    df = _diag(dias_sem_giro, ate)
+    return JSONResponse(diagnostico.confianca(q, outliers.sinalizar(outliers.carregar(wh())), df))
+
+
+@app.get("/diagnostico.csv")
+def diagnostico_csv(faixa: str = "", por: str = "", chave: str = "", q: str = "", ate: str = "",
+                    dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    from fastapi.responses import StreamingResponse
+
+    df = pd.DataFrame(diagnostico.itens(_diag(dias_sem_giro, ate), faixa=faixa, por=por,
+                                        chave=chave, busca=q, limite=1_000_000))
+
+    def gerar():
+        yield "﻿"                     # BOM: o Excel abre acentos certo
+        yield ";".join(df.columns) + "\n"
+        for linha in df.itertuples(index=False):
+            campos = []
+            for v in linha:
+                if v is None:
+                    campos.append("")
+                elif isinstance(v, bool):
+                    campos.append("sim" if v else "nao")
+                elif isinstance(v, (int, float)):
+                    campos.append(str(v).replace(".", ","))
+                else:
+                    campos.append('"' + str(v).replace('"', '""') + '"')
+            yield ";".join(campos) + "\n"
+
+    sufixo = "-" + faixa.lower().replace(" ", "-") if faixa else ""
+    nome = f"diagnostico-estoque{sufixo}.csv"
+    return StreamingResponse(gerar(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{nome}"'})
 
 
 # ======================================================================

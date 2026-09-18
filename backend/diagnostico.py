@@ -128,8 +128,11 @@ COLUNAS_ITEM = [
 ]
 
 
-def carregar(wh: Warehouse, dias_sem_giro: int = DIAS_SEM_GIRO_PADRAO) -> pd.DataFrame:
+def carregar(wh: Warehouse, dias_sem_giro: int = DIAS_SEM_GIRO_PADRAO,
+             ate: str | None = None) -> pd.DataFrame:
     """res_plano_compra (politica) x mart_estoque_posicao (foto), classificado."""
+    if ate:
+        raise NotImplementedError("foto congelada (ate) ainda nao implementada")
     plano = wh.query(f"select {', '.join(COLUNAS_PLANO)} from {ref('res_plano_compra')}")
     posicao = wh.query(f"select {', '.join(COLUNAS_POSICAO)} from {ref('mart_estoque_posicao')}")
     df = plano.merge(posicao, on="sku", how="left")
