@@ -35,6 +35,10 @@ change in the dbt models (this branch added `pecas_ecommerce`/`pecas_lojas` and 
 `*_ecommerce`/`*_lojas` financial columns; `--pular-dbt` against a warehouse built before them
 fails in `ler_base`).
 
+A foto da posição das lojas (`raw_estoque_posicao_lojas`) só existe na extração direta do DW;
+`rodar_pipeline.py` passa `posicao_lojas: true` ao dbt quando a base é `dw`, e a view
+`stg_estoque_posicao_lojas` sai vazia nas outras bases.
+
 **Tests / verification** (there is no pytest suite — verification is two standalone scripts that
 recompute results independently and diff against what's stored):
 
@@ -121,6 +125,12 @@ A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
   not recalculate — the page calls `POST /recalcular` afterwards.
 - `backend/acompanhamento.py` — day-by-day per-SKU reconciliation (stock vs. sales vs. reserva)
   for manual conference, independent of the optimization model.
+- `backend/diagnostico.py` — leitura do estoque **de hoje** (ou de uma data `ate`): cruza
+  `res_plano_compra` com `mart_estoque_posicao` e classifica cada SKU em uma faixa
+  (zerado com demanda / risco / sem giro / excesso / saudável, nesta ordem de prioridade),
+  valoriza ao custo do modelo e ao custo médio contábil do ERP, mede a idade FIFO do saldo
+  e agrega por fornecedor, comprador e família. Não recalcula política: só lê. Funções puras
+  sobre DataFrame para `revisao.py` (bloco 9) recompor. Feeds the `/diagnostico` page.
 - `backend/main.py` — FastAPI app; one route pair per page (`GET /pagina` renders the template,
   `GET /api/pagina/recurso` returns JSON for that page's charts/tables). Route handlers follow a
   fixed shape: get a `Warehouse` via `wh()`, bail out to `sem_dados()` if `pronto(w)` is false,

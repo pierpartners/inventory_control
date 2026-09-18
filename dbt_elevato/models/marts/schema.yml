@@ -32,3 +32,15 @@ models:
     columns:
       - name: data
         tests: [unique, not_null]
+  - name: mart_estoque_posicao
+    description: >
+      Foto do estoque de hoje por item para o diagnostico: saldo no CD e na
+      rede, custo medio contabil, ultima venda, ultima entrada e idade FIFO do
+      saldo (aproximacao pelas ultimas entradas).
+    columns:
+      - name: sku
+        tests: [unique, not_null]
+      - name: saldo_cd
+        tests: [not_null]
+      - name: data_posicao
+        tests: [not_null]

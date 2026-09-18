@@ -289,3 +289,15 @@ alteração, porque toda leitura e escrita passa por `backend/warehouse.py`.
 Os CSVs em `data/fonte/` vêm da simulação de vendas da Elevato — **não são dados reais**. A
 entrega é o laboratório (metodologia + aplicação), pronto para receber a extração do ERP no mesmo
 formato (`catalogo.csv`, `vendas.csv`, `estoque_diario.csv`).
+
+## Diagnóstico do estoque atual
+
+A página `/diagnostico` responde "o que está parado, o que está em risco e quanto isso custa",
+sem recalcular a política. Cada SKU cai numa faixa, avaliada nesta ordem: **zerado com demanda**
+(sem peça e com demanda corrigida positiva), **risco** (posição ≤ ponto de pedido, com ponto de
+pedido positivo), **sem giro** (há peça e não vende há mais de N dias, padrão 180), **excesso**
+(acima do estoque máximo do modelo), **saudável**. O estoque é valorizado duas vezes: ao custo
+que o modelo usa e ao custo médio contábil do ERP. A **idade FIFO** aproxima há quanto tempo o
+saldo está no CD percorrendo as entradas da mais recente para trás até cobrir o saldo. A foto
+das lojas (uma linha por SKU e local, sem histórico) aponta transferência em vez de compra.
+`scripts/revisao.py` (bloco 9) recompõe faixas, idade e somas por fora.
