@@ -175,6 +175,28 @@
       </div>
     </div>
   </div>
+
+  <div class="painel mt18" id="p-prazo" hidden>
+    <div class="painel-cab">
+      <h2>Quanto o fornecedor de fato demora</h2>
+      <span class="dica">cada pedido de compra do catálogo, do dia do pedido à entrada no estoque</span>
+    </div>
+    <div class="painel-int">
+      <div class="gr gr-23">
+        <div>
+          <div class="curto" id="x2-prazo"></div>
+          <div class="gr gr-3 mt18" id="prazo-percentis"></div>
+        </div>
+        <div>
+          <div id="g-prazo" class="gfx m"></div>
+          <div class="legenda mt10">
+            <span><i style="background:#F2A93B"></i>prazo realizado · quanto levou de fato</span>
+            <span><i style="background:#5D6C7C"></i>prazo combinado · o que o pedido prometia</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ============================================ 3 -->
@@ -973,6 +995,9 @@
        N.num(m.demanda_media_dia, 2) + " un/dia"],
       ["H", "agá", "horizonte: dias até a mercadoria nova chegar (revisão + fornecedor)",
        N.num(m.periodo_protecao_dias) + " dias"],
+      ["D", "dê", "dias com o dinheiro preso: H mais o prazo até a venda virar caixa, menos " +
+       "o prazo que o fornecedor dá para pagar. Só a nota divide por D",
+       N.num(m.dias_capital || m.periodo_protecao_dias, 1) + " dias"],
       ["μ", "mi", "quantas peças devem sair dentro do horizonte, em média",
        N.num(m.mu_periodo, 1) + " un"],
       ["σ", "sigma", "o quanto isso costuma variar de um ciclo para outro",
@@ -995,9 +1020,6 @@
       ["giro", "", "quantas vezes por ano o estoque médio do produto se renova " +
        "(demanda do ano ÷ estoque médio)", N.num(m.giro_ano, 1) + "× por ano"],
       ["capital", "", "dinheiro parado neste produto: estoque médio × custo da peça",
-      ["D", "dê", "dias com o dinheiro preso: H mais o prazo até a venda virar caixa, menos " +
-       "o prazo que o fornecedor dá para pagar. Só a nota divide por D",
-       N.num(m.dias_capital || m.periodo_protecao_dias, 1) + " dias"],
        "R$ " + N.moeda(m.capital_imobilizado)],
       ["retorno s/ capital", "", "lucro líquido de um ano dividido pelo capital que o " +
        "produto prende — é a taxa que ele paga ao dono do dinheiro",
@@ -1017,6 +1039,64 @@
   }
 
   /* ============================================ blocos globais */
+  /* ============================================ prazo do fornecedor */
+  N.buscar("/api/metodologia/prazo").then(function (pz) {
+    if (!pz || !pz.pedidos) return;
+    id("p-prazo").hidden = false;
+    var ult = pz.inicio.length - 1;
+    var rot = pz.inicio.map(function (x, i) {
+      return i === ult ? N.num(x) + "+" : N.num(x) + "–" + N.num(x + pz.passo - 1); });
+    var faixaDe = function (dias) { return Math.min(ult, Math.floor(dias / pz.passo)); };
+    N.grafico("g-prazo", {
+      grid: N.grade({ top: 24, right: 14, bottom: 30, left: 4 }),
+      tooltip: N.dica(function (ps) {
+        var i = ps[0].dataIndex;
+        return N.dicaTit((i === ult ? "Mais de " + N.num(pz.inicio[i] - 1) : "Entre " + rot[i]) + " dias") +
+          N.dicaLin(C.ambar, "dos pedidos chegaram nesse prazo", N.pct(pz.realizado[i], 1)) +
+          N.dicaLin(C.tinta3, "dos pedidos prometiam esse prazo", N.pct(pz.combinado[i], 1));
+      }),
+      xAxis: N.eixoX({ data: rot, name: "dias entre o pedido e a entrada no estoque",
+        nameLocation: "middle", nameGap: 27, nameTextStyle: { color: C.tinta4, fontSize: 10 },
+        axisLabel: { color: C.tinta4, fontSize: 9.5, interval: 1 } }),
+      yAxis: N.eixoY({ show: false }),
+      series: [{
+        type: "bar", barWidth: "62%", z: 3,
+        data: pz.realizado.map(function (v) { return { value: v,
+          itemStyle: { color: N.sombra(C.ambar, .85) } }; }),
+        markLine: { silent: true, symbol: "none",
+          lineStyle: { color: C.ambar, width: 1.4 },
+          label: { color: C.ambar, fontSize: 10.5, rotate: 0, distance: 5, position: "insideEndTop" },
+          data: [
+            { xAxis: faixaDe(pz.mediana), label: { formatter: "metade em " + N.num(pz.mediana, 0) + "d" } },
+            { xAxis: faixaDe(pz.p90), label: { formatter: "9 em 10 em " + N.num(pz.p90, 0) + "d" } }
+          ] }
+      }, {
+        type: "bar", barWidth: "62%", barGap: "-100%", z: 2,
+        data: pz.combinado.map(function (v) { return { value: v,
+          itemStyle: { color: N.sombra(C.tinta3, .45), borderColor: C.tinta3, borderWidth: 1 } }; })
+      }]
+    });
+    id("x2-prazo").innerHTML =
+      "<p>O prazo que entra no horizonte não é o que o pedido promete: é o que o fornecedor " +
+      "<b>cumpriu</b>. Em <b>" + N.num(pz.pedidos) + " pedidos</b> recebidos, metade entrou no " +
+      "estoque em até <b>" + N.num(pz.mediana, 0) + " dias</b>, enquanto o cadastro combinava " +
+      "<b>" + N.num(pz.mediana_combinado, 0) + "</b>. Dimensionar pelo combinado prenderia dinheiro " +
+      "para uma espera que quase nunca acontece.</p>" +
+      "<p>Mas a cauda é longa: 1 pedido em 10 passa de <b>" + N.num(pz.p90, 0) + " dias</b>, e o desvio " +
+      "fica em <b>" + N.num(pz.desvio, 0) + " dias</b>. É por isso que o prazo entra em σ como " +
+      "variável, item a item — cada produto usa a mediana e o desvio dos <em>seus</em> pedidos, " +
+      "e quem tem menos de 3 herda os do catálogo.</p>";
+    id("prazo-percentis").innerHTML = [
+      [N.pct(pz.adiantou, 0), "dos pedidos chegaram antes do combinado"],
+      [N.pct(pz.atrasou, 0), "chegaram depois do combinado"],
+      [N.num(pz.fora), "pedidos fora de 0–365 dias, descartados como erro de registro"]
+    ].map(function (q) {
+      return '<div style="border-left:2px solid var(--linha);padding-left:11px">' +
+        '<div class="mono" style="font-size:17px;color:var(--tinta)">' + q[0] + "</div>" +
+        '<div class="pequeno t3" style="line-height:1.4;margin-top:3px">' + q[1] + "</div></div>";
+    }).join("");
+  });
+
   N.buscar("/api/comparar").then(function (d) {
     var pr = d.produtos;
     if (!pr.length) return;

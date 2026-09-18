@@ -981,6 +981,7 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
         "distribuicao": dist,
         "marginal": marginal,
         "seguranca": seguranca,
+        "prazos": {"pedidos": prazos_item(wh, sku), "catalogo": distribuicao_prazo(wh)},
         "parametros": {
             "periodo_revisao_dias": p.periodo_revisao_dias,
             "taxa_manutencao_ano": p.taxa_manutencao_ano,
@@ -993,6 +994,112 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
             "dias_utilizaveis_minimo": getattr(p, "dias_utilizaveis_minimo", 0),
         },
     }
+
+
+# ----------------------------------------------------------------------
+# 6a. o prazo do fornecedor como distribuicao, nao como um numero
+# ----------------------------------------------------------------------
+PRAZO_MAX_DIAS = 365      # mesmo corte de stg_catalogo.sql: fora disso e erro de registro
+PRAZO_PASSO_DIAS = 7      # uma faixa por semana; a ultima acumula o que passa do teto
+PRAZO_TETO_DIAS = 126     # 18 semanas cobrem o p99 (157 no extrato real fica na faixa "+")
+
+
+def distribuicao_prazo(wh: Warehouse) -> dict:
+    """O prazo de recebimento das compras, pedido a pedido, no catalogo inteiro.
+
+    Histograma semanal do prazo REALIZADO (do pedido a entrada no estoque) e do
+    COMBINADO (o que o cadastro do pedido dizia), com mediana e p90 de cada um.
+    E a evidencia por tras de `lead_time_desvio_dias`: se a cauda do realizado
+    for longa, o desvio do prazo tem de entrar no estoque de seguranca. Base
+    sem `raw_ciclo_pagamento` (sintetica/exports) devolve {} e as telas omitem
+    o grafico.
+    """
+    if not wh.existe("raw_ciclo_pagamento"):
+        return {}
+    r = wh.query(f"""
+        with k as (
+            select cast(dias_entrega_realizado as double) realizado,
+                   cast(dias_entrega_combinado as double) combinado
+            from {ref('raw_ciclo_pagamento')}
+            where dias_entrega_realizado is not null
+              and cast(dias_entrega_realizado as double) between 0 and {PRAZO_MAX_DIAS}),
+        faixa as (
+            select least(floor(realizado / {PRAZO_PASSO_DIAS}), {PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS}) f,
+                   count(*) n_realizado
+            from k group by 1),
+        faixa_c as (
+            select least(floor(combinado / {PRAZO_PASSO_DIAS}), {PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS}) f,
+                   count(*) n_combinado
+            from k where combinado is not null and combinado between 0 and {PRAZO_MAX_DIAS}
+            group by 1),
+        resumo as (
+            select count(*) pedidos,
+                   median(realizado) mediana, quantile_cont(realizado, 0.9) p90,
+                   stddev(realizado) desvio,
+                   median(combinado) mediana_combinado, quantile_cont(combinado, 0.9) p90_combinado,
+                   avg(case when realizado > combinado then 1.0 else 0.0 end) atrasou,
+                   avg(case when realizado < combinado then 1.0 else 0.0 end) adiantou
+            from k),
+        fora as (
+            select count(*) n from {ref('raw_ciclo_pagamento')}
+            where dias_entrega_realizado is null
+               or cast(dias_entrega_realizado as double) not between 0 and {PRAZO_MAX_DIAS})
+        select coalesce(a.f, c.f) f, coalesce(a.n_realizado, 0) n_realizado,
+               coalesce(c.n_combinado, 0) n_combinado,
+               (select pedidos from resumo) pedidos, (select mediana from resumo) mediana,
+               (select p90 from resumo) p90, (select desvio from resumo) desvio,
+               (select mediana_combinado from resumo) mediana_combinado,
+               (select p90_combinado from resumo) p90_combinado,
+               (select atrasou from resumo) atrasou, (select adiantou from resumo) adiantou,
+               (select n from fora) fora
+        from faixa a full outer join faixa_c c on c.f = a.f
+        order by 1""")
+    if r.empty or int(r.pedidos.iloc[0] or 0) == 0:
+        return {}
+    n_faixas = PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS + 1
+    real = np.zeros(n_faixas); comb = np.zeros(n_faixas)
+    for t in r.itertuples(index=False):
+        i = int(t.f)
+        real[i] = t.n_realizado; comb[i] = t.n_combinado
+    tot = float(real.sum()); tot_c = float(comb.sum()) or 1.0
+    cab = r.iloc[0]
+    return {
+        "passo": PRAZO_PASSO_DIAS,
+        "inicio": [i * PRAZO_PASSO_DIAS for i in range(n_faixas)],
+        "realizado": [float(v) / tot for v in real],
+        "combinado": [float(v) / tot_c for v in comb],
+        "pedidos": int(cab.pedidos),
+        "fora": int(cab.fora or 0),
+        "mediana": limpo(cab.mediana), "p90": limpo(cab.p90), "desvio": limpo(cab.desvio),
+        "mediana_combinado": limpo(cab.mediana_combinado), "p90_combinado": limpo(cab.p90_combinado),
+        "atrasou": limpo(cab.atrasou), "adiantou": limpo(cab.adiantou),
+    }
+
+
+def prazos_item(wh: Warehouse, sku: str) -> list[dict]:
+    """Cada recebimento do item: quando pediu, quando entrou, quantos dias levou
+    e quantos o pedido prometia. Sao os pontos que sustentam `lead_time_dias`."""
+    if not wh.existe("raw_ciclo_pagamento"):
+        return []
+    seguro = str(sku).replace("'", "''")
+    tem_compras = wh.existe("raw_compras")
+    forn = (f"""left join (select distinct idpedido, cast(idsubproduto as varchar) sku, fornecedor
+                          from {ref('raw_compras')}
+                          where cast(idsubproduto as varchar) = '{seguro}') c
+                 on c.idpedido = k.idpedido and c.sku = cast(k.idsubproduto as varchar)"""
+            if tem_compras else "")
+    r = wh.query(f"""
+        select k.idpedido pedido, cast(k.dt_pedido as date) pedido_em,
+               cast(k.dt_entrada_estoque as date) entrou_em,
+               cast(k.dias_entrega_realizado as double) realizado,
+               cast(k.dias_entrega_combinado as double) combinado,
+               {'c.fornecedor' if tem_compras else 'null'} fornecedor,
+               cast(k.dias_entrega_realizado as double) between 0 and {PRAZO_MAX_DIAS} usado
+        from {ref('raw_ciclo_pagamento')} k {forn}
+        where cast(k.idsubproduto as varchar) = '{seguro}'
+          and k.dias_entrega_realizado is not null
+        order by 2""")
+    return registros(r)
 
 
 # ----------------------------------------------------------------------

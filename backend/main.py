@@ -661,6 +661,14 @@ def metodologia(request: Request, sku: str = ""):
         sugestoes={k: {"sku": str(v.sku), "item": str(v.item)} for k, v in sug.items()}))
 
 
+@app.get("/api/metodologia/prazo")
+def api_metodologia_prazo():
+    """Distribuicao do prazo de recebimento das compras no catalogo inteiro:
+    realizado contra combinado, pedido a pedido. Evidencia da parcela de
+    desvio do prazo no estoque de seguranca."""
+    return JSONResponse(analitico.distribuicao_prazo(wh()))
+
+
 @app.get("/api/comparar")
 def api_comparar():
     """Produtos bem diferentes entre si, medidos na mesma regua."""

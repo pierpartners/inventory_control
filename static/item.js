@@ -217,6 +217,85 @@
     return h;
   }
 
+  /* O prazo do fornecedor deste item como pontos, nao como um numero: cada
+     recebimento e um ponto na regua de dias, sobre a distribuicao de todos os
+     pedidos do catalogo. A mediana que o modelo usou e o desvio ficam
+     marcados - e da para ver de quantos pedidos saiu essa mediana. */
+  function faixaPrazo(pz, m) {
+    if (!pz || !pz.catalogo || !pz.catalogo.pedidos) return "";
+    var n = (pz.pedidos || []).length, usados = m.lead_time_pedidos || 0;
+    var nota = usados >= 3
+      ? "Cada ponto é um recebimento deste item (" + N.num(n) + "); o fundo é a distribuição de " +
+        "todos os pedidos do catálogo. O modelo usa a <b>mediana</b> destes pontos, " +
+        N.num(m.lead_time_dias, 0) + " dias, e o desvio, ± " + N.num(m.lead_time_desvio_dias, 1) + "."
+      : "Este item tem " + (n ? "só " + N.num(n) : "nenhum") + " recebimento registrado — menos de 3. " +
+        "O prazo de " + N.num(m.lead_time_dias, 0) + " dias que o modelo usa é a <b>mediana do catálogo</b>, " +
+        "não a dele.";
+    return '<div class="mt14" style="border-top:1px solid var(--linha);padding-top:10px">' +
+      '<div class="pequeno t3" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">' +
+      "Prazo do fornecedor · do pedido à entrada no estoque</div>" +
+      '<div id="gv-prazo" class="gfx" style="height:118px"></div>' +
+      '<div class="pequeno t3" style="line-height:1.45">' + nota +
+      (n ? " Verde: chegou dentro do combinado; coral: atrasou." : "") + "</div></div>";
+  }
+
+  function desenharPrazo(pz, m) {
+    if (!pz || !pz.catalogo || !pz.catalogo.pedidos || !document.getElementById("gv-prazo")) return;
+    var cat = pz.catalogo, peds = pz.pedidos || [];
+    var teto = cat.inicio[cat.inicio.length - 1] + cat.passo;
+    var maxItem = peds.reduce(function (a, r) { return Math.max(a, r.realizado || 0); }, 0);
+    var fim = Math.max(teto, Math.ceil((maxItem + 5) / cat.passo) * cat.passo,
+                       (m.lead_time_dias + m.lead_time_desvio_dias) * 1.05);
+    /* o histograma do catalogo como area em degraus: a ultima faixa acumula
+       o que passa do teto, entao ela e esticada ate o fim do eixo */
+    var fundo = cat.inicio.map(function (x, i) { return [x, cat.realizado[i]]; });
+    fundo.push([fim, cat.realizado[cat.realizado.length - 1]]);
+    var pico = Math.max.apply(null, cat.realizado) || 1;
+
+    var pontos = peds.map(function (r) {
+      var cor = !r.usado ? C.tinta4 : (r.combinado != null && r.realizado > r.combinado ? C.coral : C.menta);
+      return { value: [Math.min(r.realizado, fim), 0.5], r: r,
+        itemStyle: { color: r.usado ? N.sombra(cor, .85) : "transparent", borderColor: cor, borderWidth: 1.2 } };
+    });
+    var sd = m.lead_time_desvio_dias || 0;
+
+    N.grafico("gv-prazo", {
+      grid: N.grade({ top: 18, right: 14, bottom: 22, left: 4 }),
+      tooltip: Object.assign(N.dica(function (p) {
+        if (Array.isArray(p)) p = p[0];
+        if (!p || p.seriesType !== "scatter") return "";
+        var r = p.data.r;
+        return N.dicaTit("Pedido " + N.esc(String(r.pedido)) + " · " + N.data(r.pedido_em)) +
+          N.dicaLin(r.combinado != null && r.realizado > r.combinado ? C.coral : C.menta,
+            "levou", N.num(r.realizado, 0) + " dias") +
+          N.dicaLin(C.tinta3, "combinado no pedido", r.combinado != null ? N.num(r.combinado, 0) + " dias" : "–") +
+          N.dicaLin(C.tinta3, "entrou em", N.data(r.entrou_em)) +
+          (r.fornecedor ? N.dicaLin(C.tinta3, "fornecedor", N.esc(r.fornecedor)) : "") +
+          (!r.usado ? N.dicaLin(C.tinta4, "fora de 0–365 dias", "não entra na mediana") : "");
+      }), { trigger: "item" }),
+      xAxis: N.eixoX({ type: "value", min: 0, max: fim, boundaryGap: [0, 0],
+        axisLabel: { color: C.tinta4, fontSize: 9.5, formatter: function (v) { return v + "d"; } },
+        splitLine: { show: false } }),
+      yAxis: [N.eixoY({ show: false, min: 0, max: pico * 1.15 }),
+              N.eixoY({ show: false, min: 0, max: 1 })],
+      series: [{
+        type: "line", step: "end", symbol: "none", silent: true, z: 1,
+        lineStyle: { width: 0 }, areaStyle: { color: N.sombra(C.tinta3, .28) },
+        data: fundo,
+        markArea: sd > 0 ? { silent: true,
+          itemStyle: { color: N.sombra(C.ambar, .10) },
+          data: [[{ xAxis: Math.max(0, m.lead_time_dias - sd) }, { xAxis: Math.min(fim, m.lead_time_dias + sd) }]] } : undefined,
+        markLine: { silent: true, symbol: "none",
+          lineStyle: { color: C.ambar, width: 1.5 },
+          label: { color: C.ambar, fontSize: 10, position: "insideEndTop", distance: 4, rotate: 0,
+            formatter: "prazo usado · " + N.num(m.lead_time_dias, 0) + "d" },
+          data: [{ xAxis: m.lead_time_dias }] }
+      }, {
+        type: "scatter", yAxisIndex: 1, symbolSize: 10, z: 5, data: pontos
+      }]
+    });
+  }
+
   raiz.abrirItem = function (sku) {
     var alvo = N.abrir(
       '<span class="carregando" style="min-height:0"></span>',
@@ -377,7 +456,7 @@
         '<span><i style="background:' + N.sombra(C.coral, .75) + '"></i>' +
         'demanda que passaria do ponto de pedido</span>' +
         '<span><i style="background:' + C.ambar + '"></i>ponto de pedido</span>' +
-        '</div></div></div>');
+        '</div></div></div>' + faixaPrazo(d.prazos, m));
 
       /* ------- 4. política */
       var pol = "";
@@ -730,6 +809,9 @@
           }]
         });
       }
+
+      /* ---------------------------------------------------- prazo */
+      desenharPrazo(d.prazos, m);
 
       /* ---------------------------------------------------- regime */
       if (discreto && d.marginal.length) {
