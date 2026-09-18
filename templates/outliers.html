@@ -119,7 +119,7 @@
       <div class="seg" id="esc-y"><button data-v="log">log</button><button data-v="linear">linear</button></div>
     </div>
   </div>
-  <div class="painel-int"><div id="g-nuvem" class="gfx" style="height:340px"></div></div>
+  <div class="painel-int"><div id="g-nuvem" class="gfx" style="height:470px"></div></div>
 </div>
 
 <!-- ============================================ filtros + tabela -->
@@ -300,9 +300,57 @@
     eixo.ey = b.dataset.v; pintarEscalas(); guardarEixos(); nuvem();
   });
 
+  /* percentil de um vetor ja ordenado */
+  function pctl(v, q) {
+    if (!v.length) return NaN;
+    var i = (v.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+    return v[lo] + (v[hi] - v[lo]) * (i - lo);
+  }
+  /* bordas de NB bins entre lo e hi: iguais no log em escala log, iguais no
+     valor em linear. Devolve NB+1 bordas. */
+  function bordas(lo, hi, esc, NB) {
+    var e = [], i;
+    if (esc === "log") {
+      var a = Math.log10(lo), b = Math.log10(hi);
+      for (i = 0; i <= NB; i++) e.push(Math.pow(10, a + (b - a) * i / NB));
+    } else {
+      for (i = 0; i <= NB; i++) e.push(lo + (hi - lo) * i / NB);
+    }
+    return e;
+  }
+  /* conta os pontos por bin e por gravidade; devolve os retangulos
+     empilhados (fundo embaixo, amarelo, vermelho em cima), um por
+     [bin, gravidade], no formato [de, ate, base, topo] no eixo da dimensao
+     e no eixo da contagem. */
+  function histograma(pontos, e, esc, idx) {
+    var NB = e.length - 1, cont = { fundo: [], am: [], cr: [] }, k;
+    for (k in cont) for (var i = 0; i < NB; i++) cont[k].push(0);
+    var lo = e[0], hi = e[NB];
+    var pos = esc === "log"
+      ? function (v) { return Math.floor((Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * NB); }
+      : function (v) { return Math.floor((v - lo) / (hi - lo) * NB); };
+    ["fundo", "am", "cr"].forEach(function (g) {
+      pontos[g].forEach(function (p) {
+        var j = pos(p.value[idx]); if (j >= NB) j = NB - 1; if (j < 0) j = 0;
+        cont[g][j]++;
+      });
+    });
+    var out = { fundo: [], am: [], cr: [] }, maximo = 0;
+    for (var j = 0; j < NB; j++) {
+      var base = 0;
+      ["fundo", "am", "cr"].forEach(function (g) {
+        var n = cont[g][j];
+        if (n > 0) out[g].push({ value: [e[j], e[j + 1], base, base + n], n: n, faixa: [e[j], e[j + 1]], bin: j, cont: cont });
+        base += n;
+      });
+      if (base > maximo) maximo = base;
+    }
+    return { rect: out, maximo: maximo };
+  }
+
   function nuvem() {
-    var fundo = [], am = [], cr = [], fora = 0, total = 0;
     var kx = eixo.x, ky = eixo.y, dx = DIM[kx], dy = DIM[ky];
+    var pts = [], fora = 0, total = 0;
     /* em escala log o zero nao existe: o ponto sai e e contado */
     var okx = eixo.ex === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
     var oky = eixo.ey === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
@@ -310,27 +358,88 @@
       total++;
       var vx = r[kx], vy = r[ky];
       if (vx === null || vy === null || vx === undefined || vy === undefined || !okx(vx) || !oky(vy)) { fora++; return; }
-      var p = { value: [vx, vy], sku: r.sku, item: r.item };
-      (r.gravidade === "cr" ? cr : r.gravidade === "am" ? am : fundo).push(p);
+      pts.push({ value: [vx, vy], sku: r.sku, item: r.item, g: r.gravidade === "cr" ? "cr" : r.gravidade === "am" ? "am" : "fundo" });
     });
+    /* o quadro: em log, o dado inteiro com folga; em linear, os percentis
+       0,5 e 99,5 - um item com margem de -2.000% nao pode achatar os outros
+       6 mil. O que fica fora do quadro e contado na dica. */
+    function quadro(idx, esc) {
+      var v = pts.map(function (p) { return p.value[idx]; }).sort(function (a, b) { return a - b; });
+      if (!v.length) return [0, 1];
+      if (esc === "log") return [v[0] / 1.25, v[v.length - 1] * 1.25];
+      var lo = pctl(v, 0.005), hi = pctl(v, 0.995);
+      if (!(hi > lo)) { lo = v[0]; hi = v[v.length - 1]; }
+      var folga = (hi - lo) * 0.03 || 1;
+      return [lo - folga, hi + folga];
+    }
+    var qx = quadro(0, eixo.ex), qy = quadro(1, eixo.ey), foraQuadro = 0;
+    var pontos = { fundo: [], am: [], cr: [] };
+    pts.forEach(function (p) {
+      if (p.value[0] < qx[0] || p.value[0] > qx[1] || p.value[1] < qy[0] || p.value[1] > qy[1]) { foraQuadro++; return; }
+      pontos[p.g].push(p);
+    });
+    var NB = 40;
+    var hx = histograma(pontos, bordas(qx[0], qx[1], eixo.ex, NB), eixo.ex, 0);
+    var hy = histograma(pontos, bordas(qy[0], qy[1], eixo.ey, NB), eixo.ey, 1);
+
     id("nuvem-tit").textContent = dx.rotulo + " × " + dy.rotulo;
-    id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar" +
-      (fora ? " · " + N.num(fora) + " de " + N.num(total) + " sem valor válido nesta escala ficaram de fora" : "");
-    function eixoCfg(k, esc, nameGap, semGrade) {
+    var notas = [];
+    if (fora) notas.push(N.num(fora) + " de " + N.num(total) + " sem valor válido nesta escala");
+    if (foraQuadro) notas.push(N.num(foraQuadro) + " fora do quadro (além dos percentis 0,5 e 99,5)");
+    id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar; " +
+      "as barras contam os itens por faixa de cada eixo" + (notas.length ? " · " + notas.join(" · ") : "");
+
+    /* margens fixas em pixels para os tres grids se alinharem: o histograma
+       de cima divide o eixo X da nuvem, o da direita divide o eixo Y */
+    var L = 70, R = 108, T = 30, HT = 64, GAP = 8, B = 46, W_DIR = 78;
+    var topoNuvem = T + HT + GAP;
+    function eixoDim(k, esc, q, extra) {
       var d = DIM[k];
-      var o = { name: d.rotulo + (d.unidade ? " (" + d.unidade + ")" : "") + (esc === "log" ? " · log" : ""),
-        nameLocation: "middle", nameGap: nameGap,
-        axisLabel: { color: C.tinta4, fontSize: 10, formatter: fmtEixo(k) } };
-      if (semGrade) o.splitLine = { show: false };
+      var o = Object.assign({ min: q[0], max: q[1],
+        axisLabel: { color: C.tinta4, fontSize: 10, formatter: fmtEixo(k),
+          showMinLabel: false, showMaxLabel: false } }, extra || {});
       if (esc === "log") { o.type = "log"; o.logBase = 10; }
       return o;
     }
+    var nomeX = dx.rotulo + (dx.unidade ? " (" + dx.unidade + ")" : "") + (eixo.ex === "log" ? " · log" : "");
+    var nomeY = dy.rotulo + (dy.unidade ? " (" + dy.unidade + ")" : "") + (eixo.ey === "log" ? " · log" : "");
+    var oculto = { show: false, min: 0 };
+    var mudo = { axisLabel: { show: false }, axisTick: { show: false }, splitLine: { show: false }, axisLine: { show: false } };
+
+    /* um retangulo por [bin, gravidade]; `vert` = barras em pe (histograma de
+       cima), senao deitadas (o da direita) */
+    function barras(vert, cor, nome, dados, xi, yi) {
+      return { name: nome, type: "custom", xAxisIndex: xi, yAxisIndex: yi, data: dados, silent: false,
+        renderItem: function (params, api) {
+          var v0 = api.value(0), v1 = api.value(1), b0 = api.value(2), b1 = api.value(3);
+          var p0 = vert ? api.coord([v0, b0]) : api.coord([b0, v0]);
+          var p1 = vert ? api.coord([v1, b1]) : api.coord([b1, v1]);
+          var x = Math.min(p0[0], p1[0]), y = Math.min(p0[1], p1[1]);
+          var w = Math.abs(p1[0] - p0[0]), h = Math.abs(p1[1] - p0[1]);
+          return { type: "rect", shape: { x: x + 0.5, y: y, width: Math.max(w - 1, 0.5), height: Math.max(h, 0.5) },
+            style: { fill: cor } };
+        } };
+    }
+    var corF = N.sombra(C.tinta4, 0.35), corA = N.sombra(C.ambar, 0.8), corC = N.sombra(C.coral, 0.8);
+
     N.grafico("g-nuvem", {
-      grid: N.grade({ top: 34, right: 22, bottom: 40, left: 4 }),
+      grid: [
+        { left: L, right: R, top: topoNuvem, bottom: B, containLabel: false },
+        { left: L, right: R, top: T, height: HT, containLabel: false },
+        { right: R - GAP - W_DIR, width: W_DIR, top: topoNuvem, bottom: B, containLabel: false }
+      ],
       legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 16, icon: "circle",
-        textStyle: { color: C.tinta3, fontSize: 11 } },
+        data: ["sem motivo", "em amarelo", "em vermelho"], textStyle: { color: C.tinta3, fontSize: 11 } },
       tooltip: Object.assign(N.dica(function (ps) {
         var p = Array.isArray(ps) ? ps[0] : ps;
+        if (p.seriesType === "custom") {
+          var d = p.data, vert = p.seriesIndex < 6, k = vert ? kx : ky, c = d.cont, j = d.bin;
+          return N.dicaTit(DIM[k].rotulo + ": " + fmtDim(k, d.faixa[0]) + " a " + fmtDim(k, d.faixa[1])) +
+            N.dicaLin(C.coral, "em vermelho", N.num(c.cr[j])) +
+            N.dicaLin(C.ambar, "em amarelo", N.num(c.am[j])) +
+            N.dicaLin(C.tinta4, "sem motivo", N.num(c.fundo[j])) +
+            N.dicaLin(C.tinta3, "total", N.num(c.cr[j] + c.am[j] + c.fundo[j]));
+        }
         var r = POR_SKU[p.data.sku];
         var h = N.dicaTit(p.data.item) +
           N.dicaLin(C.ceu, dx.rotulo, fmtDim(kx, p.data.value[0])) +
@@ -338,17 +447,32 @@
         if (r) h += N.dicaLin(C.coral, "motivos", r.motivos.map(function (k) { return REGRA[k].rotulo; }).join(", "));
         return h;
       }), { trigger: "item" }),
-      xAxis: N.eixoY(eixoCfg(kx, eixo.ex, 28, true)),
-      yAxis: N.eixoY(eixoCfg(ky, eixo.ey, 44)),
+      xAxis: [
+        N.eixoY(eixoDim(kx, eixo.ex, qx, { gridIndex: 0, name: nomeX, nameLocation: "middle", nameGap: 28, splitLine: { show: false } })),
+        N.eixoY(eixoDim(kx, eixo.ex, qx, Object.assign({ gridIndex: 1 }, mudo))),
+        N.eixoY(Object.assign({ gridIndex: 2, type: "value", max: hy.maximo || 1 }, oculto, mudo))
+      ],
+      yAxis: [
+        N.eixoY(eixoDim(ky, eixo.ey, qy, { gridIndex: 0, name: nomeY, nameLocation: "middle", nameGap: 50 })),
+        N.eixoY(Object.assign({ gridIndex: 1, type: "value", max: hx.maximo || 1 }, oculto, mudo)),
+        N.eixoY(eixoDim(ky, eixo.ey, qy, Object.assign({ gridIndex: 2 }, mudo)))
+      ],
       series: [
-        { name: "sem motivo", type: "scatter", data: fundo, symbolSize: 5, silent: true,
-          itemStyle: { color: N.sombra(C.tinta4, 0.35) }, large: true },
-        { name: "em amarelo", type: "scatter", data: am, symbolSize: 8,
+        { name: "sem motivo", type: "scatter", data: pontos.fundo, symbolSize: 5, silent: true,
+          itemStyle: { color: corF }, large: true },
+        { name: "em amarelo", type: "scatter", data: pontos.am, symbolSize: 8,
           itemStyle: { color: N.sombra(C.ambar, 0.7), borderColor: C.ambar, borderWidth: 1 } },
-        { name: "em vermelho", type: "scatter", data: cr, symbolSize: 9,
-          itemStyle: { color: N.sombra(C.coral, 0.7), borderColor: C.coral, borderWidth: 1 } }
+        { name: "em vermelho", type: "scatter", data: pontos.cr, symbolSize: 9,
+          itemStyle: { color: N.sombra(C.coral, 0.7), borderColor: C.coral, borderWidth: 1 } },
+        /* histograma de cima (indices 3-5) e da direita (6-8) */
+        barras(true, corF, "hx-fundo", hx.rect.fundo, 1, 1),
+        barras(true, corA, "hx-am", hx.rect.am, 1, 1),
+        barras(true, corC, "hx-cr", hx.rect.cr, 1, 1),
+        barras(false, corF, "hy-fundo", hy.rect.fundo, 2, 2),
+        barras(false, corA, "hy-am", hy.rect.am, 2, 2),
+        barras(false, corC, "hy-cr", hy.rect.cr, 2, 2)
       ]
-    }).on("click", function (p) { if (p.data && p.data.sku && POR_SKU[p.data.sku]) abrirAjuste(p.data.sku); });
+    }).on("click", function (p) { if (p.seriesType === "scatter" && p.data && p.data.sku && POR_SKU[p.data.sku]) abrirAjuste(p.data.sku); });
   }
 
   /* ------------------------------------------------------------ tabela */
