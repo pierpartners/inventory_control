@@ -32,6 +32,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
 from backend.config import Parametros  # noqa: E402
+from backend import diagnostico  # noqa: E402
 from backend.modelo import ajustar_distribuicao, caminhar, modelar  # noqa: E402
 from backend.warehouse import abrir, ref  # noqa: E402
 
@@ -1329,12 +1330,120 @@ def bloco8(r: Relatorio, wh, p, ctx) -> None:
                  f"direto de que sao dinamicas distintas")
 
 
+# ======================================================================
+# BLOCO 9 - diagnostico do estoque atual
+# ======================================================================
+def _fifo_python(entradas: pd.DataFrame, saldo: float, data_pos) -> tuple[float | None, bool]:
+    """A mesma regra do mart, em Python puro: da entrada mais recente para
+    tras ate cobrir o saldo; a fracao descoberta herda a idade da mais antiga."""
+    if saldo <= 0 or entradas.empty:
+        return None, saldo <= 0
+    e = entradas.sort_values(["data", "pecas"], ascending=[False, True])
+    resta, soma, coberto = float(saldo), 0.0, 0.0
+    for d, q in zip(e.data, e.pecas):
+        if resta <= 0:
+            break
+        usa = min(float(q), resta)
+        soma += usa * (data_pos - d).days
+        coberto += usa
+        resta -= usa
+    if resta > 1e-9:
+        soma += resta * (data_pos - e.data.min()).days
+        return soma / saldo, False
+    return soma / coberto, True
+
+
+def bloco9(r: Relatorio, wh, p, ctx) -> None:
+    B = "9. diagnostico do estoque"
+    if not wh.existe("mart_estoque_posicao"):
+        r.alerta(B, "mart_estoque_posicao ausente", "rode o dbt com o modelo novo")
+        return
+    pos = wh.query(f"select * from {ref('mart_estoque_posicao')}")
+    plano = ctx["plano"]
+
+    # 9.1 um registro por SKU do catalogo, e o saldo e o do plano
+    r.registrar("OK" if pos.sku.is_unique and len(pos) == len(plano) else "FALHA", B,
+                "um registro por SKU no mart",
+                f"{len(pos)} linhas, {pos.sku.nunique()} SKUs, plano com {len(plano)}")
+    j = pos.merge(plano[["sku", "estoque_fisico"]], on="sku")
+    r.compara(B, "saldo_cd = estoque_fisico do plano", j.saldo_cd, j.estoque_fisico, tol=1e-9)
+
+    # 9.2 faixas recompostas em numpy
+    df = diagnostico.carregar(wh, 180)
+    fis = df.estoque_fisico.fillna(0).to_numpy(float)
+    posi = df.posicao_estoque.fillna(0).to_numpy(float)
+    dem = df.demanda_media_dia.fillna(0).to_numpy(float)
+    rop = df.ponto_de_pedido.fillna(0).to_numpy(float)
+    mx = df.estoque_maximo.fillna(0).to_numpy(float)
+    dias = (pd.to_datetime(df.data_posicao) - pd.to_datetime(df.ultima_venda)).dt.days.to_numpy(float)
+    dias = np.where(np.isnan(dias), np.inf, dias)
+    esperado = np.full(len(df), diagnostico.FAIXAS[4], dtype=object)
+    esperado[(fis <= 0) & (dem > 0)] = diagnostico.FAIXAS[0]
+    m_risco = ~((fis <= 0) & (dem > 0)) & (posi <= rop) & (rop > 0)
+    esperado[m_risco] = diagnostico.FAIXAS[1]
+    m_sg = (esperado == diagnostico.FAIXAS[4]) & (fis > 0) & (dias > 180)
+    esperado[m_sg] = diagnostico.FAIXAS[2]
+    m_ex = (esperado == diagnostico.FAIXAS[4]) & (fis > mx)
+    esperado[m_ex] = diagnostico.FAIXAS[3]
+    dif = int((esperado != df.faixa.to_numpy()).sum())
+    r.registrar("OK" if dif == 0 else "FALHA", B, "faixas recompostas em numpy",
+                f"{dif} divergencias em {len(df)} itens")
+    custo = df.custo_unitario.fillna(0).to_numpy(float)
+    r.compara(B, "capital_modelo = fisico x custo", fis * custo, df.capital_modelo, tol=TOL)
+    r.compara(B, "excesso_valor = (fisico - maximo) x custo, so na faixa Excesso",
+              np.where(m_ex, (fis - mx) * custo, 0.0), df.excesso_valor, tol=TOL)
+
+    # 9.3 idade FIFO numa amostra de 300 itens com saldo
+    ent = wh.query(f"select sku, data, pecas from {ref('stg_entradas')}")
+    ent["data"] = pd.to_datetime(ent.data)
+    com_saldo = pos[pos.saldo_cd > 0]
+    amostra = com_saldo.sample(min(300, len(com_saldo)), random_state=7)
+    data_pos = pd.Timestamp(pos.data_posicao.max())
+    calc, grav, cob_ok = [], [], 0
+    for row in amostra.itertuples(index=False):
+        e = ent[(ent.sku == row.sku) & (ent.data <= data_pos)]
+        idade, cobre = _fifo_python(e, float(row.saldo_cd), data_pos)
+        gravado_nulo = row.idade_fifo_dias is None or pd.isna(row.idade_fifo_dias)
+        if idade is None or gravado_nulo:
+            cob_ok += int((idade is None) == gravado_nulo)
+            continue
+        calc.append(idade); grav.append(float(row.idade_fifo_dias))
+        cob_ok += int(bool(cobre) == bool(row.entradas_cobrem_saldo))
+    if calc:
+        pior = float(np.max(np.abs(np.array(calc) - np.array(grav))))
+        r.registrar("OK" if pior <= 0.5 else "FALHA", B, "idade FIFO recomposta em Python",
+                    f"pior diferenca {pior:.3f} dias em {len(calc)} itens")
+    r.registrar("OK" if cob_ok == len(amostra) else "FALHA", B, "flag entradas_cobrem_saldo",
+                f"{cob_ok} de {len(amostra)} coincidem")
+    r.registrar("OK" if (pos.idade_fifo_dias.dropna() >= 0).all() else "FALHA", B,
+                "idade FIFO nunca negativa", f"min {pos.idade_fifo_dias.min()}")
+
+    # 9.4 somas por dimensao fecham com o total
+    g = diagnostico.resumo_geral(df)
+    for por in diagnostico.DIMENSOES:
+        a = diagnostico.agregar(df, por)
+        soma = sum(x["capital_modelo"] for x in a)
+        n = sum(x["itens"] for x in a)
+        ok = abs(soma - g["capital_modelo"]) < 1e-6 and n == len(df)
+        r.registrar("OK" if ok else "FALHA", B, f"agregado por {por} fecha com o total",
+                    f"R$ {soma:,.2f} vs R$ {g['capital_modelo']:,.2f} · {n} itens")
+    soma_f = sum(f["capital_modelo"] for f in g["faixas"])
+    r.registrar("OK" if abs(soma_f - g["capital_modelo"]) < 1e-6 else "FALHA", B,
+                "faixas fecham com o total", f"R$ {soma_f:,.2f}")
+
+    # 9.5 diagnostico: quanto ha em cada faixa (informativo)
+    for f in g["faixas"]:
+        r.ok(B, f"[info] {f['faixa']}", f"{f['itens']} itens · R$ {f['capital_modelo']:,.0f}")
+    r.ok(B, "[info] real - otimo", f"R$ {g['diferenca_real_otimo']:,.0f} · cobertura real "
+         f"{g['cobertura_real_dias']:.0f}d vs otima {g['cobertura_otima_dias']:.0f}d")
+
+
 # ----------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--amostra", type=int, default=1500,
                     help="pecas conferidas peca a peca no bloco 6")
-    ap.add_argument("--so", type=int, default=0, help="rodar so um bloco (1..8)")
+    ap.add_argument("--so", type=int, default=0, help="rodar so um bloco (1..9)")
     args = ap.parse_args()
 
     wh = abrir()
@@ -1373,7 +1482,7 @@ def main() -> None:
           f"lote minimo {'ligado' if p.respeitar_lote_minimo else 'desligado'}")
 
     r = Relatorio()
-    blocos = [bloco1, bloco2, bloco3, bloco4, bloco5, None, bloco7, bloco8]
+    blocos = [bloco1, bloco2, bloco3, bloco4, bloco5, None, bloco7, bloco8, bloco9]
     for i, fn in enumerate(blocos, 1):
         if args.so and args.so != i:
             continue
