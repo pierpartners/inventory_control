@@ -138,8 +138,22 @@ cad as (
            cast(DESCRCOMPRODUTO as varchar) as item,
            cast(DESCRSECAO as varchar)      as familia,
            cast(UNMEDIDA as varchar)        as unidade,
-           cast(FABRICANTE as varchar)      as origem
+           cast(FABRICANTE as varchar)      as origem,
+           try_cast(IDCLIFOR_FORNECEDOR as bigint) as id_fornecedor,
+           cast(COMPRADOROFICIAL as varchar) as comprador
     from {{ source('raw', 'raw_produtos') }}
+),
+
+fornecedor_nome as (
+    -- o cadastro so tem o ID do fornecedor; o nome vem do pedido de compra
+    -- mais recente daquele id (332 ids, 343 grafias - fica a ultima)
+    select idclifor, fornecedor
+    from (
+        select cast(idclifor as bigint) as idclifor, cast(fornecedor as varchar) as fornecedor,
+               row_number() over (partition by idclifor order by dtmovimento desc) as rn
+        from {{ source('raw', 'raw_compras') }}
+        where idclifor is not null and fornecedor is not null
+    ) where rn = 1
 ),
 
 mediana_prazo as (
@@ -154,6 +168,13 @@ select
     coalesce(cad.familia, 'Sem classificacao')   as familia,
     coalesce(cad.unidade, 'UN')                  as unidade,
     coalesce(cad.origem, 'Nao informado')        as origem,
+    -- dimensoes do time de compras (diagnostico do estoque): quem vende e
+    -- quem compra. 1.773 dos 19.140 itens nao tem fornecedor no cadastro.
+    coalesce(fn.fornecedor,
+             case when cad.id_fornecedor is not null
+                  then 'Fornecedor ' || cast(cad.id_fornecedor as varchar) end,
+             'Nao informado')                        as fornecedor,
+    coalesce(cad.comprador, 'Nao informado')         as comprador,
     -- item sem custo no estoque fica em zero de proposito: nunca teve peca no
     -- CD, o modelo nao dimensiona a prateleira dele (a coluna custo_origem
     -- diz quantos sao, e `compra` guarda o preco pago para quem quiser usar)
@@ -194,6 +215,7 @@ select
 from universo u
 cross join mediana_prazo mp
 left join cad   on cad.sku   = u.sku
+left join fornecedor_nome fn on fn.idclifor = cad.id_fornecedor
 left join custo on custo.sku = u.sku
 left join compra on compra.sku = u.sku
 left join prazo on prazo.sku = u.sku
@@ -240,6 +262,8 @@ select
     coalesce(a.familia, 'Sem classificacao')         as familia,
     coalesce(a.unidade, 'UN')                        as unidade,
     coalesce(a.origem, 'Nao informado')              as origem,
+    cast(null as varchar)                            as fornecedor,
+    cast(null as varchar)                            as comprador,
     coalesce(case when a.custo_ultimo < a.custo_mediano * 0.25
                     or a.custo_ultimo > a.custo_mediano * 4
                   then a.custo_mediano else a.custo_ultimo end, 0.0) as custo_unitario,
@@ -265,6 +289,8 @@ select
     cast(familia as varchar)            as familia,
     cast(unidade as varchar)            as unidade,
     cast(origem as varchar)             as origem,
+    cast(null as varchar)               as fornecedor,
+    cast(null as varchar)               as comprador,
     cast(custo_unitario as double)      as custo_unitario,
     cast(custo_unitario as double)      as custo_ultimo_lancado,
     cast(custo_unitario as double)      as custo_mediano,
