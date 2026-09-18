@@ -62,9 +62,10 @@ consumida de cada uma (a última, parcialmente), medida em dias até
 idade da entrada mais antiga disponível e `entradas_cobrem_saldo = false`. Sem
 nenhuma entrada, idade nula. Implementado em SQL com soma acumulada em janela.
 
-O `custo_medio_erp` exige que `stg_estoque_diario` (base dw) carregue
-`valcustomedio`; hoje descarta. Acrescentar a coluna e propagá-la até
-`mart_estoque_diario` como `custo_medio_erp` (nulo nas outras bases).
+O `custo_medio_erp` vem de uma view nova `stg_custo_medio_erp` (sku, data,
+custo; só dias com custo > 0 e saldo > 0), vazia fora da base real. As
+entradas para o FIFO vêm de `stg_entradas` (sku, data, pecas), também por base.
+Assim o mart não lê `source()` e a grade diária não muda.
 
 ## Classificação (`backend/diagnostico.py`)
 
