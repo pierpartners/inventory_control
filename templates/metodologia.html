@@ -342,7 +342,10 @@
         muito mais tempo</b>. Enquanto uma peça dessas dá uma volta, o mesmo dinheiro poderia
         ter dado várias em um produto barato que sai rápido.</p>
         <p>Para colocar as duas na mesma balança, o valor da peça é dividido por
-        <b>quanto ela custa</b> e por <b>quantos dias ela prende o dinheiro</b>:</p>
+        <b>quanto ela custa</b> e por <b>quantos dias ela prende o dinheiro</b>. Esses dias
+        não acabam na venda: acabam quando a venda vira caixa (cartão parcelado e marketplace
+        recebem depois), e começam quando o fornecedor é pago. Por isso o denominador é
+        <b>D</b> = horizonte + prazo de recebimento − prazo ao fornecedor, não só o horizonte:</p>
       </div>
 
       <div class="eq" id="eq-nota"></div>
@@ -492,7 +495,11 @@
           </tr></thead>
           <tbody>
             <tr><td class="nome forte">Período de revisão</td><td class="n">{{ p.periodo_revisao_dias }} dias</td>
-              <td><a href="#e2">2 · horizonte</a></td><td>H = revisão + prazo do fornecedor. Entra em μ, σ, em L (dias carregando) e na nota (dias presos).</td></tr>
+              <td><a href="#e2">2 · horizonte</a></td><td>H = revisão + prazo do fornecedor. Entra em μ, σ, em L (dias carregando) e em D, os dias presos da nota.</td></tr>
+            <tr><td class="nome forte">Prazo de recebimento (e-commerce / lojas)</td><td class="n">{{ p.prazo_recebimento_ecommerce_dias }} / {{ p.prazo_recebimento_lojas_dias }} dias</td>
+              <td><a href="#e5">5 · nota</a></td><td>Quantos dias depois da venda o dinheiro entra. O prazo do item é a média dos dois canais ponderada pela participação do e-commerce. Soma a D = H + recebimento − pagamento; não muda μ, σ, M nem L.</td></tr>
+            <tr><td class="nome forte">Prazo de pagamento ao fornecedor</td><td class="n">{{ p.prazo_pagamento_fornecedor_dias }} dias</td>
+              <td><a href="#e5">5 · nota</a></td><td>Dinheiro que ainda não saiu não está preso: subtrai de D. Piso de 1 dia.</td></tr>
             <tr><td class="nome forte">Custo de manter estoque</td><td class="n">{{ '%.0f'|format(p.taxa_manutencao_ano*100) }}% a.a.</td>
               <td><a href="#e4">4 · L</a> e <a href="#e7">7</a></td><td>Na fila: custo × (taxa + λ) × H ÷ 365 = custo de carregar uma peça pelo horizonte. Na política: h = custo × (taxa + λ) por peça-ano, no lote econômico e no nível de serviço; custo × taxa × estoque médio na conta anual.</td></tr>
             <tr><td class="nome forte">Perda quando falta no e-commerce</td><td class="n">{{ '%.0f'|format(p.fator_perda_ruptura_ecommerce*100) }}%</td>
@@ -944,7 +951,7 @@
       id("eq-nota").innerHTML =
         cx("vale", "R$ " + N.moeda(primeira.valor, 2), "V") + op("÷") +
         cx("custa a peça", "R$ " + N.moeda(ec.custo_unitario, 2), "c") + op("÷") +
-        cx("dias presos", N.num(m.periodo_protecao_dias), "H") + op("=") +
+        cx("dias presos", N.num(m.dias_capital || m.periodo_protecao_dias, 1), "D") + op("=") +
         cx("nota", N.num(primeira.nota * 1000, 2), "por R$ 1.000/dia", "res");
     }
 
@@ -988,6 +995,9 @@
       ["giro", "", "quantas vezes por ano o estoque médio do produto se renova " +
        "(demanda do ano ÷ estoque médio)", N.num(m.giro_ano, 1) + "× por ano"],
       ["capital", "", "dinheiro parado neste produto: estoque médio × custo da peça",
+      ["D", "dê", "dias com o dinheiro preso: H mais o prazo até a venda virar caixa, menos " +
+       "o prazo que o fornecedor dá para pagar. Só a nota divide por D",
+       N.num(m.dias_capital || m.periodo_protecao_dias, 1) + " dias"],
        "R$ " + N.moeda(m.capital_imobilizado)],
       ["retorno s/ capital", "", "lucro líquido de um ano dividido pelo capital que o " +
        "produto prende — é a taxa que ele paga ao dono do dinheiro",

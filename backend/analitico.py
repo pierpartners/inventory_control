@@ -169,6 +169,9 @@ ETAPAS_FILA = [
         ("lead_time_dias", "Prazo do fornecedor", "int"),
         ("periodo_revisao_dias", "Intervalo entre revisões", "int"),
         ("horizonte", "Horizonte  ·  H = prazo + revisão", "int"),
+        ("prazo_recebimento_dias", "Prazo de recebimento  ·  s×receb_e + (1−s)×receb_l", "num1"),
+        ("prazo_pagamento_dias", "Prazo de pagamento ao fornecedor", "num1"),
+        ("dias_capital", "Dias com o dinheiro preso  ·  D = max(1, H + recebimento − pagamento)", "num1"),
     ]),
     ("3. Distribuição da demanda no horizonte", [
         ("mu_periodo", "Demanda esperada  ·  μ = d × H", "num3"),
@@ -208,7 +211,7 @@ ETAPAS_FILA = [
         ("valor_esperado", "Valor  ·  V = ganho − custo", "brl2"),
         ("custo", "Investimento desta linha  ·  c × peças", "brl2"),
         ("valor_por_real", "Retorno por real  ·  V / (c × peças)", "num4"),
-        ("nota", "NOTA  ·  V / (c × peças) / H", "num6"),
+        ("nota", "NOTA  ·  V / (c × peças) / D", "num6"),
     ]),
     ("7. Decisão do caixa", [
         ("teto_ciclo", "Caixa do ciclo", "brl"),
@@ -592,6 +595,18 @@ def pontos_distribuicao(mu: float, sd: float, max_pontos: int = 150) -> dict:
 # ----------------------------------------------------------------------
 # 3. teste da unidade marginal
 # ----------------------------------------------------------------------
+def _dias_capital(m: pd.Series) -> float:
+    """O denominador da nota: dias em que o dinheiro da peca fica preso.
+
+    Resultado gravado antes do ciclo financeiro existir nao tem a coluna; ai
+    o capital conta so ate a venda, como antes.
+    """
+    v = m.get("dias_capital") if hasattr(m, "get") else None
+    if v is None or v != v:
+        return float(m.periodo_protecao_dias)
+    return float(v)
+
+
 def proxima_peca(m: pd.Series, p: Parametros, pos: float) -> dict | None:
     """A conta de uma unica peca: a proxima que se pensa em comprar."""
     if float(m.mu_periodo) <= 0 or float(m.custo_unitario) <= 0:
@@ -599,7 +614,7 @@ def proxima_peca(m: pd.Series, p: Parametros, pos: float) -> dict | None:
     _, dist, _, _ = ajustar_distribuicao(float(m.mu_periodo), float(m.sd_periodo))
     cu = float(m.custo_falta_unit)
     perda = float(m.custo_manter_no_periodo) + float(m.custo_unitario) * p.perda_encalhe
-    horizonte = float(m.periodo_protecao_dias)
+    horizonte = _dias_capital(m)
     k = int(max(0, round(pos))) + 1
     pv = float(1 - dist.cdf(k - 1))
     valor = pv * cu - (1 - pv) * perda
@@ -626,7 +641,7 @@ def escada_de_pecas(m: pd.Series, p: Parametros, pos: float,
     _, dist, _, _ = ajustar_distribuicao(float(m.mu_periodo), float(m.sd_periodo))
     cu = float(m.custo_falta_unit)
     perda = float(m.custo_manter_no_periodo) + float(m.custo_unitario) * p.perda_encalhe
-    horizonte = float(m.periodo_protecao_dias)
+    horizonte = _dias_capital(m)
     base = int(max(0, round(pos)))
 
     # onde o valor da peca cruza zero: valor >= 0  <=>  P >= perda/(Cu+perda)
@@ -694,7 +709,7 @@ def escada_por_loja(wh: Warehouse, m: pd.Series, p: Parametros, escada: list[dic
     r = mu * mu / (var - mu) if var > mu * 1.05 else None
     cu = float(m.custo_falta_unit)
     perda = float(m.custo_manter_no_periodo) + float(m.custo_unitario) * p.perda_encalhe
-    horizonte = float(m.periodo_protecao_dias)
+    horizonte = _dias_capital(m)
 
     lojas = []
     for row in v.sort_values("pecas", ascending=False).itertuples(index=False):
@@ -759,6 +774,7 @@ def comparar_produtos(wh: Warehouse, p: Parametros, n: int = 5) -> list[dict]:
             "custo_unitario": float(m.custo_unitario),
             "margem": float(m.custo_falta_unit),
             "horizonte": float(m.periodo_protecao_dias),
+            "dias_capital": _dias_capital(m),
             "p_vender": primeiro["p_vender"],
             "valor": primeiro["valor"],
             "retorno_por_real": primeiro["valor"] / float(m.custo_unitario),

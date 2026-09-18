@@ -447,6 +447,33 @@ def plano_compra(modelo: pd.DataFrame, posicoes: pd.DataFrame, p: Parametros) ->
 MAX_UNIDADES_POR_ITEM = 6000
 
 
+def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
+    """Quantos dias o dinheiro de uma peca fica preso: `dias_capital`.
+
+    O periodo de protecao (prazo do fornecedor + revisao) e o tempo ate a
+    peca VENDER. O capital so volta quando a venda vira CAIXA - e cartao
+    parcelado ou marketplace recebem bem depois da venda - e so sai de fato
+    quando o fornecedor e pago. Entao:
+
+        dias_capital = protecao + prazo de recebimento - prazo ao fornecedor
+
+    O prazo de recebimento do item e a media dos dois canais ponderada pela
+    participacao do e-commerce na demanda dele. Piso de 1 dia: um fornecedor
+    que financia mais do que o ciclo inteiro nao pode dar denominador nulo
+    nem negativo. So a NOTA (retorno por real por dia) usa isto; mu, sigma e
+    a chance de vender continuam no periodo de protecao, porque a peca tem
+    de sair antes da reposicao, independente de quando o dinheiro volta.
+    """
+    share = (b["share_ecommerce"].fillna(0.0) if "share_ecommerce" in b.columns
+             else pd.Series(0.0, index=b.index))
+    b["prazo_recebimento_dias"] = (share * float(p.prazo_recebimento_ecommerce_dias)
+                                   + (1.0 - share) * float(p.prazo_recebimento_lojas_dias))
+    b["prazo_pagamento_dias"] = float(p.prazo_pagamento_fornecedor_dias)
+    b["dias_capital"] = np.maximum(
+        1.0, b.periodo_protecao_dias + b.prazo_recebimento_dias - b.prazo_pagamento_dias)
+    return b
+
+
 def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
     """Uma linha por bloco de unidades candidatas, item a item.
 
@@ -454,14 +481,17 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
 
         P            = P(demanda no horizonte >= k)      chance de ela vender
         valor        = P x Cu - (1 - P) x perda
-        nota         = valor / custo unitario / horizonte
+        nota         = valor / custo unitario / dias_capital
 
     `Cu` e a margem que a peca captura se vender (ja descontada pelo fator de
     perda na ruptura) e `perda` e o que ela custa se ficar parada: o custo de
     carregar durante o horizonte mais a fracao do custo que se perde no
-    encalhe. A nota divide por custo e por horizonte para que itens de precos
-    e prazos diferentes possam ser comparados na mesma regua - um item caro de
-    lead time longo prende muito mais capital por real de margem.
+    encalhe. A nota divide por custo e pelos dias em que o dinheiro fica
+    preso (`dias_capital`, ver `ciclo_financeiro`: horizonte + prazo de
+    recebimento - prazo ao fornecedor) para que itens de precos e prazos
+    diferentes possam ser comparados na mesma regua - um item caro de lead
+    time longo, ou vendido a prazo, prende muito mais capital por real de
+    margem.
 
     A tabela devolvida e a trilha de auditoria do plano: cada linha carrega
     todos os valores intermediarios que entraram na conta, do dado de demanda
@@ -511,6 +541,7 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         qtd = (fins - inicios).astype(int)
         custo = qtd * float(r.custo_unitario)
         horizonte = float(r.periodo_protecao_dias)
+        dias_capital = float(getattr(r, "dias_capital", horizonte))
         var_periodo = float(r.sd_periodo) ** 2
         share_e = float(np.nan_to_num(getattr(r, "share_ecommerce", 0.0)))
 
@@ -538,6 +569,11 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             "lead_time_dias": float(r.lead_time_dias),
             "periodo_revisao_dias": float(p.periodo_revisao_dias),
             "horizonte": horizonte,
+            # o ciclo financeiro: quando a venda vira caixa e quando o
+            # fornecedor e pago. So a nota usa; mu e sigma ficam no horizonte.
+            "prazo_recebimento_dias": float(getattr(r, "prazo_recebimento_dias", 0.0)),
+            "prazo_pagamento_dias": float(getattr(r, "prazo_pagamento_dias", 0.0)),
+            "dias_capital": dias_capital,
             # ---- 3. distribuicao no horizonte
             "distribuicao": nome_dist,
             "mu_periodo": float(r.mu_periodo),
@@ -591,7 +627,7 @@ def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             # o custo repartido pelos dois caixas, na participacao do canal
             "custo_ecommerce": custo * share_e,
             "custo_lojas": custo * (1.0 - share_e),
-            "nota": valor / (custo * horizonte),
+            "nota": valor / (custo * dias_capital),
         }))
 
     if not partes:
@@ -1003,9 +1039,10 @@ def plano_marginal(df: pd.DataFrame, p: Parametros) -> tuple[pd.DataFrame, pd.Da
     plano["posicao_final"] = plano.posicao_estoque + plano.quantidade_a_comprar
     plano["retorno_por_real"] = np.where(
         plano.valor_da_compra > 0, plano.margem_esperada / plano.valor_da_compra, 0.0)
+    dias_capital = plano["dias_capital"] if "dias_capital" in plano.columns else plano.periodo_protecao_dias
     plano["retorno_dia"] = np.where(
         plano.valor_da_compra > 0,
-        plano.retorno_por_real / plano.periodo_protecao_dias, 0.0)
+        plano.retorno_por_real / dias_capital, 0.0)
 
     plano["decisao"] = np.where(
         plano.quantidade_a_comprar > 0, "COMPRAR AGORA",
@@ -1332,6 +1369,7 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
     b = ajustes.aplicar(b)
 
     b["periodo_protecao_dias"] = b.lead_time_dias + p.periodo_revisao_dias
+    b = ciclo_financeiro(b, p)
     b["mu_periodo"] = b.demanda_media_dia * b.periodo_protecao_dias
     # raiz(H) supoe dias independentes. Quando a demanda tem reversao a media,
     # essa conta superestima a variacao no horizonte e infla o estoque de

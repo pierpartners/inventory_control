@@ -141,7 +141,10 @@
   "decisao": "O que fazer com este item neste ciclo: comprar, esperar, ou ficou fora do caixa.",
 
   /* -------------------------------------------------- nota e formula */
-  "nota": "Retorno por real investido por dia: V ÷ (c × H). É a régua que ordena a fila de compra — ela põe na mesma escala um item barato de giro rápido e um item caro de prazo longo.",
+  "nota": "Retorno por real investido por dia: V ÷ (c × D), com D os dias em que o dinheiro fica preso. É a régua que ordena a fila de compra — ela põe na mesma escala um item barato de giro rápido e um item caro de prazo longo ou vendido a prazo.",
+  "d": "D: dias com o dinheiro preso — o horizonte H mais o prazo até a venda virar caixa (cartão parcelado, marketplace), menos o prazo que o fornecedor dá para pagar. Só a nota divide por D; a chance de vender continua medida em H.",
+  "dias de capital": "Quantos dias o dinheiro de uma peça fica fora do caixa: da data em que o fornecedor é pago até a venda ser recebida. É o denominador da nota.",
+  "dias com o dinheiro preso": "O mesmo que dias de capital: horizonte + prazo de recebimento − prazo de pagamento ao fornecedor.",
   "vale": "O valor esperado da peça: o que ela devolve, em média, descontado o risco de não vender.",
   "f k 1": "F(k−1): probabilidade acumulada de a demanda no horizonte ficar abaixo de k−1 peças — ou seja, a chance de a k-ésima peça encalhar.",
   "p": "P: probabilidade de vender esta peça dentro do horizonte. É 1 − F(k−1).",
@@ -151,7 +154,7 @@
   "1 p l": "(1−P) × L: a perda esperada da peça.",
   "v": "V = P×M − (1−P)×L: o valor esperado da peça em reais. Positivo significa que carregar esta unidade se paga.",
   "c": "c: o custo unitário da peça — o denominador da nota.",
-  "h": "H: o horizonte em dias — prazo do fornecedor mais o intervalo de revisão. Dividir por ele põe itens de prazos diferentes na mesma régua de retorno por dia.",
+  "h": "H: o horizonte em dias — prazo do fornecedor mais o intervalo de revisão. É a janela em que a peça tem de vender; os dias que o dinheiro fica preso (D) partem dele.",
   "caixa acum": "Soma acumulada do custo das peças, na ordem da fila. Onde essa coluna cruza o caixa do ciclo é onde a compra é cortada.",
   "retorno r": "Quanto de margem esperada cada real investido neste item devolve.",
   "por real aplicado": "Margem esperada dividida pelo investimento — quanto volta por real aplicado.",

@@ -1007,10 +1007,14 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
     if len(f) > amostra:
         f = f.sample(amostra, random_state=7)
 
-    calc = {k: [] for k in ("H", "mu", "sd", "dist", "cdf", "P", "M", "obs", "L",
+    calc = {k: [] for k in ("H", "D", "mu", "sd", "dist", "cdf", "P", "M", "obs", "L",
                             "lim", "ganho", "custo_esp", "V", "custo", "vpr", "nota")}
     for x in f.itertuples(index=False):
         H = x.lead_time_dias + x.periodo_revisao_dias
+        # dias com o dinheiro preso: ate a venda virar caixa, menos o que o
+        # fornecedor financia. So a nota divide por isto; mu e sigma ficam em H
+        D = max(1.0, H + float(getattr(x, "prazo_recebimento_dias", 0.0) or 0.0)
+                - float(getattr(x, "prazo_pagamento_dias", 0.0) or 0.0))
         mu = x.demanda_dia_corrigida * H
         # dois termos: a demanda que varia ao longo de H, e o proprio H que
         # varia porque o fornecedor atrasa
@@ -1034,11 +1038,11 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
         custo_esp = (1 - P) * L * q
         V = ganho - custo_esp
         custo = x.custo_unitario * q
-        for k, v in [("H", H), ("mu", mu), ("sd", sd), ("dist", nome), ("cdf", cdf),
+        for k, v in [("H", H), ("D", D), ("mu", mu), ("sd", sd), ("dist", nome), ("cdf", cdf),
                      ("P", P), ("M", M), ("obs", obs), ("L", L),
                      ("lim", L / (M + L)), ("ganho", ganho), ("custo_esp", custo_esp),
                      ("V", V), ("custo", custo), ("vpr", V / custo),
-                     ("nota", V / (custo * H))]:
+                     ("nota", V / (custo * D))]:
             calc[k].append(v)
 
     r.afirma(B, "distribuicao escolhida por peca",
@@ -1046,6 +1050,7 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
              f"{len(f)} pecas conferidas")
     for nome, chave, col in [
         ("horizonte H = prazo + revisao", "H", "horizonte"),
+        ("dias de capital D = max(1, H + recebimento - pagamento)", "D", "dias_capital"),
         ("mu = demanda diaria x H", "mu", "mu_periodo"),
         ("sigma = raiz(H x Var(d) + d^2 x Var(L))", "sd", "sd_periodo"),
         ("F(k-1) da distribuicao", "cdf", "cdf_ate_k_menos_1"),
@@ -1059,8 +1064,10 @@ def bloco6(r: Relatorio, wh, p, ctx, amostra: int) -> None:
         ("V = ganho - custo esperado", "V", "valor_esperado"),
         ("investimento = c x pecas", "custo", "custo"),
         ("retorno por real = V / investimento", "vpr", "valor_por_real"),
-        ("nota = V / investimento / H", "nota", "nota"),
+        ("nota = V / investimento / D", "nota", "nota"),
     ]:
+        if col not in f.columns:   # resultado gravado antes do ciclo financeiro
+            continue
         r.compara(B, nome, calc[chave], f[col].to_numpy())
 
 

@@ -30,7 +30,7 @@ from backend.warehouse import abrir, ref  # noqa: E402
 
 TOLERANCIA = 1e-9
 
-CAMPOS = ["horizonte", "mu_periodo", "sd_periodo", "distribuicao",
+CAMPOS = ["horizonte", "dias_capital", "mu_periodo", "sd_periodo", "distribuicao",
           "cdf_ate_k_menos_1", "p_vender", "margem_unit", "custo_obsolescencia",
           "perda_unit", "ganho_esperado", "custo_esperado", "custo",
           "valor_esperado", "valor_por_real", "nota"]
@@ -39,6 +39,10 @@ CAMPOS = ["horizonte", "mu_periodo", "sd_periodo", "distribuicao",
 def refazer(r) -> dict:
     """A conta feita do zero, so com os insumos gravados na propria linha."""
     H = r.lead_time_dias + r.periodo_revisao_dias
+    # Dias com o dinheiro preso: H mais o prazo ate a venda virar caixa, menos
+    # o prazo que o fornecedor da para pagar. So a nota divide por D.
+    D = max(1.0, H + float(getattr(r, "prazo_recebimento_dias", 0.0) or 0.0)
+            - float(getattr(r, "prazo_pagamento_dias", 0.0) or 0.0))
     mu = r.demanda_dia_corrigida * H
     # Dois termos na variancia do horizonte: a demanda que varia ao longo de H,
     # e o proprio H, que varia porque o fornecedor atrasa. Com desvio de prazo
@@ -67,12 +71,12 @@ def refazer(r) -> dict:
     valor = ganho - perda
     custo = r.custo_unitario * q
 
-    return dict(horizonte=H, mu_periodo=mu, sd_periodo=sd, distribuicao=nome,
+    return dict(horizonte=H, dias_capital=D, mu_periodo=mu, sd_periodo=sd, distribuicao=nome,
                 cdf_ate_k_menos_1=cdf, p_vender=P, margem_unit=M,
                 custo_obsolescencia=obsolescencia, perda_unit=L,
                 ganho_esperado=ganho, custo_esperado=perda, custo=custo,
                 valor_esperado=valor, valor_por_real=valor / custo,
-                nota=valor / (custo * H))
+                nota=valor / (custo * D))
 
 
 def main() -> None:

@@ -10,6 +10,7 @@
     if (v === null || v === undefined || v === "") return '<span class="t4">–</span>';
     switch (tipo) {
       case "int":  return N.num(v);
+      case "num1": return N.num(v, 1);
       case "num2": return N.num(v, 2);
       case "num3": return N.num(v, 3);
       case "num4": return N.num(v, 4);
@@ -30,6 +31,12 @@
        "H = prazo do fornecedor + revisão\n" +
        "H = " + N.num(r.lead_time_dias) + " + " + N.num(r.periodo_revisao_dias) +
        " = <b>" + N.num(r.horizonte) + " dias</b>"],
+      ["Dias com o dinheiro preso",
+       "D = max(1, H + prazo de recebimento − prazo ao fornecedor)\n" +
+       "D = max(1, " + N.num(r.horizonte) + " + " + N.num(r.prazo_recebimento_dias || 0, 1) +
+       " − " + N.num(r.prazo_pagamento_dias || 0, 1) +
+       ") = <b>" + N.num(r.dias_capital || r.horizonte, 1) + " dias</b>\n" +
+       "<i>a venda ainda tem de sair em H; D só diz quando o dinheiro volta</i>"],
       ["Demanda esperada no horizonte",
        "μ = demanda diária × H\n" +
        "μ = " + N.num(r.demanda_dia_corrigida, 4) + " × " + N.num(r.horizonte) +
@@ -61,9 +68,9 @@
        " = <b>R$ " + N.moeda(r.custo_esperado, 2) + "</b>\n\n" +
        "V = ganho − custo = <b>R$ " + N.moeda(r.valor_esperado, 2) + "</b>"],
       ["Nota — o que ordena a fila",
-       "nota = V / (c × peças) / H\n" +
+       "nota = V / (c × peças) / D\n" +
        "nota = " + N.moeda(r.valor_esperado, 2) + " / (" + N.moeda(r.custo_unitario, 2) +
-       " × " + q + ") / " + N.num(r.horizonte) + "\n" +
+       " × " + q + ") / " + N.num(r.dias_capital || r.horizonte, 1) + "\n" +
        "nota = <b>" + N.num(r.nota, 8) + "</b>  " +
        "<i>(× 1.000 nas tabelas = " + N.num(r.nota * 1000, 3) + ")</i>"],
       ["Decisão do caixa",

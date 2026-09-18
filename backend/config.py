@@ -44,6 +44,18 @@ class Parametros:
     fatia_ecommerce_rigida: bool = False
     limiar_giro_baixo: float = 20.0
     perda_encalhe: float = 0.04
+    # Ciclo financeiro da peca. A nota divide o valor da peca pelos DIAS QUE O
+    # DINHEIRO FICA PRESO, e esse prazo nao acaba na venda: acaba quando a
+    # venda vira caixa. Cartao parcelado e marketplace (e-commerce) recebem
+    # bem depois da venda; a loja recebe mais perto. O prazo de recebimento
+    # de cada item e a media dos dois canais ponderada pela participacao do
+    # e-commerce nele. O prazo que o fornecedor da para pagar encurta o
+    # ciclo. Zero em tudo = o comportamento antigo (dinheiro preso so ate a
+    # venda). Nada disto muda a probabilidade de vender: essa continua no
+    # periodo de protecao, porque a peca tem de sair antes da reposicao.
+    prazo_recebimento_ecommerce_dias: int = 0
+    prazo_recebimento_lojas_dias: int = 0
+    prazo_pagamento_fornecedor_dias: int = 0
     fator_desvio_horizonte: float = 1.00
     # Dias de historico DIARIO usados para estimar a taxa de demanda. Nao e o
     # tamanho do banco: e a memoria do modelo.
@@ -133,6 +145,18 @@ CAMPOS = [
      "remarcação, tonalidade fora de linha, descontinuação. Item de linha que sempre "
      "acaba vendendo fica entre 2% e 5%; coleção ou item em fim de vida, entre 30% e 50%. "
      "É o que segura a compra de não virar empilhamento.", "Economia"),
+    ("prazo_recebimento_ecommerce_dias", "Prazo de recebimento · e-commerce", "dias", "int", 0, 365,
+     "Quantos dias depois da venda o dinheiro do e-commerce entra no caixa (cartão parcelado, "
+     "repasse de marketplace). Soma aos dias em que a peça prende o dinheiro: a nota passa a "
+     "dividir por horizonte + recebimento − prazo do fornecedor. Zero = o dinheiro volta na venda.",
+     "Economia"),
+    ("prazo_recebimento_lojas_dias", "Prazo de recebimento · lojas", "dias", "int", 0, 365,
+     "O mesmo para as lojas (dinheiro, débito, crediário). O prazo de cada item é a média dos "
+     "dois canais ponderada pela participação do e-commerce na demanda dele.", "Economia"),
+    ("prazo_pagamento_fornecedor_dias", "Prazo de pagamento ao fornecedor", "dias", "int", 0, 365,
+     "Quantos dias depois de receber a mercadoria a empresa paga o fornecedor. Encurta o ciclo "
+     "financeiro da peça — dinheiro que ainda não saiu não está preso. Não muda a chance de "
+     "vender nem o custo de carregar; só os dias no denominador da nota.", "Economia"),
 
     ("nivel_servico_min", "Nível de serviço mínimo", "%", "pct", 0.5, 0.99,
      "Piso do nível de serviço no regime EOQ, mesmo para itens de margem magra.",

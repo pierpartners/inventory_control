@@ -125,6 +125,7 @@
           <th data-col="valor_esperado" class="n">V</th>
           <th data-col="custo_unitario" class="n">c</th>
           <th data-col="horizonte" class="n">H</th>
+          <th data-col="dias_capital" class="n" data-ajuda="D: dias em que o dinheiro da peça fica preso — horizonte mais o prazo de recebimento da venda, menos o prazo de pagamento ao fornecedor. É por D que a nota divide.">D</th>
           <th data-col="nota" class="n">Nota</th>
           <th data-col="caixa_acumulado" class="n">Caixa acum.</th>
           <th data-col="comprar">Decisão</th>
@@ -147,6 +148,7 @@
             <td class="n forte">{{ r.valor_esperado|n(2) }}</td>
             <td class="n fraco">{{ r.custo_unitario|n(2) }}</td>
             <td class="n fraco">{{ r.horizonte|n(0) }}</td>
+            <td class="n fraco">{{ (r.dias_capital if r.dias_capital is not none else r.horizonte)|n(0) }}</td>
             <td class="n"><b class="c-am">{{ (r.nota * 1000)|n(3) }}</b></td>
             <td class="n fraco">{{ r.caixa_acumulado|curto }}</td>
             <td>{% if r.comprar %}<span class="selo selo-mt">Comprada</span>
@@ -154,7 +156,7 @@
           </tr>
         {% endfor %}
         {% if not fila.linhas %}
-          <tr><td colspan="16"><div class="vazio">Nenhuma linha com esse filtro.</div></td></tr>
+          <tr><td colspan="17"><div class="vazio">Nenhuma linha com esse filtro.</div></td></tr>
         {% endif %}
         </tbody>
       </table>
@@ -166,7 +168,7 @@
       <div class="pequeno t3">
         Nota está multiplicada por 1.000 na tabela para caber — o valor cru está no dossiê e no CSV.
         <b>M</b> = margem se vender · <b>L</b> = perda se encalhar · <b>c</b> = custo unitário ·
-        <b>H</b> = horizonte em dias.
+        <b>H</b> = horizonte em dias · <b>D</b> = dias com o dinheiro preso (H + recebimento − prazo do fornecedor); a nota divide por D.
       </div>
       <div class="pag" id="pag"></div>
     </div>
