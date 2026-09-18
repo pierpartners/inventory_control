@@ -193,6 +193,15 @@
             <span><i style="background:#F2A93B"></i>prazo realizado · quanto levou de fato</span>
             <span><i style="background:#5D6C7C"></i>prazo combinado · o que o pedido prometia</span>
           </div>
+          <div id="b-pagto" hidden>
+            <div class="pequeno t3 mt18" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">
+              E quando o dinheiro sai · da entrada no estoque ao vencimento do título</div>
+            <div id="g-pagto" class="gfx p"></div>
+            <div class="legenda mt10">
+              <span><i style="background:#55B4F2"></i>vencimento do título ao fornecedor</span>
+              <span><i style="background:#F2A93B"></i>prazo de pagamento usado pelo modelo</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1086,6 +1095,44 @@
       "fica em <b>" + N.num(pz.desvio, 0) + " dias</b>. É por isso que o prazo entra em σ como " +
       "variável, item a item — cada produto usa a mediana e o desvio dos <em>seus</em> pedidos, " +
       "e quem tem menos de 3 herda os do catálogo.</p>";
+    if (pz.pagamentos) {
+      id("b-pagto").hidden = false;
+      var rotP = rot.slice(); rotP[0] = "≤" + N.num(pz.passo - 1);
+      N.grafico("g-pagto", {
+        grid: N.grade({ top: 24, right: 14, bottom: 8, left: 4 }),
+        tooltip: N.dica(function (ps) {
+          var i = ps[0].dataIndex;
+          return N.dicaTit((i === ult ? "Mais de " + N.num(pz.inicio[i] - 1)
+              : i === 0 ? "Até " + N.num(pz.passo - 1) + " (inclui pago antes da entrada)"
+              : "Entre " + rot[i]) + " dias após a entrada") +
+            N.dicaLin(C.ceu, "dos títulos vencem nesse prazo", N.pct(pz.pagamento[i], 1));
+        }),
+        xAxis: N.eixoX({ data: rotP, axisLabel: { color: C.tinta4, fontSize: 9.5, interval: 1 } }),
+        yAxis: N.eixoY({ show: false }),
+        series: [{
+          type: "bar", barWidth: "62%",
+          data: pz.pagamento.map(function (v) { return { value: v,
+            itemStyle: { color: N.sombra(C.ceu, .8) } }; }),
+          markLine: { silent: true, symbol: "none",
+            lineStyle: { color: C.ambar, width: 1.4 },
+            label: { color: C.ambar, fontSize: 10.5, rotate: 0, distance: 5, position: "insideEndTop" },
+            data: [
+              { xAxis: faixaDe(pz.mediana_pagamento), lineStyle: { color: C.ceu },
+                label: { color: C.ceu, formatter: "metade em " + N.num(pz.mediana_pagamento, 0) + "d" } },
+              { xAxis: faixaDe(pz.pagamento_parametro || 0),
+                label: { formatter: "modelo usa " + N.num(pz.pagamento_parametro || 0, 0) + "d",
+                  align: faixaDe(pz.pagamento_parametro || 0) === 0 ? "left" : "center" } }
+            ] }
+        }]
+      });
+      id("x2-prazo").innerHTML +=
+        "<p>Na outra ponta, o dinheiro só sai quando o título vence: em <b>" + N.num(pz.pagamentos) +
+        " notas</b>, metade vence até <b>" + N.num(pz.mediana_pagamento, 0) + " dias</b> depois da entrada " +
+        "(9 em 10 até " + N.num(pz.p90_pagamento, 0) + "). Esse prazo abate os dias com o dinheiro preso, " +
+        "e o modelo o resume num parâmetro único de <b>" + N.num(pz.pagamento_parametro || 0, 0) +
+        " dias</b>" + ((pz.pagamento_parametro || 0) === 0
+          ? " — hoje zero, ou seja, como se a Elevato pagasse na entrada." : ".") + "</p>";
+    }
     id("prazo-percentis").innerHTML = [
       [N.pct(pz.adiantou, 0), "dos pedidos chegaram antes do combinado"],
       [N.pct(pz.atrasou, 0), "chegaram depois do combinado"],

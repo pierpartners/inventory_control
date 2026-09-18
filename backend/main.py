@@ -666,7 +666,10 @@ def api_metodologia_prazo():
     """Distribuicao do prazo de recebimento das compras no catalogo inteiro:
     realizado contra combinado, pedido a pedido. Evidencia da parcela de
     desvio do prazo no estoque de seguranca."""
-    return JSONResponse(analitico.distribuicao_prazo(wh()))
+    d = analitico.distribuicao_prazo(wh())
+    if d:
+        d["pagamento_parametro"] = Parametros.carregar().prazo_pagamento_fornecedor_dias
+    return JSONResponse(d)
 
 
 @app.get("/api/comparar")

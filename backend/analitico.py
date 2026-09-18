@@ -1008,7 +1008,10 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
     """O prazo de recebimento das compras, pedido a pedido, no catalogo inteiro.
 
     Histograma semanal do prazo REALIZADO (do pedido a entrada no estoque) e do
-    COMBINADO (o que o cadastro do pedido dizia), com mediana e p90 de cada um.
+    COMBINADO (o que o cadastro do pedido dizia), com mediana e p90 de cada um;
+    e, na outra ponta do ciclo, o PAGAMENTO ao fornecedor (dias da entrada ao
+    vencimento do titulo), que e o que `prazo_pagamento_fornecedor_dias`
+    resume num numero so.
     E a evidencia por tras de `lead_time_desvio_dias`: se a cauda do realizado
     for longa, o desvio do prazo tem de entrar no estoque de seguranca. Base
     sem `raw_ciclo_pagamento` (sintetica/exports) devolve {} e as telas omitem
@@ -1032,6 +1035,21 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
                    count(*) n_combinado
             from k where combinado is not null and combinado between 0 and {PRAZO_MAX_DIAS}
             group by 1),
+        pg as (
+            select cast(prazo_titulo_dias as double) pagamento
+            from {ref('raw_ciclo_pagamento')}
+            where prazo_titulo_dias is not null
+              and cast(prazo_titulo_dias as double) between -{PRAZO_MAX_DIAS} and {PRAZO_MAX_DIAS}),
+        faixa_p as (
+            -- pago antes da entrada (antecipado) cai na primeira faixa
+            select least(greatest(floor(pagamento / {PRAZO_PASSO_DIAS}), 0), {PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS}) f,
+                   count(*) n_pagamento
+            from pg group by 1),
+        resumo_p as (
+            select count(*) pagamentos, median(pagamento) mediana_pagamento,
+                   quantile_cont(pagamento, 0.9) p90_pagamento, stddev(pagamento) desvio_pagamento,
+                   avg(case when pagamento < 0 then 1.0 else 0.0 end) pago_antes_entrada
+            from pg),
         resumo as (
             select count(*) pedidos,
                    median(realizado) mediana, quantile_cont(realizado, 0.9) p90,
@@ -1044,8 +1062,13 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
             select count(*) n from {ref('raw_ciclo_pagamento')}
             where dias_entrega_realizado is null
                or cast(dias_entrega_realizado as double) not between 0 and {PRAZO_MAX_DIAS})
-        select coalesce(a.f, c.f) f, coalesce(a.n_realizado, 0) n_realizado,
-               coalesce(c.n_combinado, 0) n_combinado,
+        select coalesce(a.f, c.f, g.f) f, coalesce(a.n_realizado, 0) n_realizado,
+               coalesce(c.n_combinado, 0) n_combinado, coalesce(g.n_pagamento, 0) n_pagamento,
+               (select pagamentos from resumo_p) pagamentos,
+               (select mediana_pagamento from resumo_p) mediana_pagamento,
+               (select p90_pagamento from resumo_p) p90_pagamento,
+               (select desvio_pagamento from resumo_p) desvio_pagamento,
+               (select pago_antes_entrada from resumo_p) pago_antes_entrada,
                (select pedidos from resumo) pedidos, (select mediana from resumo) mediana,
                (select p90 from resumo) p90, (select desvio from resumo) desvio,
                (select mediana_combinado from resumo) mediana_combinado,
@@ -1053,21 +1076,28 @@ def distribuicao_prazo(wh: Warehouse) -> dict:
                (select atrasou from resumo) atrasou, (select adiantou from resumo) adiantou,
                (select n from fora) fora
         from faixa a full outer join faixa_c c on c.f = a.f
+                     full outer join faixa_p g on g.f = coalesce(a.f, c.f)
         order by 1""")
     if r.empty or int(r.pedidos.iloc[0] or 0) == 0:
         return {}
     n_faixas = PRAZO_TETO_DIAS // PRAZO_PASSO_DIAS + 1
-    real = np.zeros(n_faixas); comb = np.zeros(n_faixas)
+    real = np.zeros(n_faixas); comb = np.zeros(n_faixas); pag = np.zeros(n_faixas)
     for t in r.itertuples(index=False):
         i = int(t.f)
-        real[i] = t.n_realizado; comb[i] = t.n_combinado
-    tot = float(real.sum()); tot_c = float(comb.sum()) or 1.0
+        real[i] = t.n_realizado; comb[i] = t.n_combinado; pag[i] = t.n_pagamento
+    tot = float(real.sum()); tot_c = float(comb.sum()) or 1.0; tot_p = float(pag.sum()) or 1.0
     cab = r.iloc[0]
     return {
         "passo": PRAZO_PASSO_DIAS,
         "inicio": [i * PRAZO_PASSO_DIAS for i in range(n_faixas)],
         "realizado": [float(v) / tot for v in real],
         "combinado": [float(v) / tot_c for v in comb],
+        # quando o dinheiro SAI: dias entre a entrada no estoque e o vencimento
+        # do titulo ao fornecedor (media das parcelas ponderada pelo valor)
+        "pagamento": [float(v) / tot_p for v in pag],
+        "pagamentos": int(cab.pagamentos or 0),
+        "mediana_pagamento": limpo(cab.mediana_pagamento), "p90_pagamento": limpo(cab.p90_pagamento),
+        "desvio_pagamento": limpo(cab.desvio_pagamento), "pago_antes_entrada": limpo(cab.pago_antes_entrada),
         "pedidos": int(cab.pedidos),
         "fora": int(cab.fora or 0),
         "mediana": limpo(cab.mediana), "p90": limpo(cab.p90), "desvio": limpo(cab.desvio),
@@ -1094,6 +1124,7 @@ def prazos_item(wh: Warehouse, sku: str) -> list[dict]:
                cast(k.dias_entrega_realizado as double) realizado,
                cast(k.dias_entrega_combinado as double) combinado,
                {'c.fornecedor' if tem_compras else 'null'} fornecedor,
+               cast(k.prazo_titulo_dias as double) pagamento,
                cast(k.dias_entrega_realizado as double) between 0 and {PRAZO_MAX_DIAS} usado
         from {ref('raw_ciclo_pagamento')} k {forn}
         where cast(k.idsubproduto as varchar) = '{seguro}'

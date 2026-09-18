@@ -236,7 +236,68 @@
       "Prazo do fornecedor · do pedido à entrada no estoque</div>" +
       '<div id="gv-prazo" class="gfx" style="height:118px"></div>' +
       '<div class="pequeno t3" style="line-height:1.45">' + nota +
-      (n ? " Verde: chegou dentro do combinado; coral: atrasou." : "") + "</div></div>";
+      (n ? " Verde: chegou dentro do combinado; coral: atrasou." : "") + "</div>" +
+      (pz.catalogo.pagamentos ? faixaPagamento(pz, m) : "") + "</div>";
+  }
+
+  /* A outra ponta do ciclo: quantos dias depois da entrada o titulo ao
+     fornecedor vence. Pontos do item sobre a distribuicao do catalogo, com o
+     prazo unico que o modelo usa (prazo_pagamento_dias) marcado. */
+  function faixaPagamento(pz, m) {
+    var pags = (pz.pedidos || []).filter(function (r) { return r.pagamento != null; });
+    var usado = m.prazo_pagamento_dias || 0;
+    return '<div class="pequeno t3 mt14" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em">' +
+      "Pagamento ao fornecedor · da entrada no estoque ao vencimento do título</div>" +
+      '<div id="gv-pagto" class="gfx" style="height:92px"></div>' +
+      '<div class="pequeno t3" style="line-height:1.45">' +
+      (pags.length
+        ? "Cada ponto é o vencimento de uma nota deste item (" + N.num(pags.length) + "), em dias após a entrada; "
+        : "Nenhuma nota com título registrada para este item; ") +
+      "o fundo é o catálogo. O modelo abate dos dias com o dinheiro preso um prazo único de <b>" +
+      N.num(usado, 0) + " dias</b>" + (usado === 0 ? " — zero, como se pagasse na entrada." : ".") + "</div>";
+  }
+
+  function desenharPagamento(pz, m) {
+    var el = document.getElementById("gv-pagto");
+    if (!el || !pz || !pz.catalogo || !pz.catalogo.pagamentos) return;
+    var cat = pz.catalogo;
+    var pags = (pz.pedidos || []).filter(function (r) { return r.pagamento != null; });
+    var teto = cat.inicio[cat.inicio.length - 1] + cat.passo;
+    var maxItem = pags.reduce(function (a, r) { return Math.max(a, r.pagamento || 0); }, 0);
+    var fim = Math.max(teto, Math.ceil((maxItem + 5) / cat.passo) * cat.passo);
+    var fundo = cat.inicio.map(function (x, i) { return [x, cat.pagamento[i]]; });
+    fundo.push([fim, cat.pagamento[cat.pagamento.length - 1]]);
+    var pico = Math.max.apply(null, cat.pagamento) || 1;
+    var pontos = pags.map(function (r) {
+      return { value: [Math.max(0, Math.min(r.pagamento, fim)), 0.5], r: r,
+        itemStyle: { color: N.sombra(C.ceu, .85), borderColor: C.ceu, borderWidth: 1.2 } };
+    });
+    N.grafico("gv-pagto", {
+      grid: N.grade({ top: 18, right: 14, bottom: 22, left: 4 }),
+      tooltip: Object.assign(N.dica(function (p) {
+        if (Array.isArray(p)) p = p[0];
+        if (!p || p.seriesType !== "scatter") return "";
+        var r = p.data.r;
+        return N.dicaTit("Pedido " + N.esc(String(r.pedido)) + " · entrou em " + N.data(r.entrou_em)) +
+          N.dicaLin(C.ceu, "título vence", (r.pagamento < 0 ? N.num(-r.pagamento, 0) + " dias antes da entrada"
+            : N.num(r.pagamento, 0) + " dias após a entrada")) +
+          (r.fornecedor ? N.dicaLin(C.tinta3, "fornecedor", N.esc(r.fornecedor)) : "");
+      }), { trigger: "item" }),
+      xAxis: N.eixoX({ type: "value", min: 0, max: fim, boundaryGap: [0, 0],
+        axisLabel: { color: C.tinta4, fontSize: 9.5, formatter: function (v) { return v + "d"; } },
+        splitLine: { show: false } }),
+      yAxis: [N.eixoY({ show: false, min: 0, max: pico * 1.15 }),
+              N.eixoY({ show: false, min: 0, max: 1 })],
+      series: [{
+        type: "line", step: "end", symbol: "none", silent: true, z: 1,
+        lineStyle: { width: 0 }, areaStyle: { color: N.sombra(C.tinta3, .28) }, data: fundo,
+        markLine: { silent: true, symbol: "none",
+          lineStyle: { color: C.ambar, width: 1.5 },
+          label: { color: C.ambar, fontSize: 10, position: "insideEndTop", distance: 4, rotate: 0,
+            formatter: "modelo usa · " + N.num(m.prazo_pagamento_dias || 0, 0) + "d" },
+          data: [{ xAxis: m.prazo_pagamento_dias || 0 }] }
+      }, { type: "scatter", yAxisIndex: 1, symbolSize: 10, z: 5, data: pontos }]
+    });
   }
 
   function desenharPrazo(pz, m) {
@@ -812,6 +873,7 @@
 
       /* ---------------------------------------------------- prazo */
       desenharPrazo(d.prazos, m);
+      desenharPagamento(d.prazos, m);
 
       /* ---------------------------------------------------- regime */
       if (discreto && d.marginal.length) {

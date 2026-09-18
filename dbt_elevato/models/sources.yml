@@ -50,7 +50,10 @@ sources:
         description: >
           Pedido a pagamento, com prazo de entrega combinado e realizado. E a
           unica fonte de prazo REAL e da sua variabilidade, que o modelo antes
-          nao tinha como medir.
+          nao tinha como medir. `prazo_titulo_dias` (extracao do DW a partir
+          de 2026-09-18) e quantos dias depois da entrada o titulo ao
+          fornecedor vence - media das parcelas ponderada pelo valor, via
+          db2.contas_pagar pela mesma idplanilha; mediana 33 dias.
 
       # ---- exportacao do DW dwanalitico (var base=exports) ----
       # Dois arquivos gerados em dbt-elevato/exports. O diario e a fonte de

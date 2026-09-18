@@ -268,8 +268,22 @@ order by c.idempresa, c.idpedido, c.idsubproduto, c.qtdsolicitada, c.valunitario
 # ("Compra de Mercadoria") traz numpedido em 41.312 de 41.315 linhas do ultimo
 # ano. dias_entrega_realizado = entrada - pedido; mediana 12 dias contra 30
 # combinados (40 mil pares, 2025-09 a 2026-09).
+# Prazo ao fornecedor: db2.contas_pagar liga-se a entrada pela mesma
+# idplanilha (16.131 de 16.134 entradas do CD nos ultimos 12 meses tem
+# titulo). prazo_titulo_dias = quantos dias depois da ENTRADA o dinheiro sai,
+# media dos vencimentos das parcelas ponderada pelo valor - mediana 25 dias na
+# primeira parcela, 34 na ultima, 1,4 parcelas por nota.
 SQL_CICLO = f"""
 with {UNIVERSO},
+titulos as (
+    select idplanilha,
+           sum((dtvencimento - date '1970-01-01') * valtitulo) filter (where valtitulo > 0) as soma_venc,
+           sum(valtitulo) filter (where valtitulo > 0)                                    as soma_val,
+           min(dtvencimento - date '1970-01-01')                                          as venc_min
+    from db2.contas_pagar
+    where idempresa = {EMPRESA_CD} and dtvencimento is not null
+    group by 1
+),
 entradas as (
     select ea.idsubproduto, cast(ea.numpedido as integer) as idpedido, ea.idplanilha,
            ea.dtmovimento as dt_entrada_estoque,
@@ -291,10 +305,13 @@ select
     e.valtitulo,
     pc.diasentrega                                    as dias_entrega_combinado,
     (e.dt_entrada_estoque - pc.dtmovimento)           as dias_entrega_realizado,
-    cast(null as integer)                             as prazo_titulo_dias
+    cast(round(coalesce(t.soma_venc / nullif(t.soma_val, 0), t.venc_min)
+               - (e.dt_entrada_estoque::date - date '1970-01-01')) as integer)
+                                                      as prazo_titulo_dias
 from entradas e
 join db2.pedido_compra pc on pc.idpedido = e.idpedido and pc.idempresa = {EMPRESA_CD}
 left join db2.notas n on n.idplanilha = e.idplanilha and n.idempresa = {EMPRESA_CD}
+left join titulos t on t.idplanilha = e.idplanilha
 order by e.dt_entrada_estoque, e.idpedido
 """
 
