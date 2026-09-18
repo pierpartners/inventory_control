@@ -302,8 +302,26 @@
   "depois desta compra": "O mesmo risco depois de a compra entrar. A diferença é a redução de risco que o dinheiro deste item comprou.",
   "retorno por real investido": "Margem esperada da compra dividida pelo que ela custa. É a mesma régua da nota, sem dividir pelo horizonte.",
   "lote economico eoq": "Lote que minimiza a soma do custo de pedir e do custo de manter: a raiz de (2 × demanda anual × custo por pedido ÷ custo de manter uma peça por ano). Vale para item de giro relevante; para item caro de giro baixo o modelo usa o teste da unidade marginal, porque ali o EOQ manda comprar mais peças do que o item vende no horizonte.",
-  "unidades marginais": "Quantas peças passaram no teste da unidade marginal: o modelo carrega a k-ésima peça enquanto a chance de precisar dela for maior que o limite em que o custo de mantê-la parada empata com a margem que se perde se ela faltar."
-  };
+  "unidades marginais": "Quantas peças passaram no teste da unidade marginal: o modelo carrega a k-ésima peça enquanto a chance de precisar dela for maior que o limite em que o custo de mantê-la parada empata com a margem que se perde se ela faltar.",
+
+  /* ------------------------------------------------------ diagnostico */
+  "faixa": "Estado do item hoje, avaliado nesta ordem: <b>Zerado com demanda</b> (sem peça e com demanda estimada), <b>Risco</b> (posição igual ou abaixo do ponto de pedido), <b>Sem giro</b> (há peça, mas sem venda há mais dias que o limiar da página), <b>Excesso</b> (acima do estoque máximo do modelo), <b>Saudável</b> (o resto). Um item cai numa faixa só.",
+  "acao": "O que o diagnóstico sugere para o item: comprar (está na fila do plano), transferir (falta no CD e a rede tem o suficiente para o período de proteção), revisar (falta e nem o plano nem a rede resolvem), liquidar (sem giro há mais de um ano), segurar (excesso ou sem giro recente), manter.",
+  "idade fifo": "Há quantos dias, em média, as peças do saldo atual estão no CD. Aproximação: percorre as entradas de mercadoria da mais recente para trás até cobrir o saldo e pondera a idade de cada entrada pela quantidade usada. O ERP não guarda lote; quando as entradas registradas não cobrem o saldo, a parte descoberta recebe a idade da entrada mais antiga disponível e o valor sai marcado com *.",
+  "capital contabil": "Estoque físico vezes o custo médio contábil do ERP no último dia com estoque. É o valor que a contabilidade vê; o capital do modelo usa o custo corrigido (ver Custo unitário). A diferença entre os dois é um achado em si.",
+  "otimo": "Capital que a política do modelo manteria em estoque médio para o item (estoque médio vezes custo). Real menos ótimo é quanto a operação carrega a mais ou a menos do que a política recomenda.",
+  "real menos otimo": "Capital em estoque hoje menos o capital que a política do modelo manteria em estoque médio. Positivo: a empresa carrega mais do que a política recomenda; negativo: menos.",
+  "excesso": "Peças acima do estoque máximo do modelo vezes o custo unitário. Só existe na faixa Excesso.",
+  "sem giro": "Capital em itens com peça no CD e sem venda há mais dias que o limiar escolhido na página (padrão 180).",
+  "dias sem venda": "Dias desde a última venda registrada em qualquer loja até a data da posição. 'nunca' quando não há venda no histórico.",
+  "rede": "Saldo somado nas lojas e demais locais fora do CD, na foto mais recente extraída do DW. Não entra na política; serve para apontar transferência em vez de compra.",
+  "lojas": "Quantos locais fora do CD têm saldo positivo do item.",
+  "precisa no periodo": "Demanda esperada no período de proteção (prazo de entrega + revisão), μ do período. Se a rede tem pelo menos isso, a transferência cobre a falta do CD.",
+  "valor em loja": "Saldo em loja vezes o custo médio contábil de cada local, somado.",
+  "comprador": "Comprador oficial do item no cadastro do ERP.",
+  "parado": "Capital em itens sem giro ou em excesso: peça que está no CD e que, pela demanda estimada, não deveria estar toda lá.",
+  "em risco ou zerado": "Capital em itens abaixo do ponto de pedido ou zerados com demanda: onde a falta está acontecendo ou é iminente.",
+};
 
   /* Coluna de um simbolo so - "#", "μ" - nao tem chave possivel: a
      normalizacao remove pontuacao e caractere nao latino, e sobra vazio. Para

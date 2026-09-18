@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block titulo %}Diagnóstico do estoque{% endblock %}
+{% block cabecalho %}Diagnóstico do estoque{% endblock %}
+{% block subcabecalho %}o estoque de hoje, item a item: o que está parado, o que está em risco e quanto isso custa · posição de {{ exec.posicao if exec else '–' }}{% endblock %}
+{% block classe_corpo %}largo{% endblock %}
+{% block acoes %}
+  <label class="pequeno t4" style="display:inline-flex;align-items:center;gap:8px">
+    foto em <input type="date" id="ate" value="{{ ate }}">
+  </label>
+  <label class="pequeno t4" style="display:inline-flex;align-items:center;gap:8px">
+    sem giro a partir de
+    <input type="number" id="dias-sem-giro" value="{{ dias_sem_giro }}" min="30" max="1095" step="30"
+           style="width:70px"> dias
+  </label>
+  <a class="btn btn-p" id="bt-csv" href="/diagnostico.csv?dias_sem_giro={{ dias_sem_giro }}">Baixar CSV</a>
+{% endblock %}
+
+{% block cabeca %}
+<style>
+  .faixa-selo { display:inline-block; padding:2px 8px; border-radius:6px; font-size:10.5px; font-weight:600; white-space:nowrap; }
+  .fx-zerado   { background: var(--coral); color:#111; }
+  .fx-risco    { background: var(--ambar); color:#111; }
+  .fx-semgiro  { background: var(--violeta); color:#fff; }
+  .fx-excesso  { background: var(--ceu); color:#111; }
+  .fx-saudavel { background: var(--menta); color:#111; }
+  .abas { display:flex; gap:6px; }
+  .abas button { font-size:11.5px; padding:4px 10px; }
+  .abas button.on { border-color: var(--tinta-3); background: var(--painel-3); color: var(--tinta); }
+  .conf { display:inline-flex; align-items:center; gap:6px; font-size:10.5px; color: var(--tinta-3); margin-left:auto; }
+  .conf .pt { width:8px; height:8px; border-radius:50%; background: var(--tinta-4); }
+  .conf.ok .pt { background: var(--menta); } .conf.aviso .pt { background: var(--ambar); } .conf.erro .pt { background: var(--coral); }
+  .kpi-par { display:flex; gap:10px; align-items:baseline; }
+  .kpi-par .vs { font-size:10.5px; color: var(--tinta-4); }
+  tr.clicavel { cursor:pointer; }
+  tr.clicavel:hover td { background: var(--painel-3); }
+  tr.sel td { background: var(--ambar-lav); }
+  .vazio { padding: 18px 14px; color: var(--tinta-4); font-size: 12px; }
+</style>
+{% endblock %}
+
+{% block conteudo %}
+
+<div class="msg msg-am" id="aviso-ate" style="display:none">
+  Foto congelada em <b id="aviso-ate-data"></b>: o motor rodou como naquele dia. Idade FIFO e saldo das lojas só existem para a posição de hoje e ficam em branco.
+</div>
+
+<!-- ============================================ visão geral -->
+<div class="gr gr-5 secao" id="kpis">
+  <div class="painel metrica">
+    <div class="rotulo">Capital em estoque</div>
+    <div class="valor md" id="k-cap-modelo">–</div>
+    <div class="nota">ao custo contábil do ERP: <b id="k-cap-erp">–</b> <span id="k-sem-erp" class="t4"></span></div>
+  </div>
+  <div class="painel metrica am">
+    <div class="rotulo">Real menos ótimo</div>
+    <div class="valor md" id="k-dif">–</div>
+    <div class="nota">a política do modelo manteria <b id="k-cap-otimo">–</b> em estoque médio</div>
+  </div>
+  <div class="painel metrica">
+    <div class="rotulo">Cobertura real · ótima</div>
+    <div class="valor md kpi-par"><span id="k-cob-real">–</span><span class="vs">vs</span><span id="k-cob-otima" class="t3">–</span></div>
+    <div class="nota">dias, ponderados por capital · giro <b id="k-giro">–</b></div>
+  </div>
+  <div class="painel metrica cr">
+    <div class="rotulo">Em risco ou zerado</div>
+    <div class="valor md" id="k-risco">–</div>
+    <div class="nota"><span id="k-risco-n">–</span> itens · lucro perdido por ruptura no histórico <b id="k-perdido">–</b></div>
+  </div>
+  <div class="painel metrica">
+    <div class="rotulo">Parado</div>
+    <div class="valor md" id="k-parado">–</div>
+    <div class="nota"><span id="k-parado-n">–</span> itens sem giro ou em excesso · acima do máximo <b id="k-excesso">–</b></div>
+  </div>
+</div>
+
+<div class="gr gr-2 secao">
+  <div class="painel">
+    <div class="painel-cab"><h2>Reais por faixa</h2><span class="conf" data-bloco="geral"><i class="pt"></i><span></span></span></div>
+    <div class="painel-int"><div id="g-faixas" style="height:260px"></div></div>
+  </div>
+  <div class="painel">
+    <div class="painel-cab"><h2>Idade do estoque</h2><span class="dica">idade FIFO do saldo atual, empilhada por faixa</span><span class="conf" data-bloco="idade"><i class="pt"></i><span></span></span></div>
+    <div class="painel-int"><div id="g-idade" style="height:260px"></div></div>
+  </div>
+</div>
+
+<!-- ============================================ agregado -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Por fornecedor, comprador e família</h2>
+    <span class="dica">clique numa linha para filtrar a tabela de itens</span>
+    <div class="dir abas" id="abas-por">
+      <button class="btn btn-p on" data-por="fornecedor">Fornecedor</button>
+      <button class="btn btn-p" data-por="comprador">Comprador</button>
+      <button class="btn btn-p" data-por="familia">Família</button>
+    </div>
+  </div>
+  <div class="painel"><div class="painel-int rente"><div class="rolo rolo-medio" id="agregado"></div></div></div>
+</div>
+
+<!-- ============================================ rede -->
+<div class="gr gr-2 secao">
+  <div class="painel">
+    <div class="painel-cab"><h2>Falta no CD, tem na rede</h2><span class="dica">zerado ou em risco no CD com saldo em loja que cobre o período de proteção: transferir antes de comprar</span><span class="conf" data-bloco="rede"><i class="pt"></i><span></span></span></div>
+    <div class="painel-int rente"><div class="rolo rolo-medio" id="rede-transferir"></div></div>
+  </div>
+  <div class="painel">
+    <div class="painel-cab"><h2>Parado em loja</h2><span class="dica">excesso ou sem giro no CD e valor em loja acima do p90 da rede</span></div>
+    <div class="painel-int rente"><div class="rolo rolo-medio" id="rede-parado"></div></div>
+  </div>
+</div>
+
+<!-- ============================================ itens -->
+<div class="secao">
+  <div class="secao-cab">
+    <h2>Itens</h2>
+    <span class="dica" id="itens-filtro">todas as faixas</span>
+    <div class="dir" style="display:flex;gap:8px;align-items:center">
+      <select id="sel-faixa"><option value="">Todas as faixas</option>
+        {% for f in faixas %}<option value="{{ f }}">{{ f }}</option>{% endfor %}</select>
+      <input type="search" id="busca-itens" placeholder="buscar SKU ou nome" style="width:220px">
+      <button class="btn btn-p" id="bt-limpar">Limpar filtro</button>
+      <span class="conf" data-bloco="itens"><i class="pt"></i><span></span></span>
+    </div>
+  </div>
+  <div class="painel"><div class="painel-int rente"><div class="rolo rolo-alto" id="itens"></div></div></div>
+</div>
+
+{% endblock %}
+
+{% block rodape %}
+<script src="{{ est('item.js') }}"></script>
+<script src="{{ est('diagnostico.js') }}"></script>
+{% endblock %}
