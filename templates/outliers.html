@@ -117,6 +117,8 @@
       <div class="seg" id="esc-x"><button data-v="log">log</button><button data-v="linear">linear</button></div>
       <label>Y <select id="eixo-y"></select></label>
       <div class="seg" id="esc-y"><button data-v="log">log</button><button data-v="linear">linear</button></div>
+      <div class="seg" id="modo-hist" title="faixas: quantos itens em cada faixa, empilhados por gravidade · acumulada: a fração de cada grupo até aquele valor, de 0 a 100% do próprio grupo">
+        <button data-v="faixas">faixas</button><button data-v="acumulada">acumulada</button></div>
     </div>
   </div>
   <div class="painel-int"><div id="g-nuvem" class="gfx" style="height:470px"></div></div>
@@ -184,10 +186,11 @@
   var pendentes = 0;
   /* os eixos da nuvem: chave da dimensao e escala, lembrados entre visitas */
   var DIM = {};
-  var eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear" };
+  var eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear", modo: "faixas" };
   try {
     var g = JSON.parse(localStorage.getItem("outliers.eixos") || "null");
     if (g && g.x && g.y) eixo = g;
+    if (eixo.modo !== "acumulada") eixo.modo = "faixas";
   } catch (e) {}
 
   function carregar() {
@@ -197,7 +200,7 @@
       CAMPOS = d.campos;
       POR_SKU = {}; d.itens.forEach(function (r) { POR_SKU[r.sku] = r; });
       DIM = {}; (d.dimensoes || []).forEach(function (x) { DIM[x.chave] = x; });
-      if (!DIM[eixo.x] || !DIM[eixo.y]) eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear" };
+      if (!DIM[eixo.x] || !DIM[eixo.y]) eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear", modo: "faixas" };
       montarEixos();
       placar(); regras(); nuvem(); tabela();
     });
@@ -281,6 +284,7 @@
   function pintarEscalas() {
     id("esc-x").querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === eixo.ex); });
     id("esc-y").querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === eixo.ey); });
+    id("modo-hist").querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === eixo.modo); });
   }
   function guardarEixos() {
     try { localStorage.setItem("outliers.eixos", JSON.stringify(eixo)); } catch (e) {}
@@ -298,6 +302,10 @@
   id("esc-y").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (!b) return;
     eixo.ey = b.dataset.v; pintarEscalas(); guardarEixos(); nuvem();
+  });
+  id("modo-hist").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    eixo.modo = b.dataset.v; pintarEscalas(); guardarEixos(); nuvem();
   });
 
   /* percentil de um vetor ja ordenado */
@@ -345,11 +353,30 @@
       });
       if (base > maximo) maximo = base;
     }
-    return { rect: out, maximo: maximo };
+    /* a acumulada de cada grupo, como fracao do PROPRIO grupo: os grupos tem
+       tamanhos muito diferentes, e em contagem bruta a curva dos sinalizados
+       sumiria embaixo da do catalogo. `passos` e a escada [de, ate, antes,
+       depois] por faixa, no mesmo formato dos retangulos. */
+    var frac = { fundo: [], am: [], cr: [] };
+    ["fundo", "am", "cr"].forEach(function (g) {
+      var tot = cont[g].reduce(function (a, b) { return a + b; }, 0), soma = 0;
+      for (var j = 0; j < NB; j++) { soma += cont[g][j]; frac[g].push(tot ? soma / tot : 0); }
+    });
+    /* sem referencia ao objeto pai dentro do item: o ECharts clona os dados
+       em profundidade e uma referencia circular estoura a pilha */
+    var acum = { fundo: [], am: [], cr: [] };
+    ["fundo", "am", "cr"].forEach(function (g) {
+      for (var j = 0; j < NB; j++) {
+        acum[g].push({ value: [e[j], e[j + 1], j ? frac[g][j - 1] : 0, frac[g][j]], faixa: [e[j], e[j + 1]], bin: j,
+          ate: { fundo: frac.fundo[j], am: frac.am[j], cr: frac.cr[j] } });
+      }
+    });
+    return { rect: out, maximo: maximo, acum: acum };
   }
 
   function nuvem() {
     var kx = eixo.x, ky = eixo.y, dx = DIM[kx], dy = DIM[ky];
+    var acumulada = eixo.modo === "acumulada";
     var pts = [], fora = 0, total = 0;
     /* em escala log o zero nao existe: o ponto sai e e contado */
     var okx = eixo.ex === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
@@ -387,7 +414,9 @@
     if (fora) notas.push(N.num(fora) + " de " + N.num(total) + " sem valor válido nesta escala");
     if (foraQuadro) notas.push(N.num(foraQuadro) + " fora do quadro (além dos percentis 0,5 e 99,5)");
     id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar; " +
-      "as barras contam os itens por faixa de cada eixo" + (notas.length ? " · " + notas.join(" · ") : "");
+      (acumulada ? "as curvas são a fração acumulada de cada grupo até aquele valor"
+                 : "as barras contam os itens por faixa de cada eixo") +
+      (notas.length ? " · " + notas.join(" · ") : "");
 
     /* margens fixas em pixels para os tres grids se alinharem: o histograma
        de cima divide o eixo X da nuvem, o da direita divide o eixo Y */
@@ -422,6 +451,53 @@
     }
     var corF = N.sombra(C.tinta4, 0.35), corA = N.sombra(C.ambar, 0.8), corC = N.sombra(C.coral, 0.8);
 
+    /* a escada da acumulada: um degrau por faixa, ligado ao anterior. E uma
+       serie custom com um item por faixa, e cada item desenha o degrau
+       horizontal (ou vertical, no histograma da direita) e a subida ate o
+       proximo. Um retangulo transparente por faixa fica por baixo so para o
+       tooltip ter onde pousar. */
+    function escada(vert, cor, nome, dados, xi, yi) {
+      return { name: nome, type: "custom", xAxisIndex: xi, yAxisIndex: yi, data: dados, silent: true, z: 3,
+        renderItem: function (params, api) {
+          var v0 = api.value(0), v1 = api.value(1), a = api.value(2), d = api.value(3);
+          var p0 = vert ? api.coord([v0, a]) : api.coord([a, v0]);
+          var p1 = vert ? api.coord([v0, d]) : api.coord([d, v0]);
+          var p2 = vert ? api.coord([v1, d]) : api.coord([d, v1]);
+          return { type: "polyline", shape: { points: [p0, p1, p2] },
+            style: { stroke: cor, lineWidth: vert ? 1.6 : 1.6, fill: "none" } };
+        } };
+    }
+    function alvoTooltip(vert, dados, xi, yi) {
+      return { name: "alvo", type: "custom", xAxisIndex: xi, yAxisIndex: yi, data: dados, z: 1,
+        renderItem: function (params, api) {
+          var v0 = api.value(0), v1 = api.value(1);
+          var p0 = vert ? api.coord([v0, 0]) : api.coord([0, v0]);
+          var p1 = vert ? api.coord([v1, 1]) : api.coord([1, v1]);
+          var x = Math.min(p0[0], p1[0]), y = Math.min(p0[1], p1[1]);
+          return { type: "rect", shape: { x: x, y: y, width: Math.abs(p1[0] - p0[0]), height: Math.abs(p1[1] - p0[1]) },
+            style: { fill: "rgba(0,0,0,0)" } };
+        } };
+    }
+    var corAf = N.sombra(C.tinta4, 0.7), corAa = C.ambar, corAc = C.coral;
+    var seriesHist = acumulada ? [
+        alvoTooltip(true, hx.acum.fundo, 1, 1),
+        escada(true, corAf, "hx-fundo", hx.acum.fundo, 1, 1),
+        escada(true, corAa, "hx-am", hx.acum.am, 1, 1),
+        escada(true, corAc, "hx-cr", hx.acum.cr, 1, 1),
+        alvoTooltip(false, hy.acum.fundo, 2, 2),
+        escada(false, corAf, "hy-fundo", hy.acum.fundo, 2, 2),
+        escada(false, corAa, "hy-am", hy.acum.am, 2, 2),
+        escada(false, corAc, "hy-cr", hy.acum.cr, 2, 2)
+      ] : [
+        barras(true, corF, "hx-fundo", hx.rect.fundo, 1, 1),
+        barras(true, corA, "hx-am", hx.rect.am, 1, 1),
+        barras(true, corC, "hx-cr", hx.rect.cr, 1, 1),
+        barras(false, corF, "hy-fundo", hy.rect.fundo, 2, 2),
+        barras(false, corA, "hy-am", hy.rect.am, 2, 2),
+        barras(false, corC, "hy-cr", hy.rect.cr, 2, 2)
+      ];
+    var maxX = acumulada ? 1 : (hx.maximo || 1), maxY = acumulada ? 1 : (hy.maximo || 1);
+
     N.grafico("g-nuvem", {
       grid: [
         { left: L, right: R, top: topoNuvem, bottom: B, containLabel: false },
@@ -432,6 +508,13 @@
         data: ["sem motivo", "em amarelo", "em vermelho"], textStyle: { color: C.tinta3, fontSize: 11 } },
       tooltip: Object.assign(N.dica(function (ps) {
         var p = Array.isArray(ps) ? ps[0] : ps;
+        if (p.seriesType === "custom" && p.data.ate) {
+          var d2 = p.data, vert2 = p.seriesIndex < 7, k2 = vert2 ? kx : ky, a2 = d2.ate;
+          return N.dicaTit(DIM[k2].rotulo + " até " + fmtDim(k2, d2.faixa[1])) +
+            N.dicaLin(C.coral, "em vermelho", N.pct(a2.cr, 0) + " do grupo") +
+            N.dicaLin(C.ambar, "em amarelo", N.pct(a2.am, 0) + " do grupo") +
+            N.dicaLin(C.tinta4, "sem motivo", N.pct(a2.fundo, 0) + " do grupo");
+        }
         if (p.seriesType === "custom") {
           var d = p.data, vert = p.seriesIndex < 6, k = vert ? kx : ky, c = d.cont, j = d.bin;
           return N.dicaTit(DIM[k].rotulo + ": " + fmtDim(k, d.faixa[0]) + " a " + fmtDim(k, d.faixa[1])) +
@@ -450,11 +533,11 @@
       xAxis: [
         N.eixoY(eixoDim(kx, eixo.ex, qx, { gridIndex: 0, name: nomeX, nameLocation: "middle", nameGap: 28, splitLine: { show: false } })),
         N.eixoY(eixoDim(kx, eixo.ex, qx, Object.assign({ gridIndex: 1 }, mudo))),
-        N.eixoY(Object.assign({ gridIndex: 2, type: "value", max: hy.maximo || 1 }, oculto, mudo))
+        N.eixoY(Object.assign({ gridIndex: 2, type: "value", max: maxY }, oculto, mudo))
       ],
       yAxis: [
         N.eixoY(eixoDim(ky, eixo.ey, qy, { gridIndex: 0, name: nomeY, nameLocation: "middle", nameGap: 50 })),
-        N.eixoY(Object.assign({ gridIndex: 1, type: "value", max: hx.maximo || 1 }, oculto, mudo)),
+        N.eixoY(Object.assign({ gridIndex: 1, type: "value", max: maxX }, oculto, mudo)),
         N.eixoY(eixoDim(ky, eixo.ey, qy, Object.assign({ gridIndex: 2 }, mudo)))
       ],
       series: [
@@ -464,14 +547,7 @@
           itemStyle: { color: N.sombra(C.ambar, 0.7), borderColor: C.ambar, borderWidth: 1 } },
         { name: "em vermelho", type: "scatter", data: pontos.cr, symbolSize: 9,
           itemStyle: { color: N.sombra(C.coral, 0.7), borderColor: C.coral, borderWidth: 1 } },
-        /* histograma de cima (indices 3-5) e da direita (6-8) */
-        barras(true, corF, "hx-fundo", hx.rect.fundo, 1, 1),
-        barras(true, corA, "hx-am", hx.rect.am, 1, 1),
-        barras(true, corC, "hx-cr", hx.rect.cr, 1, 1),
-        barras(false, corF, "hy-fundo", hy.rect.fundo, 2, 2),
-        barras(false, corA, "hy-am", hy.rect.am, 2, 2),
-        barras(false, corC, "hy-cr", hy.rect.cr, 2, 2)
-      ]
+      ].concat(seriesHist)
     }).on("click", function (p) { if (p.seriesType === "scatter" && p.data && p.data.sku && POR_SKU[p.data.sku]) abrirAjuste(p.data.sku); });
   }
 
