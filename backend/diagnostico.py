@@ -130,18 +130,49 @@ COLUNAS_ITEM = [
 
 def carregar(wh: Warehouse, dias_sem_giro: int = DIAS_SEM_GIRO_PADRAO,
              ate: str | None = None) -> pd.DataFrame:
-    """res_plano_compra (politica) x mart_estoque_posicao (foto), classificado."""
-    if ate:
-        raise NotImplementedError("foto congelada (ate) ainda nao implementada")
-    plano = wh.query(f"select {', '.join(COLUNAS_PLANO)} from {ref('res_plano_compra')}")
+    """res_plano_compra (politica) x mart_estoque_posicao (foto), classificado.
+
+    Com `ate`, a foto e congelada naquela data: o motor roda em memoria como
+    no backtest (mesmo caminho, nunca um paralelo), a ultima venda e o custo
+    contabil sao lidos ate a data, e o que so existe para hoje (idade FIFO,
+    saldo das lojas) fica em branco - a pagina avisa.
+    """
     posicao = wh.query(f"select {', '.join(COLUNAS_POSICAO)} from {ref('mart_estoque_posicao')}")
+    if not ate:
+        plano = wh.query(f"select {', '.join(COLUNAS_PLANO)} from {ref('res_plano_compra')}")
+    else:
+        from .config import Parametros
+        from .modelo import executar
+        corte = str(pd.Timestamp(ate).date())
+        plano = executar(wh, Parametros.carregar(), ate=corte)["res_plano_compra"][COLUNAS_PLANO].copy()
+        venda = wh.query(
+            f"select sku, max(data) as ultima_venda from {ref('stg_vendas')} "
+            f"where pecas_vendidas > 0 and data <= DATE '{corte}' group by sku")
+        custo = wh.query(
+            f"select sku, custo as custo_medio_erp from ("
+            f"  select sku, custo, row_number() over (partition by sku order by data desc) as rn "
+            f"  from {ref('stg_custo_medio_erp')} where data <= DATE '{corte}') where rn = 1")
+        posicao = (posicao[["sku", "fornecedor", "comprador"]]
+                   .merge(venda, on="sku", how="left")
+                   .merge(custo, on="sku", how="left"))
+        posicao["data_posicao"] = pd.Timestamp(corte)
+        posicao["saldo_cd"] = np.nan
+        posicao["saldo_lojas"] = 0.0
+        posicao["lojas_com_saldo"] = 0
+        posicao["valor_lojas_erp"] = 0.0
+        posicao["ultima_entrada"] = pd.NaT
+        posicao["idade_fifo_dias"] = np.nan
+        posicao["entrada_mais_antiga_em_estoque"] = pd.NaT
+        posicao["entradas_cobrem_saldo"] = False
     df = plano.merge(posicao, on="sku", how="left")
     df["data_posicao"] = pd.to_datetime(df.data_posicao).fillna(pd.Timestamp(posicao.data_posicao.max()))
     for c in ("saldo_lojas", "lojas_com_saldo", "valor_lojas_erp"):
         df[c] = df[c].fillna(0)
     df["fornecedor"] = df.fornecedor.fillna("Nao informado")
     df["comprador"] = df.comprador.fillna("Nao informado")
-    return classificar_faixas(df, dias_sem_giro)
+    out = classificar_faixas(df, dias_sem_giro)
+    out.attrs["congelado"] = bool(ate)
+    return out
 
 
 # ----------------------------------------------------------------------
