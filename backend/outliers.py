@@ -43,6 +43,10 @@ REGRAS = [
     ("margem_negativa", "Vende abaixo do custo", "cr", "custo_unitario",
      "Preço praticado na janela menor que o custo de hoje. Ou o custo está errado, ou o item "
      "não deveria ser reposto."),
+    ("margem_atipica", "Margem fora do padrão da família", "am", "custo_unitario",
+     "Custo e preço médio praticado não conversam: a margem deste item está a mais de 20 pontos "
+     "da margem típica da família. Ou o custo está errado, ou o preço — nos dois casos a nota "
+     "de retorno sai distorcida."),
     ("compra_desproporcional", "Compra desproporcional à venda", "cr", "demanda_media_dia,lead_time_dias",
      "O plano compra mais que meio ano de demanda de uma vez, ou um valor no topo do "
      "catálogo: sinal de que a entrada (demanda ou prazo) está errada."),
@@ -73,6 +77,7 @@ def limiares(m: pd.DataFrame) -> dict:
         "prazo_pedidos_min": 3,
         "custo_movimento": 0.5,
         "compra_dias": 180,
+        "margem_desvio": 0.20,
         "compra_valor": _q(m.valor_da_compra[m.valor_da_compra > 0], 0.99, 50_000)
         if "valor_da_compra" in m.columns else float("inf"),
     }
@@ -125,6 +130,19 @@ def sinalizar(m: pd.DataFrame, lim: dict | None = None) -> pd.DataFrame:
         ((pedidos_lt < lim["prazo_pedidos_min"]) & (lead > 2 * mediana_lead)) | (sd_lead > lead))
     m["f_custo_movimento"] = com_estoque & ((m.custo_unitario / custo_med - 1).abs() >= lim["custo_movimento"])
     m["f_margem_negativa"] = com_estoque & vendeu & (m.lucro_por_peca <= 0)
+    # custo amarrado ao preco medio: a margem (preco praticado - custo) / preco
+    # de cada item e comparada com a MEDIANA da familia dele, nao com um numero
+    # fixo - piso porcelanato e acessorio de pintura nao praticam a mesma margem.
+    # O custo que devolveria a margem tipica fica gravado como sugestao.
+    preco = m.preco_liquido_peca.where(m.preco_liquido_peca > 0)
+    m["margem_item"] = (preco - m.custo_unitario) / preco
+    base_fam = m[relevante & vendeu & preco.notna()]
+    tipica_fam = base_fam.groupby("familia").margem_item.median()
+    tipica_geral = float(base_fam.margem_item.median()) if len(base_fam) else 0.3
+    m["margem_tipica"] = m.familia.map(tipica_fam).fillna(tipica_geral)
+    m["custo_sugerido"] = (preco * (1 - m.margem_tipica)).round(2)
+    m["f_margem_atipica"] = com_estoque & vendeu & preco.notna() & (m.lucro_por_peca > 0) & (
+        (m.margem_item - m.margem_tipica).abs() >= lim["margem_desvio"])
     m["f_compra_desproporcional"] = (m.quantidade_a_comprar > 0) & (
         (m.quantidade_a_comprar > lim["compra_dias"] * dem.replace(0, np.nan))
         | (m.valor_da_compra >= lim["compra_valor"]))
@@ -150,10 +168,39 @@ COLUNAS_TELA = [
     "cv_diario", "demanda_max_dia", "dias_com_venda", "dias_historico", "dias_utilizaveis",
     "dias_sem_estoque", "subestimacao_ingenua_pct", "lead_time_dias", "lead_time_desvio_dias",
     "lead_time_pedidos", "custo_unitario", "custo_mediano", "custo_ultimo_lancado",
-    "lucro_por_peca", "preco_liquido_peca", "margem_pct", "pecas_vendidas", "posicao_estoque",
+    "lucro_por_peca", "preco_liquido_peca", "margem_pct", "margem_item", "margem_tipica",
+    "custo_sugerido", "pecas_vendidas", "posicao_estoque",
     "ponto_de_pedido", "estoque_seguranca", "capital_imobilizado", "quantidade_a_comprar",
     "valor_da_compra", "cobertura_apos_dias", "risco_de_faltar", "decisao",
     "lucro_potencial_periodo", "impacto",
+]
+
+
+# As dimensoes que a nuvem de dispersao aceita nos eixos. Uma lista so, no
+# servidor, para a tela nao carregar uma copia: chave -> rotulo, unidade,
+# casas decimais e escala padrao ("log" para o que varia em ordens de
+# grandeza - demanda, dinheiro, dias de cobertura; "linear" para %, risco e
+# contagens curtas). Em escala log o ponto com valor <= 0 e omitido, e a
+# tela diz quantos ficaram de fora.
+DIMENSOES = [
+    ("demanda_media_dia", "Demanda por dia", "un/dia", 3, "log"),
+    ("cv_diario", "Coeficiente de variação diário", "", 2, "linear"),
+    ("demanda_max_dia", "Maior venda num dia", "un", 0, "log"),
+    ("dias_com_venda", "Dias com venda", "dias", 0, "linear"),
+    ("dias_sem_estoque", "Dias sem estoque", "dias", 0, "linear"),
+    ("subestimacao_ingenua_pct", "Correção de censura", "%", 0, "linear"),
+    ("lead_time_dias", "Prazo de entrega", "dias", 0, "linear"),
+    ("lead_time_desvio_dias", "Desvio do prazo", "dias", 0, "linear"),
+    ("custo_unitario", "Custo unitário", "R$", 2, "log"),
+    ("lucro_por_peca", "Lucro por peça", "R$", 2, "log"),
+    ("margem_item", "Margem do item", "%", 0, "linear"),
+    ("pecas_vendidas", "Peças vendidas na janela", "un", 0, "log"),
+    ("posicao_estoque", "Posição de estoque", "un", 0, "log"),
+    ("cobertura_apos_dias", "Cobertura após a compra", "dias", 0, "log"),
+    ("risco_de_faltar", "Risco de faltar", "%", 0, "linear"),
+    ("quantidade_a_comprar", "Quantidade a comprar", "un", 0, "log"),
+    ("valor_da_compra", "Valor da compra", "R$", 0, "log"),
+    ("capital_imobilizado", "Capital imobilizado", "R$", 0, "log"),
 ]
 
 
@@ -171,9 +218,11 @@ def painel(wh: Warehouse) -> dict:
     alvo = alvo.sort_values(["n_motivos", "impacto"], ascending=[False, False])
     cols = [c for c in COLUNAS_TELA if c in alvo.columns] + ["ajuste"]
     contagem = {r[0]: int(s[f"f_{r[0]}"].sum()) for r in REGRAS}
-    # nuvem demanda x CV do catalogo inteiro, para o item sinalizado ter fundo
-    nuvem = s[s.demanda_media_dia > 0][["sku", "item", "demanda_media_dia", "cv_diario",
-                                        "lead_time_dias", "n_motivos", "gravidade"]]
+    # nuvem do catalogo inteiro, para o item sinalizado ter fundo. Leva todas
+    # as dimensoes que a tela pode por nos eixos (DIMENSOES), nao so a dupla
+    # padrao demanda x CV.
+    dims = [d[0] for d in DIMENSOES if d[0] in s.columns]
+    nuvem = s[s.demanda_media_dia > 0][["sku", "item", "n_motivos", "gravidade"] + dims]
     return {
         "regras": [dict(chave=r[0], rotulo=r[1], gravidade=r[2], campo=r[3], explicacao=r[4],
                         n=contagem[r[0]]) for r in REGRAS],
@@ -186,4 +235,6 @@ def painel(wh: Warehouse) -> dict:
                    for k, v in ajustes.CAMPOS.items()},
         "itens": registros(alvo[cols]),
         "nuvem": registros(nuvem),
+        "dimensoes": [dict(chave=d[0], rotulo=d[1], unidade=d[2], casas=d[3], escala=d[4])
+                      for d in DIMENSOES if d[0] in s.columns],
     }

@@ -1,4 +1,2 @@
-tem que desconsiderar venda por encomenda
-olhar pra ordens de compra em aberto. ja tem tabela pra isso no dw
 logica de poder trocar o custo de N items e ver como isso afeta a compra final
 refinar o backtest pra pegar mais dias

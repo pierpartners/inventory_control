@@ -45,7 +45,7 @@
   <div class="painel metrica">
     <div class="rotulo">Itens na seleção</div>
     <div class="valor md" id="a-itens">–</div>
-    <div class="nota">de {{ linhas|length }} no catálogo</div>
+    <div class="nota">de {{ total|n }} no catálogo</div>
   </div>
   <div class="painel metrica am">
     <div class="rotulo">Capital imobilizado</div>
@@ -98,46 +98,12 @@
           <th class="n">Perdido</th>
           <th class="n">Risco</th>
         </tr></thead>
-        <tbody>
-        {% for r in linhas %}
-          <tr class="clicavel" data-sku="{{ r.sku }}"
-              data-familia="{{ r.familia }}" data-abc="{{ r.curva_abc }}"
-              data-regime="{{ 'marginal' if 'marginal' in r.regime else 'EOQ' }}"
-              data-rop="{{ 1 if (r.posicao_estoque or 0) <= r.ponto_de_pedido else 0 }}"
-              data-comprar="{{ 1 if r.decisao == 'COMPRAR AGORA' else 0 }}"
-              data-capital="{{ r.capital_imobilizado }}" data-lucro="{{ r.lucro_bruto_ano }}"
-              data-perdido="{{ r.lucro_perdido_ruptura }}" data-ns="{{ r.nivel_servico }}">
-            <td class="nome forte">{{ r.item }}
-              <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}</div></td>
-            <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
-            <td class="fraco pequeno">{{ 'Unid. marginal' if 'marginal' in r.regime else 'EOQ + normal' }}</td>
-            <td class="n" data-v="{{ r.custo_unitario }}"><span class="pre">R$</span>{{ r.custo_unitario|n(2) }}</td>
-            <td class="n" data-v="{{ r.preco_por_peca }}"><span class="pre">R$</span>{{ r.preco_por_peca|n(2) }}</td>
-            <td class="n {{ 'c-mt' if r.lucro_por_peca > 0 else 'c-cr' }}" data-v="{{ r.lucro_por_peca }}"><span class="pre">R$</span>{{ r.lucro_por_peca|n(2) }}</td>
-            <td class="n {{ 'c-cr' if (r.margem_por_peca_pct or 0) <= 0 }}" data-v="{{ r.margem_por_peca_pct or 0 }}">{{ r.margem_por_peca_pct|pct(1) }}</td>
-            <td class="n fraco" data-v="{{ r.pecas_vendidas or 0 }}">{{ r.pecas_vendidas|n }}</td>
-            <td class="n {{ 'forte' if (r.quantidade_a_comprar or 0) > 0 }}" data-v="{{ r.quantidade_a_comprar or 0 }}">{% if (r.quantidade_a_comprar or 0) > 0 %}{{ r.quantidade_a_comprar|n }}<span class="suf">un</span>{% else %}<span class="t4">–</span>{% endif %}</td>
-            <td class="n">{{ r.demanda_media_dia|n(2) }}</td>
-            <td class="n fraco">{{ r.cv_diario|n(2) }}</td>
-            <td class="n" data-v="{{ ((r.posicao_estoque or 0) / (r.ponto_de_pedido or 1))|round(4) }}"
-                data-pos="{{ r.posicao_estoque or 0 }}" data-r="{{ r.ponto_de_pedido }}"
-                data-max="{{ r.estoque_maximo }}"></td>
-            <td class="n {{ 'c-am' if r.lead_time_dias > 90 }}" data-v="{{ r.lead_time_dias }}"
-                title="desvio {{ r.lead_time_desvio_dias|n(1) }} dias · {{ r.lead_time_pedidos|n }} pedidos">
-              {{ r.lead_time_dias|n }}<span class="suf">d</span>{% if r.lead_time_pedidos < 3 %} <span class="t4" title="prazo estimado com menos de 3 pedidos">?</span>{% endif %}</td>
-            <td class="n">{{ r.lote_compra|n }}</td>
-            <td class="n fraco">{{ r.estoque_seguranca|n }}</td>
-            <td class="n" data-v="{{ r.nivel_servico }}">{{ r.nivel_servico|pct(1) }}</td>
-            <td class="n fraco">{{ r.cobertura_dias|n(0) }}<span class="suf">d</span></td>
-            <td class="n fraco">{{ r.giro_ano|n(1) }}×</td>
-            <td class="n" data-v="{{ r.capital_imobilizado }}"><span class="pre">R$</span>{{ r.capital_imobilizado|n }}</td>
-            <td class="n" data-v="{{ r.lucro_bruto_ano }}"><span class="pre">R$</span>{{ r.lucro_bruto_ano|curto }}</td>
-            <td class="n" data-v="{{ r.lucro_perdido_ruptura }}">{% if r.lucro_perdido_ruptura > 0 %}<span class="c-cr"><span class="pre">R$</span>{{ r.lucro_perdido_ruptura|curto }}</span>{% else %}<span class="t4">–</span>{% endif %}</td>
-            <td class="n" data-v="{{ r.risco_de_faltar or 0 }}" data-risco="{{ r.risco_de_faltar or 0 }}"></td>
-          </tr>
-        {% endfor %}
-        </tbody>
+        <tbody id="tb-corpo"></tbody>
       </table>
+    </div>
+    <div class="painel-int" id="tb-rodape" style="display:none">
+      <span class="pequeno t4" id="tb-mostrando"></span>
+      <button class="btn btn-p" id="tb-mais">Mostrar mais</button>
     </div>
   </div>
 </div>
@@ -148,49 +114,167 @@
 <script src="{{ est('item.js') }}"></script>
 <script>
 (function () {
-  document.querySelectorAll("td[data-pos]").forEach(function (td) {
-    td.innerHTML = N.barraPosicao(+td.dataset.pos, +td.dataset.r, +td.dataset.max);
-  });
-  document.querySelectorAll("td[data-risco]").forEach(function (td) {
-    td.innerHTML = N.seloRisco(+td.dataset.risco);
-  });
+  /* A tabela e montada no navegador a partir de /api/itens/tabela. Sao ~19 mil
+     itens: renderizar todos no HTML travava a pagina, e filtrar 19 mil <tr> a
+     cada tecla travava a busca. Aqui o filtro e a ordenacao rodam sobre o
+     array de dados, e so as primeiras PAGINA linhas do resultado vao ao DOM;
+     os agregados continuam somando a selecao inteira. */
+  var PAGINA = 300;
+  var dados = [], f = { familia: "", abc: "", regime: "", risco: "" };
+  var ord = { col: null, dir: "desc" }, txt = "", limite = PAGINA;
+  var corpo = document.getElementById("tb-corpo");
+  var tabela = document.getElementById("tb-itens");
+  var ths = Array.prototype.slice.call(tabela.tHead.rows[0].cells);
 
-  var f = { familia: "", abc: "", regime: "", risco: "" };
+  function marginal(r) { return (r.regime || "").indexOf("marginal") >= 0; }
+  function num(v) { return v === null || v === undefined ? 0 : +v; }
+
+  /* uma chave de ordenacao por coluna, na mesma ordem do <thead> */
+  var CHAVE = [
+    function (r) { return (r.item || "").toLowerCase(); },
+    function (r) { return (r.classificacao || "").toLowerCase(); },
+    function (r) { return marginal(r) ? "unid. marginal" : "eoq + normal"; },
+    function (r) { return num(r.custo_unitario); },
+    function (r) { return num(r.preco_por_peca); },
+    function (r) { return num(r.lucro_por_peca); },
+    function (r) { return num(r.margem_por_peca_pct); },
+    function (r) { return num(r.pecas_vendidas); },
+    function (r) { return num(r.quantidade_a_comprar); },
+    function (r) { return num(r.demanda_media_dia); },
+    function (r) { return num(r.cv_diario); },
+    function (r) { return num(r.posicao_estoque) / (num(r.ponto_de_pedido) || 1); },
+    function (r) { return num(r.lead_time_dias); },
+    function (r) { return num(r.lote_compra); },
+    function (r) { return num(r.estoque_seguranca); },
+    function (r) { return num(r.nivel_servico); },
+    function (r) { return num(r.cobertura_dias); },
+    function (r) { return num(r.giro_ano); },
+    function (r) { return num(r.capital_imobilizado); },
+    function (r) { return num(r.lucro_bruto_ano); },
+    function (r) { return num(r.lucro_perdido_ruptura); },
+    function (r) { return num(r.risco_de_faltar); }
+  ];
+
+  function preparar(r) {
+    r._busca = ((r.item || "") + " " + (r.sku || "") + " " + (r.familia || "")).toLowerCase();
+    r._regime = marginal(r) ? "marginal" : "EOQ";
+    r._rop = num(r.posicao_estoque) <= num(r.ponto_de_pedido) ? 1 : 0;
+    r._comprar = r.decisao === "COMPRAR AGORA" ? 1 : 0;
+    return r;
+  }
+
+  function passa(r) {
+    if (f.familia && r.familia !== f.familia) return false;
+    if (f.abc && r.curva_abc !== f.abc) return false;
+    if (f.regime && r._regime !== f.regime) return false;
+    if (f.risco === "rop" && !r._rop) return false;
+    if (f.risco === "comprar" && !r._comprar) return false;
+    if (txt && r._busca.indexOf(txt) < 0) return false;
+    return true;
+  }
+
+  function rs(v, casas) { return '<span class="pre">R$</span>' + N.num(v, casas); }
+
+  function linha(r) {
+    var lucro = num(r.lucro_por_peca), margem = num(r.margem_por_peca_pct);
+    var comprar = num(r.quantidade_a_comprar), perdido = num(r.lucro_perdido_ruptura);
+    var prazo = num(r.lead_time_dias), pedidos = num(r.lead_time_pedidos);
+    return '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '">' +
+      '<td class="nome forte">' + N.esc(r.item) +
+        '<div class="pequeno t4">' + N.esc(r.sku) + ' · ' + N.esc(r.familia) + '</div></td>' +
+      '<td><span class="classe classe-' + N.esc(r.curva_abc) + '">' + N.esc(r.classificacao) + '</span></td>' +
+      '<td class="fraco pequeno">' + (marginal(r) ? "Unid. marginal" : "EOQ + normal") + '</td>' +
+      '<td class="n">' + rs(r.custo_unitario, 2) + '</td>' +
+      '<td class="n">' + rs(r.preco_por_peca, 2) + '</td>' +
+      '<td class="n ' + (lucro > 0 ? "c-mt" : "c-cr") + '">' + rs(r.lucro_por_peca, 2) + '</td>' +
+      '<td class="n ' + (margem <= 0 ? "c-cr" : "") + '">' + N.pct(r.margem_por_peca_pct, 1) + '</td>' +
+      '<td class="n fraco">' + N.num(r.pecas_vendidas) + '</td>' +
+      '<td class="n ' + (comprar > 0 ? "forte" : "") + '">' +
+        (comprar > 0 ? N.num(comprar) + '<span class="suf">un</span>' : '<span class="t4">–</span>') + '</td>' +
+      '<td class="n">' + N.num(r.demanda_media_dia, 2) + '</td>' +
+      '<td class="n fraco">' + N.num(r.cv_diario, 2) + '</td>' +
+      '<td class="n">' + N.barraPosicao(num(r.posicao_estoque), num(r.ponto_de_pedido), num(r.estoque_maximo)) + '</td>' +
+      '<td class="n ' + (prazo > 90 ? "c-am" : "") + '" title="desvio ' + N.num(r.lead_time_desvio_dias, 1) +
+        ' dias · ' + N.num(pedidos) + ' pedidos">' + N.num(prazo) + '<span class="suf">d</span>' +
+        (pedidos < 3 ? ' <span class="t4" title="prazo estimado com menos de 3 pedidos">?</span>' : '') + '</td>' +
+      '<td class="n">' + N.num(r.lote_compra) + '</td>' +
+      '<td class="n fraco">' + N.num(r.estoque_seguranca) + '</td>' +
+      '<td class="n">' + N.pct(r.nivel_servico, 1) + '</td>' +
+      '<td class="n fraco">' + N.num(r.cobertura_dias, 0) + '<span class="suf">d</span></td>' +
+      '<td class="n fraco">' + N.num(r.giro_ano, 1) + '×</td>' +
+      '<td class="n">' + rs(r.capital_imobilizado) + '</td>' +
+      '<td class="n">' + rs(r.lucro_bruto_ano) + '</td>' +
+      '<td class="n">' + (perdido > 0 ? '<span class="c-cr">' + rs(perdido) + '</span>' : '<span class="t4">–</span>') + '</td>' +
+      '<td class="n">' + N.seloRisco(num(r.risco_de_faltar)) + '</td>' +
+      '</tr>';
+  }
 
   function agregar(vis) {
     var cap = 0, luc = 0, per = 0, rop = 0, ns = 0;
-    vis.forEach(function (tr) {
-      cap += +tr.dataset.capital || 0;
-      luc += +tr.dataset.lucro || 0;
-      per += +tr.dataset.perdido || 0;
-      rop += +tr.dataset.rop || 0;
-      ns += +tr.dataset.ns || 0;
+    vis.forEach(function (r) {
+      cap += num(r.capital_imobilizado); luc += num(r.lucro_bruto_ano);
+      per += num(r.lucro_perdido_ruptura); rop += r._rop; ns += num(r.nivel_servico);
     });
     var n = vis.length || 1;
-    document.getElementById("a-itens").textContent = vis.length;
+    document.getElementById("a-itens").textContent = N.num(vis.length);
     document.getElementById("a-capital").textContent = N.curto(cap);
     document.getElementById("a-lucro").textContent = N.curto(luc);
     document.getElementById("a-perdido").textContent = N.curto(per);
     document.getElementById("a-retorno").textContent = cap > 0 ? N.num(luc / cap, 1) + "×" : "–";
-    document.getElementById("a-rop").textContent = rop;
+    document.getElementById("a-rop").textContent = N.num(rop);
     document.getElementById("a-ns").textContent = N.pct(ns / n, 1);
   }
 
-  var motor = N.tabela("#tb-itens", {
-    busca: "#q",
-    filtro: function (tr) {
-      if (f.familia && tr.dataset.familia !== f.familia) return false;
-      if (f.abc && tr.dataset.abc !== f.abc) return false;
-      if (f.regime && tr.dataset.regime !== f.regime) return false;
-      if (f.risco === "rop" && tr.dataset.rop !== "1") return false;
-      if (f.risco === "comprar" && tr.dataset.comprar !== "1") return false;
-      return true;
-    },
-    aoFiltrar: agregar
+  var vis = [];
+  function aplicar(manterLimite) {
+    if (!manterLimite) limite = PAGINA;
+    vis = dados.filter(passa);
+    if (ord.col !== null) {
+      var k = CHAVE[ord.col], s = ord.dir === "asc" ? 1 : -1;
+      vis = vis.slice().sort(function (a, b) {
+        var x = k(a), y = k(b);
+        if (x === y) return 0;
+        return (typeof x === "number" ? x - y : (x > y ? 1 : -1)) * s;
+      });
+    }
+    corpo.innerHTML = vis.slice(0, limite).map(linha).join("");
+    agregar(vis);
+    var rodape = document.getElementById("tb-rodape");
+    if (vis.length > limite) {
+      rodape.style.display = "";
+      document.getElementById("tb-mostrando").textContent =
+        "mostrando " + N.num(limite) + " de " + N.num(vis.length) + " itens da seleção";
+      document.getElementById("tb-mais").textContent = "Mostrar mais " + N.num(Math.min(PAGINA, vis.length - limite));
+    } else {
+      rodape.style.display = "none";
+    }
+  }
+  document.getElementById("tb-mais").addEventListener("click", function () {
+    limite += PAGINA; aplicar(true);
+  });
+
+  /* ordenacao por clique no cabecalho, mesma convencao visual de N.tabela */
+  ths.forEach(function (th, i) {
+    th.classList.add("ord");
+    th.insertAdjacentHTML("beforeend", '<span class="seta"></span>');
+    th.addEventListener("click", function () {
+      if (ord.col === i) ord.dir = ord.dir === "asc" ? "desc" : "asc";
+      else { ord.col = i; ord.dir = th.classList.contains("n") ? "desc" : "asc"; }
+      ths.forEach(function (o) { o.classList.remove("asc", "desc"); });
+      th.classList.add(ord.dir);
+      aplicar();
+    });
+  });
+
+  /* busca com debounce: espera a pessoa parar de digitar */
+  var q = document.getElementById("q"), tmr;
+  q.addEventListener("input", function () {
+    clearTimeout(tmr);
+    tmr = setTimeout(function () { txt = q.value.trim().toLowerCase(); aplicar(); }, 150);
   });
 
   document.getElementById("f-familia").addEventListener("change", function () {
-    f.familia = this.value; motor.aplicar();
+    f.familia = this.value; aplicar();
   });
   [["f-abc", "abc"], ["f-regime", "regime"], ["f-risco", "risco"]].forEach(function (par) {
     var el = document.getElementById(par[0]);
@@ -200,13 +284,21 @@
       el.querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
       b.classList.add("on");
       f[par[1]] = b.dataset.v;
-      motor.aplicar();
+      aplicar();
     });
   });
 
-  document.querySelector("#tb-itens tbody").addEventListener("click", function (e) {
+  corpo.addEventListener("click", function (e) {
     var tr = e.target.closest("tr[data-sku]");
     if (tr) abrirItem(tr.dataset.sku);
+  });
+
+  corpo.innerHTML = '<tr><td colspan="22"><div class="carregando"><div class="girar"></div></div></td></tr>';
+  N.buscar("/api/itens/tabela").then(function (j) {
+    dados = j.itens.map(preparar);
+    aplicar();
+  }).catch(function (err) {
+    corpo.innerHTML = '<tr><td colspan="22" class="t4">Não foi possível carregar os itens: ' + N.esc(err.message) + '</td></tr>';
   });
 })();
 </script>

@@ -54,6 +54,10 @@
   .pendente { display: none; align-items: center; gap: 14px; }
   .pendente.on { display: flex; }
   .pendente .txt { flex: 1; }
+  .eixos { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .eixos label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--tinta-3); }
+  .eixos select { max-width: 210px; font-size: 11.5px; }
+  .eixos .seg button { font-size: 10.5px; padding: 2px 7px; }
 </style>
 {% endblock %}
 
@@ -106,8 +110,14 @@
 
 <!-- ============================================ dispersão -->
 <div class="painel mb14">
-  <div class="painel-cab"><h2>Demanda por dia × variabilidade</h2>
-    <span class="dica">cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar</span>
+  <div class="painel-cab"><h2 id="nuvem-tit">Demanda por dia × variabilidade</h2>
+    <span class="dica" id="nuvem-dica">cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar</span>
+    <div class="dir eixos">
+      <label>X <select id="eixo-x"></select></label>
+      <div class="seg" id="esc-x"><button data-v="log">log</button><button data-v="linear">linear</button></div>
+      <label>Y <select id="eixo-y"></select></label>
+      <div class="seg" id="esc-y"><button data-v="log">log</button><button data-v="linear">linear</button></div>
+    </div>
   </div>
   <div class="painel-int"><div id="g-nuvem" class="gfx" style="height:340px"></div></div>
 </div>
@@ -148,6 +158,7 @@
           <th class="n">Custo/peça</th>
           <th class="n">Custo mediano</th>
           <th class="n">Lucro/peça</th>
+          <th class="n">Margem</th>
           <th class="n">Comprar</th>
           <th class="n">Valor compra</th>
           <th class="n">Capital</th>
@@ -171,6 +182,13 @@
   var f = { regra: "", familia: "", grav: "" };
   var motor = null;
   var pendentes = 0;
+  /* os eixos da nuvem: chave da dimensao e escala, lembrados entre visitas */
+  var DIM = {};
+  var eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear" };
+  try {
+    var g = JSON.parse(localStorage.getItem("outliers.eixos") || "null");
+    if (g && g.x && g.y) eixo = g;
+  } catch (e) {}
 
   function carregar() {
     return N.buscar("/api/outliers", true).then(function (d) {
@@ -178,6 +196,9 @@
       REGRA = {}; d.regras.forEach(function (r) { REGRA[r.chave] = r; });
       CAMPOS = d.campos;
       POR_SKU = {}; d.itens.forEach(function (r) { POR_SKU[r.sku] = r; });
+      DIM = {}; (d.dimensoes || []).forEach(function (x) { DIM[x.chave] = x; });
+      if (!DIM[eixo.x] || !DIM[eixo.y]) eixo = { x: "demanda_media_dia", y: "cv_diario", ex: "log", ey: "linear" };
+      montarEixos();
       placar(); regras(); nuvem(); tabela();
     });
   }
@@ -207,6 +228,7 @@
       case "prazo_longo": return "prazo ≥ " + N.num(L.prazo_longo, 0) + " dias";
       case "prazo_incerto": return "menos de " + L.prazo_pedidos_min + " pedidos com prazo longo, ou desvio > média";
       case "custo_movimento": return "custo de hoje ±" + Math.round(L.custo_movimento * 100) + "% do mediano";
+      case "margem_atipica": return "margem do item a ≥ " + Math.round(L.margem_desvio * 100) + " pontos da mediana da família";
       case "compra_desproporcional": return "compra > " + L.compra_dias + " dias de demanda, ou ≥ R$ " + N.curto(L.compra_valor);
       default: return "";
     }
@@ -233,13 +255,76 @@
   });
 
   /* ------------------------------------------------------------- nuvem */
+  /* o valor de uma dimensao como texto, com unidade: % e fracao no dado */
+  function fmtDim(k, v) {
+    var d = DIM[k]; if (v === null || v === undefined || !isFinite(v)) return "–";
+    if (d.unidade === "%") return N.pct(v, d.casas);
+    if (d.unidade === "R$") return "R$ " + N.num(v, d.casas);
+    return N.num(v, d.casas) + (d.unidade ? " " + d.unidade : "");
+  }
+  function fmtEixo(k) {
+    var d = DIM[k];
+    return function (v) {
+      if (d.unidade === "%") return N.pct(v, 0);
+      if (d.unidade === "R$") return N.curto(v);
+      return N.num(v, v < 1 ? 2 : 0);
+    };
+  }
+  function montarEixos() {
+    var ops = Object.keys(DIM).map(function (k) {
+      return '<option value="' + k + '">' + N.esc(DIM[k].rotulo) + "</option>";
+    }).join("");
+    id("eixo-x").innerHTML = ops; id("eixo-y").innerHTML = ops;
+    id("eixo-x").value = eixo.x; id("eixo-y").value = eixo.y;
+    pintarEscalas();
+  }
+  function pintarEscalas() {
+    id("esc-x").querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === eixo.ex); });
+    id("esc-y").querySelectorAll("button").forEach(function (b) { b.classList.toggle("on", b.dataset.v === eixo.ey); });
+  }
+  function guardarEixos() {
+    try { localStorage.setItem("outliers.eixos", JSON.stringify(eixo)); } catch (e) {}
+  }
+  id("eixo-x").addEventListener("change", function () {
+    eixo.x = this.value; eixo.ex = DIM[eixo.x].escala; pintarEscalas(); guardarEixos(); nuvem();
+  });
+  id("eixo-y").addEventListener("change", function () {
+    eixo.y = this.value; eixo.ey = DIM[eixo.y].escala; pintarEscalas(); guardarEixos(); nuvem();
+  });
+  id("esc-x").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    eixo.ex = b.dataset.v; pintarEscalas(); guardarEixos(); nuvem();
+  });
+  id("esc-y").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    eixo.ey = b.dataset.v; pintarEscalas(); guardarEixos(); nuvem();
+  });
+
   function nuvem() {
-    var fundo = [], am = [], cr = [];
+    var fundo = [], am = [], cr = [], fora = 0, total = 0;
+    var kx = eixo.x, ky = eixo.y, dx = DIM[kx], dy = DIM[ky];
+    /* em escala log o zero nao existe: o ponto sai e e contado */
+    var okx = eixo.ex === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
+    var oky = eixo.ey === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
     D.nuvem.forEach(function (r) {
-      if (!(r.demanda_media_dia > 0) || !(r.cv_diario >= 0)) return;
-      var p = { value: [r.demanda_media_dia, r.cv_diario], sku: r.sku, item: r.item, lead: r.lead_time_dias };
+      total++;
+      var vx = r[kx], vy = r[ky];
+      if (vx === null || vy === null || vx === undefined || vy === undefined || !okx(vx) || !oky(vy)) { fora++; return; }
+      var p = { value: [vx, vy], sku: r.sku, item: r.item };
       (r.gravidade === "cr" ? cr : r.gravidade === "am" ? am : fundo).push(p);
     });
+    id("nuvem-tit").textContent = dx.rotulo + " × " + dy.rotulo;
+    id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar" +
+      (fora ? " · " + N.num(fora) + " de " + N.num(total) + " sem valor válido nesta escala ficaram de fora" : "");
+    function eixoCfg(k, esc, nameGap, semGrade) {
+      var d = DIM[k];
+      var o = { name: d.rotulo + (d.unidade ? " (" + d.unidade + ")" : "") + (esc === "log" ? " · log" : ""),
+        nameLocation: "middle", nameGap: nameGap,
+        axisLabel: { color: C.tinta4, fontSize: 10, formatter: fmtEixo(k) } };
+      if (semGrade) o.splitLine = { show: false };
+      if (esc === "log") { o.type = "log"; o.logBase = 10; }
+      return o;
+    }
     N.grafico("g-nuvem", {
       grid: N.grade({ top: 34, right: 22, bottom: 40, left: 4 }),
       legend: { top: 0, left: 0, itemWidth: 9, itemHeight: 9, itemGap: 16, icon: "circle",
@@ -248,17 +333,13 @@
         var p = Array.isArray(ps) ? ps[0] : ps;
         var r = POR_SKU[p.data.sku];
         var h = N.dicaTit(p.data.item) +
-          N.dicaLin(C.ceu, "demanda por dia", N.num(p.data.value[0], 3) + " un") +
-          N.dicaLin(C.ambar, "CV diário", N.num(p.data.value[1], 2)) +
-          N.dicaLin(C.tinta4, "prazo", N.num(p.data.lead, 0) + " dias");
+          N.dicaLin(C.ceu, dx.rotulo, fmtDim(kx, p.data.value[0])) +
+          N.dicaLin(C.ambar, dy.rotulo, fmtDim(ky, p.data.value[1]));
         if (r) h += N.dicaLin(C.coral, "motivos", r.motivos.map(function (k) { return REGRA[k].rotulo; }).join(", "));
         return h;
       }), { trigger: "item" }),
-      xAxis: N.eixoY({ type: "log", logBase: 10, name: "demanda por dia (escala log)",
-        nameLocation: "middle", nameGap: 28, splitLine: { show: false },
-        axisLabel: { color: C.tinta4, fontSize: 10, formatter: function (v) { return N.num(v, v < 1 ? 2 : 0); } } }),
-      yAxis: N.eixoY({ name: "coeficiente de variação diário", nameLocation: "middle", nameGap: 40,
-        axisLabel: { color: C.tinta4, fontSize: 10 } }),
+      xAxis: N.eixoY(eixoCfg(kx, eixo.ex, 28, true)),
+      yAxis: N.eixoY(eixoCfg(ky, eixo.ey, 44)),
       series: [
         { name: "sem motivo", type: "scatter", data: fundo, symbolSize: 5, silent: true,
           itemStyle: { color: N.sombra(C.tinta4, 0.35) }, large: true },
@@ -304,6 +385,9 @@
       '<td class="n" data-v="' + (r.custo_unitario || 0) + '">' + par(r.custo_unitario, aj.custo_unitario, 2, "R$ ") + "</td>" +
       '<td class="n fraco" data-v="' + (r.custo_mediano || 0) + '">R$ ' + N.num(r.custo_mediano, 2) + "</td>" +
       '<td class="n ' + (r.lucro_por_peca > 0 ? "c-mt" : "c-cr") + '" data-v="' + (r.lucro_por_peca || 0) + '">R$ ' + N.num(r.lucro_por_peca, 2) + "</td>" +
+      '<td class="n" data-v="' + (r.margem_item || 0) + '" title="típica da família ' + N.pct(r.margem_tipica, 0) + '">' +
+        (r.margem_item === null || r.margem_item === undefined ? '<span class="t4">–</span>' :
+          N.pct(r.margem_item, 0) + ' <span class="t4 pequeno">/ ' + N.pct(r.margem_tipica, 0) + "</span>") + "</td>" +
       '<td class="n" data-v="' + (r.quantidade_a_comprar || 0) + '">' + (r.quantidade_a_comprar > 0 ? N.num(r.quantidade_a_comprar, 0) + '<span class="suf">un</span>' : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.valor_da_compra || 0) + '">' + (r.valor_da_compra > 0 ? "R$ " + N.curto(r.valor_da_compra) : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.capital_imobilizado || 0) + '">R$ ' + N.curto(r.capital_imobilizado || 0) + "</td>" +
@@ -362,6 +446,7 @@
       case "prazo_longo": return "prazo " + N.num(r.lead_time_dias, 0) + " dias";
       case "prazo_incerto": return "prazo " + N.num(r.lead_time_dias, 0) + " ± " + N.num(r.lead_time_desvio_dias, 1) + " dias, medido em " + N.num(r.lead_time_pedidos, 0) + " pedido(s)";
       case "custo_movimento": return "custo hoje R$ " + N.num(r.custo_unitario, 2) + " · mediano R$ " + N.num(r.custo_mediano, 2) + " · último lançado R$ " + N.num(r.custo_ultimo_lancado, 2);
+      case "margem_atipica": return "preço médio R$ " + N.num(r.preco_liquido_peca, 2) + " · custo R$ " + N.num(r.custo_unitario, 2) + " · margem " + N.pct(r.margem_item, 0) + " vs " + N.pct(r.margem_tipica, 0) + " típica da família";
       case "margem_negativa": return "preço praticado R$ " + N.num(r.preco_liquido_peca, 2) + " · custo R$ " + N.num(r.custo_unitario, 2);
       case "compra_desproporcional": return "compra " + N.num(r.quantidade_a_comprar, 0) + " un = " + N.num(r.quantidade_a_comprar / Math.max(r.demanda_media_dia, 1e-9), 0) + " dias de demanda · R$ " + N.curto(r.valor_da_compra);
       case "historico_curto": return N.num(r.dias_utilizaveis, 0) + " dias utilizáveis na janela";
@@ -388,7 +473,13 @@
         (alvos[k] ? ' <span class="selo mini selo-am liso">apontado pelos motivos</span>' : "") + "</div>" +
         '<div class="d">' + N.esc(c.ajuda) + "</div>" +
         '<div class="atual">estimado pela base: <b>' + (atual === null || atual === undefined ? "–" :
-          (c.unidade === "R$" ? "R$ " + N.num(atual, c.casas) : N.num(atual, c.casas) + " " + c.unidade)) + "</b></div></div>" +
+          (c.unidade === "R$" ? "R$ " + N.num(atual, c.casas) : N.num(atual, c.casas) + " " + c.unidade)) + "</b></div>" +
+        (k === "custo_unitario" && r.preco_liquido_peca > 0 ?
+          '<div class="atual">preço médio praticado <b>R$ ' + N.num(r.preco_liquido_peca, 2) + "</b> · margem <b>" + N.pct(r.margem_item, 0) +
+          "</b> · típica da família <b>" + N.pct(r.margem_tipica, 0) + "</b></div>" +
+          '<div class="atual">custo que daria a margem típica: <b>R$ ' + N.num(r.custo_sugerido, 2) +
+          '</b> <button class="btn btn-p" type="button" data-usar="custo_unitario" data-valor="' + r.custo_sugerido + '">usar</button></div>' : "") +
+        "</div>" +
         '<div class="ent"><input type="number" step="any" min="0" data-campo="' + k + '" placeholder="manter estimado" value="' +
         (aj[k] !== undefined && aj[k] !== null ? aj[k] : "") + '"><span class="un">' + c.unidade + "</span></div></div>";
     });
@@ -400,6 +491,12 @@
       '<div id="aj-msg"></div>';
     var int = N.abrir(N.esc(r.item), "corrigir a entrada deste item", h);
     int.querySelector("#aj-dossie").addEventListener("click", function () { abrirItem(sku); });
+    int.querySelectorAll("[data-usar]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var inp = int.querySelector('input[data-campo="' + b.dataset.usar + '"]');
+        if (inp) { inp.value = b.dataset.valor; inp.focus(); }
+      });
+    });
     int.querySelector("#aj-salvar").addEventListener("click", function () {
       var valores = {};
       int.querySelectorAll("input[data-campo]").forEach(function (i) { valores[i.dataset.campo] = i.value; });

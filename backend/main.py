@@ -553,11 +553,10 @@ def api_estrategias():
 # ======================================================================
 # ITENS
 # ======================================================================
-@app.get("/itens")
-def itens(request: Request):
-    w = wh()
-    if not pronto(w):
-        return sem_dados(request)
+def _itens_tabela(w) -> pd.DataFrame:
+    """As colunas da tabela de /itens, item a item, ja ordenadas por lucro
+    potencial. Servida como JSON: com ~19 mil SKUs, renderizar a tabela no
+    HTML passava de 38 MB e travava o navegador."""
     df = analitico.modelo_df(w).merge(
         analitico.plano_df(w)[["sku", "posicao_estoque", "quantidade_a_comprar",
                                "valor_da_compra", "decisao", "risco_de_faltar"]],
@@ -580,10 +579,26 @@ def itens(request: Request):
             "preco_por_peca", "lucro_por_peca", "margem_por_peca_pct",
             "pecas_vendidas", "quantidade_a_comprar", "valor_da_compra",
             "lead_time_desvio_dias", "lead_time_pedidos", "mu_periodo"]
-    cols = [c for c in cols if c in df.columns]
-    familias = sorted(df.familia.dropna().unique().tolist())
+    return df[[c for c in cols if c in df.columns]]
+
+
+@app.get("/itens")
+def itens(request: Request):
+    w = wh()
+    if not pronto(w):
+        return sem_dados(request)
+    fam = w.query(f"select distinct familia from {ref('res_sku_modelo')} "
+                  f"where familia is not null order by 1")
+    total = w.query(f"select count(*) as n from {ref('res_sku_modelo')}").n.iloc[0]
     return tpl.TemplateResponse(request, "itens.html", contexto(
-        request, "itens", linhas=analitico.registros(df[cols]), familias=familias))
+        request, "itens", total=int(total), familias=fam.familia.tolist()))
+
+
+@app.get("/api/itens/tabela")
+def api_itens_tabela():
+    """Todas as linhas da tabela de /itens; a pagina filtra, ordena e pagina
+    no navegador."""
+    return JSONResponse({"itens": analitico.registros(_itens_tabela(wh()))})
 
 
 @app.get("/api/item/{sku}/conferencia")
