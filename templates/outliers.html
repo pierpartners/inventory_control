@@ -82,10 +82,10 @@
     <div class="valor md" id="m-sinalizados">–</div>
     <div class="nota">ao menos um motivo — <b id="m-graves">–</b> em vermelho</div>
   </div>
-  <div class="painel metrica am">
-    <div class="rotulo">Capital em itens sinalizados</div>
-    <div class="valor md"><span class="pre">R$</span><span id="m-capital">–</span></div>
-    <div class="nota">estoque + compra do ciclo apoiados num número suspeito</div>
+  <div class="painel metrica am" title="Se a suspeita de cada motivo estiver certa: quanto o plano deste ciclo perde comprando com o número errado, contra o que compraria com o número corrigido. Já desconta o custo de oportunidade do caixa.">
+    <div class="rotulo">Custo do erro no ciclo</div>
+    <div class="valor md"><span class="pre">R$</span><span id="m-erro">–</span></div>
+    <div class="nota">compra a mais <b id="m-erro-mais">–</b> · a menos <b id="m-erro-menos">–</b> · capital exposto R$ <b id="m-capital">–</b></div>
   </div>
   <div class="painel metrica ce">
     <div class="rotulo">Com ajuste manual</div>
@@ -164,6 +164,7 @@
           <th class="n">Comprar</th>
           <th class="n">Valor compra</th>
           <th class="n">Capital</th>
+          <th class="n" title="Se a suspeita estiver certa, quanto o plano deste ciclo perde por comprar com o número errado">Custo do erro</th>
           <th class="nao-ord"></th>
         </tr></thead>
         <tbody id="corpo"></tbody>
@@ -218,6 +219,9 @@
     id("m-sinalizados").textContent = N.num(D.sinalizados);
     id("m-graves").textContent = N.num(graves);
     id("m-capital").textContent = N.curto(cap);
+    id("m-erro").textContent = N.curto(D.custo_erro || 0);
+    id("m-erro-mais").textContent = "R$ " + N.curto(D.custo_erro_a_mais || 0);
+    id("m-erro-menos").textContent = "R$ " + N.curto(D.custo_erro_a_menos || 0);
     id("m-ajustados").textContent = N.num(D.ajustados);
   }
 
@@ -563,6 +567,38 @@
     return '<span class="par"><span class="de">' + a + " → </span><span class=\"aj\">" +
       (pre || "") + N.num(ajustado, casas) + (suf || "") + "</span></span>";
   }
+  var SENTIDO = { a_mais: "compra a mais", a_menos: "compra a menos", igual: "mesma compra" };
+  function erroCel(r) {
+    if (r.custo_erro === null || r.custo_erro === undefined)
+      return '<span class="t4" title="o motivo não traz um valor corrigido para comparar">sem hipótese</span>';
+    if (!(r.custo_erro >= 0.5)) return '<span class="t4">R$ 0</span>';
+    return '<span class="' + (r.custo_erro >= 1000 ? "c-cr forte" : "") + '">R$ ' + N.curto(r.custo_erro) + "</span>" +
+      '<div class="pequeno t4">' + SENTIDO[r.sentido] + "</div>";
+  }
+  /* o quadro do ajuste: a hipotese de cada motivo e o que ela muda no ciclo */
+  function quadroErro(r) {
+    if (r.custo_erro === null || r.custo_erro === undefined) {
+      if (!r.motivos.length) return "";
+      return '<div class="nota-lat mb14">Nenhum destes motivos traz um valor corrigido para comparar ' +
+        "(histórico curto é fragilidade, não erro com direção). Exposição: R$ " + N.curto(r.impacto || 0) + " entre estoque e compra.</div>";
+    }
+    var hip = r.hipotese || {}, ks = Object.keys(hip);
+    var h = '<div class="rotulo mb8">Quanto o erro custa neste ciclo</div><div class="nota-lat mb14">';
+    h += ks.length ? "Hipótese dos motivos: " + ks.map(function (k) {
+      var c = CAMPOS[k];
+      var fmt = function (v) { return c.unidade === "R$" ? "R$ " + N.num(v, 2) : N.num(v, Math.max(c.casas, 1)) + " " + c.unidade; };
+      return "<b>" + N.esc(c.rotulo.toLowerCase()) + "</b> " + fmt(r[k]) + " → " + fmt(hip[k]);
+    }).join(" · ") : "Hipótese: a compra limitada a " + N.num(D.limiares.compra_dias, 0) + " dias de demanda";
+    h += ".<br>O plano compra <b>" + N.num(r.quantidade_a_comprar, 0) + " un</b>; com a hipótese compraria <b>" +
+      N.num(r.q_certo, 0) + " un</b>.<br>";
+    if (r.sentido === "igual") h += "A hipótese não muda a compra deste ciclo: o erro, se existir, não custa nada agora.";
+    else h += (r.sentido === "a_mais" ? "Se a suspeita estiver certa, as peças a mais custam " : "Se a suspeita estiver certa, deixa-se de ganhar ") +
+      "<b>R$ " + N.num(r.custo_erro, 0) + "</b> (margem esperada menos encalhe, custo de carregar e o custo do caixa). " +
+      "Se estiver errada e o ajuste for aplicado, perde-se <b>R$ " + N.num(r.custo_corrigir, 0) + "</b>.";
+    h += "</div>";
+    if (ks.length) h += '<div class="mb14"><button class="btn btn-p" type="button" id="aj-hipotese">usar a hipótese nos campos</button></div>';
+    return h;
+  }
   function linha(r) {
     var aj = r.ajuste || {};
     return '<tr class="clicavel" data-sku="' + r.sku + '" data-familia="' + N.esc(r.familia || "") +
@@ -591,6 +627,7 @@
       '<td class="n" data-v="' + (r.quantidade_a_comprar || 0) + '">' + (r.quantidade_a_comprar > 0 ? N.num(r.quantidade_a_comprar, 0) + '<span class="suf">un</span>' : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.valor_da_compra || 0) + '">' + (r.valor_da_compra > 0 ? "R$ " + N.curto(r.valor_da_compra) : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.capital_imobilizado || 0) + '">R$ ' + N.curto(r.capital_imobilizado || 0) + "</td>" +
+      '<td class="n" data-v="' + (r.custo_erro === null || r.custo_erro === undefined ? -1 : r.custo_erro) + '">' + erroCel(r) + "</td>" +
       '<td class="n"><button class="btn btn-p" data-ajustar="' + r.sku + '">Ajustar</button></td>' +
       "</tr>";
   }
@@ -665,6 +702,7 @@
       return '<div class="ajuste-motivo ' + g.gravidade + '"><span class="pt"></span><div><b>' + N.esc(g.rotulo) +
         "</b> — " + N.esc(g.explicacao) + '<div class="evid">' + N.esc(evidencia(r, k)) + "</div></div></div>";
     }).join("") : '<div class="nota-lat">Nenhum motivo ativo — o item aparece por ter ajuste manual gravado.</div>') + "</div>";
+    h += quadroErro(r);
     h += '<div class="rotulo mb8">Valores que o motor vai usar</div><div id="aj-campos">';
     Object.keys(CAMPOS).forEach(function (k) {
       var c = CAMPOS[k];
@@ -691,6 +729,13 @@
       '<div id="aj-msg"></div>';
     var int = N.abrir(N.esc(r.item), "corrigir a entrada deste item", h);
     int.querySelector("#aj-dossie").addEventListener("click", function () { abrirItem(sku); });
+    var bh = int.querySelector("#aj-hipotese");
+    if (bh) bh.addEventListener("click", function () {
+      Object.keys(r.hipotese || {}).forEach(function (k) {
+        var inp = int.querySelector('input[data-campo="' + k + '"]');
+        if (inp) inp.value = +Number(r.hipotese[k]).toFixed(Math.max(CAMPOS[k].casas, 2));
+      });
+    });
     int.querySelectorAll("[data-usar]").forEach(function (b) {
       b.addEventListener("click", function () {
         var inp = int.querySelector('input[data-campo="' + b.dataset.usar + '"]');

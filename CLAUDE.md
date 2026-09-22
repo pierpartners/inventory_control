@@ -116,7 +116,13 @@ A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
   (erratic sales, single-day spikes, extreme censoring correction, long/uncertain lead time,
   cost drift, negative margin, disproportionate purchase, short history). Thresholds are
   catalog-relative percentiles with absolute floors, and only items where the model acts (in
-  the purchase, ROP > 0, or curva A/B) are flagged. Feeds the `/outliers` page.
+  the purchase, ROP > 0, or curva A/B) are flagged. Each flagged item also gets a **custo do
+  erro** (`custo_do_erro`): the rule's own hypothesis (peak removed, family lead time, median
+  cost…) is pushed through `ajustes.aplicar` → `modelo.derivar_horizonte`/`dias_capital` →
+  `modelar` → `candidatas_marginais`, and the regret `V'(q_certo) − V'(q_atual)` (valor esperado
+  minus the cash opportunity cost at the plan's cut-off nota) is the R$ lost per cycle if the
+  suspicion is right; `custo_corrigir` is the reverse. `revisao.py` block 10 re-derives it.
+  Feeds the `/outliers` page.
 - `backend/ajustes.py` — per-SKU manual overrides (`data/ajustes_sku.json`: lead time, its
   deviation, unit cost, daily demand and its deviation). Applied at a single hook in
   `modelo.executar()`, right after the financial/demand merge and before any derivation, so

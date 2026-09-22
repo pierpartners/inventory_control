@@ -17,7 +17,8 @@ import numpy as np
 import pandas as pd
 
 from .warehouse import Warehouse, ref
-from . import ajustes
+from .config import Parametros
+from . import ajustes, modelo
 
 # chave, rotulo, gravidade (cr=vermelho, am=ambar), campo(s) a ajustar separados
 # por virgula, explicacao
@@ -162,6 +163,158 @@ def sinalizar(m: pd.DataFrame, lim: dict | None = None) -> pd.DataFrame:
     return m
 
 
+# ----------------------------------------------------------------------
+# custo do erro
+# ----------------------------------------------------------------------
+# Um motivo diz que o numero de entrada parece errado; nao diz quanto isso
+# custa. A conta abaixo responde "se a suspeita estiver certa, quanto eu perco
+# comprando o que o plano manda?". E um arrependimento, na regua do plano:
+#
+#     V'(q) = soma, peca a peca, de  P(vender) x Cu - P(encalhar) x perda
+#                                    - corte x custo x dias_capital
+#
+# O ultimo termo e o custo de oportunidade do caixa: o real gasto neste item
+# deixa de comprar a ultima peca que o plano comprou (a `nota` de corte da
+# fila). Com ele, a quantidade que maximiza V' e exatamente a que a fila
+# compraria com o dado corrigido - e o arrependimento nunca e negativo:
+#
+#     custo do erro = V'_certo(q_certo) - V'_certo(q_atual)
+#
+# avaliado no mundo corrigido. A mesma conta no mundo atual e o custo de
+# corrigir sem precisar - se a suspeita estiver errada e o ajuste for aplicado.
+# As duas saem por ciclo de compra (o horizonte de protecao do item).
+
+def nota_de_corte(fila: pd.DataFrame) -> float:
+    """A nota da ultima peca que o plano comprou. Se a fila inteira coube no
+    caixa, o corte e zero: toda peca de valor positivo seria comprada."""
+    if fila is None or fila.empty or "comprar" not in fila.columns:
+        return 0.0
+    comprou = fila.comprar.fillna(False).astype(bool)
+    if comprou.all() or not comprou.any():
+        return 0.0
+    return float(fila.nota[comprou].min())
+
+
+def hipoteses(s: pd.DataFrame, lim: dict) -> dict[str, dict]:
+    """O valor corrigido que cada motivo sugere, no formato de `ajustes`.
+
+    Nao e a correcao certa - e a hipotese que o proprio motivo carrega (o
+    pico isolado nao existiu, o prazo e o da familia, o custo e o mediano).
+    Varios motivos no mesmo campo: fica o valor mais conservador (o menor).
+    `_limitar` marca o item em que so a compra desproporcional disparou: sem
+    campo a corrigir, a hipotese e a propria compra limitada ao corte de dias.
+    """
+    lead = s.lead_time_dias.fillna(0.0)
+    com_lead = s[lead > 0]
+    med_fam = com_lead.groupby("familia").lead_time_dias.median()
+    med_ger = float(com_lead.lead_time_dias.median()) if len(com_lead) else 0.0
+
+    def num(v, padrao=0.0):
+        v = float(v) if v is not None and pd.notna(v) else padrao
+        return v if np.isfinite(v) else padrao
+
+    fora: dict[str, dict] = {}
+    for r in s[s.n_motivos > 0].itertuples(index=False):
+        ms = set(r.motivos)
+        dem, sd = num(r.demanda_media_dia), num(r.desvio_padrao_dia)
+        lt = num(r.lead_time_dias)
+        sd_lt = num(getattr(r, "lead_time_desvio_dias", 0.0))
+        dems, sds = [], []
+        if "pico_unico" in ms:
+            n = max(num(r.dias_historico), 2.0)
+            pico = num(r.demanda_max_dia)
+            dems.append(max(0.0, (dem * n - pico) / n))
+            sds.append(float(np.sqrt(max(0.0, (sd ** 2 * n - (pico - dem) ** 2) / (n - 1)))))
+        if "censura_extrema" in ms:
+            teto = num(r.demanda_media_dia_ingenua) * (1 + lim["censura_extrema"])
+            if 0 < teto < dem:
+                dems.append(teto)
+                sds.append(sd * teto / dem)
+        if "cv_alto" in ms:
+            sds.append(dem * lim["cv_alto"])
+        h: dict = {}
+        if dems and min(dems) < dem:
+            h["demanda_media_dia"] = min(dems)
+        if sds and min(sds) < sd:
+            h["desvio_padrao_dia"] = min(sds)
+
+        tipico = num(med_fam.get(r.familia, med_ger), med_ger)
+        pedidos = num(getattr(r, "lead_time_pedidos", 0.0))
+        if ("prazo_longo" in ms or ("prazo_incerto" in ms and pedidos < lim["prazo_pedidos_min"])) \
+                and 0 < tipico < lt:
+            h["lead_time_dias"] = tipico
+        if "prazo_incerto" in ms and sd_lt > h.get("lead_time_dias", lt):
+            h["lead_time_desvio_dias"] = h.get("lead_time_dias", lt)
+
+        custo = num(r.custo_unitario)
+        if "custo_movimento" in ms:
+            novo = num(r.custo_mediano)
+        elif ms & {"margem_negativa", "margem_atipica"}:
+            novo = num(r.custo_sugerido)
+        else:
+            novo = 0.0
+        if novo > 0 and abs(novo - custo) > 0.005:
+            h["custo_unitario"] = novo
+
+        if not h and "compra_desproporcional" in ms:
+            h["_limitar"] = True
+        if h:
+            fora[str(r.sku)] = h
+    return fora
+
+
+def _valor(df: pd.DataFrame, q: np.ndarray, p: Parametros, corte: float) -> np.ndarray:
+    """V'(q): valor esperado da compra menos o custo de oportunidade do caixa."""
+    ve = modelo.valor_esperado_da_compra(df, q, p)
+    return ve - corte * q * df.custo_unitario.to_numpy(float) * df.dias_capital.to_numpy(float)
+
+
+def custo_do_erro(s: pd.DataFrame, lim: dict, p: Parametros, corte: float) -> pd.DataFrame:
+    """Uma linha por item sinalizado com hipotese: quanto o erro custa por ciclo.
+
+    O item corrigido passa pelo mesmo caminho do motor - `ajustes.aplicar`
+    (o custo novo desloca a margem, a demanda nova leva os canais junto),
+    `derivar_horizonte`, `dias_capital` e `modelar` com o premio de escassez
+    desta rodada - e a quantidade certa sai de `candidatas_marginais`, a
+    mesma fila do plano. Nenhuma conta do modelo e refeita aqui.
+    """
+    cols = ["sku", "hipotese", "q_certo", "custo_erro", "custo_corrigir", "sentido"]
+    hip = hipoteses(s, lim)
+    if not hip:
+        return pd.DataFrame(columns=cols)
+    atual = s[s.sku.astype(str).isin(hip.keys())].reset_index(drop=True)
+    campos = {k: {c: v for c, v in h.items() if c in ajustes.CAMPOS} for k, h in hip.items()}
+
+    certo = ajustes.aplicar(atual, campos)
+    certo = modelo.derivar_horizonte(certo, p)
+    certo["dias_capital"] = modelo.dias_capital(certo)
+    lam = float(atual.premio_escassez.iloc[0]) if "premio_escassez" in atual.columns else 0.0
+    certo = modelo.modelar(certo, p, lam)
+
+    fila = modelo.candidatas_marginais(certo, p)
+    q_fila = (fila[fila.nota >= corte].groupby("sku").quantidade.sum()
+              if not fila.empty else pd.Series(dtype=float))
+    q_atual = atual.quantidade_a_comprar.fillna(0).to_numpy(float)
+    q_certo = atual.sku.map(q_fila).fillna(0).to_numpy(float)
+    limitar = atual.sku.astype(str).map(lambda k: bool(hip[k].get("_limitar"))).to_numpy()
+    teto = np.ceil(lim["compra_dias"] * atual.demanda_media_dia.fillna(0).to_numpy(float))
+    q_certo = np.where(limitar, np.minimum(q_atual, teto), q_certo)
+
+    erro = _valor(certo, q_certo, p, corte) - _valor(certo, q_atual, p, corte)
+    corrigir = _valor(atual, q_atual, p, corte) - _valor(atual, q_certo, p, corte)
+    return pd.DataFrame({
+        "sku": atual.sku,
+        "hipotese": [{c: v for c, v in hip[str(k)].items() if c in ajustes.CAMPOS}
+                     for k in atual.sku],
+        "q_certo": q_certo,
+        # arredondamento do lote pode deixar -0,01; o arrependimento e >= 0
+        "custo_erro": np.maximum(erro, 0.0),
+        "custo_corrigir": np.maximum(corrigir, 0.0),
+        "sentido": np.where(q_atual > q_certo, "a_mais",
+                            np.where(q_atual < q_certo, "a_menos", "igual")),
+    })
+
+
 COLUNAS_TELA = [
     "sku", "item", "familia", "curva_abc", "classificacao", "regime", "motivos", "n_motivos",
     "gravidade", "ajustes", "demanda_media_dia", "demanda_media_dia_ingenua", "desvio_padrao_dia",
@@ -173,6 +326,7 @@ COLUNAS_TELA = [
     "ponto_de_pedido", "estoque_seguranca", "capital_imobilizado", "quantidade_a_comprar",
     "valor_da_compra", "cobertura_apos_dias", "risco_de_faltar", "decisao",
     "lucro_potencial_periodo", "impacto",
+    "hipotese", "q_certo", "custo_erro", "custo_corrigir", "sentido",
 ]
 
 
@@ -210,12 +364,18 @@ def painel(wh: Warehouse) -> dict:
     m = carregar(wh)
     lim = limiares(m)
     s = sinalizar(m, lim)
+    fila = wh.query(f"select comprar, nota from {ref('res_fila_marginal')}")
+    corte = nota_de_corte(fila)
+    s = s.merge(custo_do_erro(s, lim, Parametros.carregar(), corte), on="sku", how="left")
     aj = ajustes.carregar()
     # itens ajustados aparecem sempre, mesmo que a correcao ja os tenha
     # tirado dos criterios - e assim que se ve o que foi mexido
     alvo = s[(s.n_motivos > 0) | s.sku.astype(str).isin(aj.keys())].copy()
     alvo["ajuste"] = alvo.sku.astype(str).map(aj)
-    alvo = alvo.sort_values(["n_motivos", "impacto"], ascending=[False, False])
+    # a fila da tela e a do dinheiro em jogo: custo do erro, depois quantos
+    # motivos e a exposicao (item sem hipotese fica no fim do seu grupo)
+    alvo = alvo.sort_values(["custo_erro", "n_motivos", "impacto"],
+                            ascending=[False, False, False], na_position="last")
     cols = [c for c in COLUNAS_TELA if c in alvo.columns] + ["ajuste"]
     contagem = {r[0]: int(s[f"f_{r[0]}"].sum()) for r in REGRAS}
     # nuvem do catalogo inteiro, para o item sinalizado ter fundo. Leva todas
@@ -231,6 +391,10 @@ def painel(wh: Warehouse) -> dict:
         "relevantes": int(s.relevante.sum()),
         "sinalizados": int((s.n_motivos > 0).sum()),
         "ajustados": int(s.sku.astype(str).isin(aj.keys()).sum()),
+        "nota_de_corte": corte,
+        "custo_erro": float(s.custo_erro.fillna(0).sum()),
+        "custo_erro_a_mais": float(s.custo_erro[s.sentido.eq("a_mais")].sum()),
+        "custo_erro_a_menos": float(s.custo_erro[s.sentido.eq("a_menos")].sum()),
         "campos": {k: dict(rotulo=v[0], unidade=v[1], casas=v[2], ajuda=v[3])
                    for k, v in ajustes.CAMPOS.items()},
         "itens": registros(alvo[cols]),

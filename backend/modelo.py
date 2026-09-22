@@ -450,6 +450,42 @@ MAX_UNIDADES_POR_ITEM = 6000
 MIN_TITULOS_PRAZO = 3
 
 
+def derivar_horizonte(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
+    """Periodo de protecao, media e desvio da demanda no horizonte, por item.
+
+    Sai de `executar()` para que quem precisa refazer a conta com um dado
+    corrigido (o custo do erro em `outliers.py`) use exatamente esta, e nao
+    uma copia. Le so colunas do item - nada que dependa do catalogo inteiro.
+    """
+    b = b.copy()
+    b["periodo_protecao_dias"] = b.lead_time_dias + p.periodo_revisao_dias
+    b["mu_periodo"] = b.demanda_media_dia * b.periodo_protecao_dias
+    # raiz(H) supoe dias independentes. Quando a demanda tem reversao a media,
+    # essa conta superestima a variacao no horizonte e infla o estoque de
+    # seguranca; `fator_desvio_horizonte` permite corrigir com o valor medido
+    # em scripts/revisao.py. Fica em 1,00 por padrao - a hipotese conservadora.
+    # Variancia da demanda no horizonte, com prazo de entrega VARIAVEL:
+    #
+    #     Var(D_H) = (E[L] + R) x Var(d)  +  E[d]^2 x Var(L)
+    #
+    # O primeiro termo e a variacao da demanda diaria acumulada no horizonte -
+    # e o unico que a versao anterior tinha. O segundo e a variacao do proprio
+    # prazo: se o fornecedor pode atrasar, a janela a cobrir e maior, e um item
+    # de giro alto sofre muito mais com isso do que um de giro baixo.
+    #
+    # No extrato real da Elevato o prazo realizado tem mediana de 18 dias e
+    # desvio mediano de 13,2 - um coeficiente de variacao de 0,75. Ignorar esse
+    # termo subdimensionaria o estoque de seguranca justamente nos itens que
+    # mais vendem. Com `lead_time_desvio_dias` = 0, que e o caso da base
+    # sintetica, a conta recai exatamente na anterior.
+    sd_lead = b.get("lead_time_desvio_dias", pd.Series(0.0, index=b.index)).fillna(0.0)
+    b["sd_lead_time_dias"] = sd_lead
+    b["sd_periodo"] = np.sqrt(
+        b.periodo_protecao_dias * b.desvio_padrao_dia ** 2
+        + (b.demanda_media_dia ** 2) * (sd_lead ** 2)) * p.fator_desvio_horizonte
+    return b
+
+
 def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
     """Quantos dias o dinheiro de uma peca fica preso: `dias_capital`.
 
@@ -509,9 +545,16 @@ def ciclo_financeiro(b: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         np.where(pag.notna(), "catalogo", "parametro"))
     b["prazo_pagamento_dias"] = pag.fillna(float(p.prazo_pagamento_fornecedor_dias))
 
-    b["dias_capital"] = np.maximum(
-        1.0, b.periodo_protecao_dias + b.prazo_recebimento_dias - b.prazo_pagamento_dias)
+    b["dias_capital"] = dias_capital(b)
     return b
+
+
+def dias_capital(b: pd.DataFrame) -> pd.Series:
+    """protecao + recebimento - pagamento, com piso de 1 dia (ver
+    `ciclo_financeiro`). Separado para quem muda o prazo de um item sem
+    refazer os prazos do catalogo inteiro."""
+    return np.maximum(
+        1.0, b.periodo_protecao_dias + b.prazo_recebimento_dias - b.prazo_pagamento_dias)
 
 
 def candidatas_marginais(df: pd.DataFrame, p: Parametros) -> pd.DataFrame:
@@ -1412,32 +1455,11 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
     # variancia, margem, nota e politica saiam todos do valor corrigido.
     b = ajustes.aplicar(b)
 
+    # o periodo de protecao sai antes do ciclo financeiro so para manter a
+    # ordem das colunas gravadas; derivar_horizonte o refaz com o mesmo valor
     b["periodo_protecao_dias"] = b.lead_time_dias + p.periodo_revisao_dias
     b = ciclo_financeiro(b, p)
-    b["mu_periodo"] = b.demanda_media_dia * b.periodo_protecao_dias
-    # raiz(H) supoe dias independentes. Quando a demanda tem reversao a media,
-    # essa conta superestima a variacao no horizonte e infla o estoque de
-    # seguranca; `fator_desvio_horizonte` permite corrigir com o valor medido
-    # em scripts/revisao.py. Fica em 1,00 por padrao - a hipotese conservadora.
-    # Variancia da demanda no horizonte, com prazo de entrega VARIAVEL:
-    #
-    #     Var(D_H) = (E[L] + R) x Var(d)  +  E[d]^2 x Var(L)
-    #
-    # O primeiro termo e a variacao da demanda diaria acumulada no horizonte -
-    # e o unico que a versao anterior tinha. O segundo e a variacao do proprio
-    # prazo: se o fornecedor pode atrasar, a janela a cobrir e maior, e um item
-    # de giro alto sofre muito mais com isso do que um de giro baixo.
-    #
-    # No extrato real da Elevato o prazo realizado tem mediana de 18 dias e
-    # desvio mediano de 13,2 - um coeficiente de variacao de 0,75. Ignorar esse
-    # termo subdimensionaria o estoque de seguranca justamente nos itens que
-    # mais vendem. Com `lead_time_desvio_dias` = 0, que e o caso da base
-    # sintetica, a conta recai exatamente na anterior.
-    sd_lead = b.get("lead_time_desvio_dias", pd.Series(0.0, index=b.index)).fillna(0.0)
-    b["sd_lead_time_dias"] = sd_lead
-    b["sd_periodo"] = np.sqrt(
-        b.periodo_protecao_dias * b.desvio_padrao_dia ** 2
-        + (b.demanda_media_dia ** 2) * (sd_lead ** 2)) * p.fator_desvio_horizonte
+    b = derivar_horizonte(b, p)
     b["cv_diario"] = np.where(b.demanda_media_dia > 0,
                               b.desvio_padrao_dia / b.demanda_media_dia, 0)
     b["cv_periodo"] = np.where(b.mu_periodo > 0, b.sd_periodo / b.mu_periodo, 0)

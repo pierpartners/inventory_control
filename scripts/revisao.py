@@ -32,7 +32,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
 from backend.config import Parametros  # noqa: E402
-from backend import diagnostico  # noqa: E402
+from backend import ajustes, diagnostico, outliers  # noqa: E402
 from backend.modelo import ajustar_distribuicao, caminhar, modelar  # noqa: E402
 from backend.warehouse import abrir, ref  # noqa: E402
 
@@ -1494,11 +1494,98 @@ def bloco9(r: Relatorio, wh, p, ctx) -> None:
 
 
 # ----------------------------------------------------------------------
+# 10. custo do erro (outliers)
+# ----------------------------------------------------------------------
+def _v_linha(mu, sd, Cu, perda, oport, pos, q) -> float:
+    """V'(q) de um item refeito do zero: soma, peca a peca, de
+    P(D>=k) Cu - P(D<k) perda - custo de oportunidade do caixa."""
+    q = int(q)
+    if q <= 0 or mu <= 0:
+        return 0.0
+    var = sd ** 2
+    if var <= mu * 1.05:
+        dist = stats.poisson(mu)
+    else:
+        r_ = mu * mu / (var - mu)
+        dist = stats.nbinom(r_, r_ / (r_ + mu))
+    k = np.arange(pos + 1, pos + q + 1)
+    pv = dist.sf(k - 1)
+    return float((pv * Cu - (1 - pv) * perda).sum() - oport * q)
+
+
+def bloco10(r: Relatorio, wh, p, ctx) -> None:
+    B = "10. custo do erro (outliers)"
+    m = outliers.carregar(wh)
+    lim = outliers.limiares(m)
+    s = outliers.sinalizar(m, lim)
+    corte = outliers.nota_de_corte(ctx["fila"])
+    lam = float(ctx["modelo"].premio_escassez.iloc[0])
+
+    # 10.1 sem hipotese nenhuma, o caminho do contrafactual refaz o gravado:
+    # se isto falha, o custo do erro compara o item corrigido com outro modelo
+    a = s[s.relevante].reset_index(drop=True)
+    from backend import modelo as mod
+    c = ajustes.aplicar(a, {})
+    c = mod.derivar_horizonte(c, p)
+    c["dias_capital"] = mod.dias_capital(c)
+    c = mod.modelar(c, p, lam)
+    for col in ("mu_periodo", "sd_periodo", "dias_capital", "custo_falta_unit",
+                "custo_manter_no_periodo"):
+        r.compara(B, f"contrafactual vazio refaz {col}", c[col], a[col], tol=TOL)
+    fila = mod.candidatas_marginais(c, p)
+    q = a.sku.map(fila[fila.nota >= corte].groupby("sku").quantidade.sum()).fillna(0)
+    dif = int((q != a.quantidade_a_comprar).sum())
+    r.afirma(B, "contrafactual vazio refaz a quantidade do plano", dif == 0,
+             f"{dif} de {len(a)} itens diferem (corte {corte:.3g})", alerta_em_vez=corte > 0)
+
+    # 10.2 cada custo do erro refeito com numpy/scipy, a partir do item corrigido
+    e = outliers.custo_do_erro(s, lim, p, corte)
+    if e.empty:
+        r.alerta(B, "nenhum item com hipotese", "")
+        return
+    hip = {str(k): v for k, v in zip(e.sku, e.hipotese)}
+    atual = s[s.sku.astype(str).isin(hip)].set_index("sku").loc[e.sku].reset_index()
+    base = ajustes.aplicar(atual, hip)
+    P = base.lead_time_dias + p.periodo_revisao_dias
+    mu = base.demanda_media_dia * P
+    sd = np.sqrt(P * base.desvio_padrao_dia ** 2
+                 + base.demanda_media_dia ** 2 * base.lead_time_desvio_dias.fillna(0) ** 2
+                 ) * p.fator_desvio_horizonte
+    share = base.share_ecommerce.fillna(0.0)
+    Cu = (share * base.lucro_por_peca_ecommerce * p.fator_perda_ruptura_ecommerce
+          + (1 - share) * base.lucro_por_peca_lojas * p.fator_perda_ruptura_lojas)
+    perda = (base.custo_unitario * (p.taxa_manutencao_ano + lam) * P / p.dias_por_ano
+             + base.custo_unitario * p.perda_encalhe)
+    dias = np.maximum(1.0, P + base.prazo_recebimento_dias - base.prazo_pagamento_dias)
+    oport = corte * base.custo_unitario * dias
+    pos = np.maximum(0, np.round(atual.posicao_estoque.fillna(0))).astype(int)
+    q_at = atual.quantidade_a_comprar.fillna(0).to_numpy()
+    bruto = np.array([
+        _v_linha(*x, qc) - _v_linha(*x, qa) for x, qc, qa in zip(
+            zip(mu, sd, Cu, perda, oport, pos), e.q_certo, q_at)])
+    r.compara(B, "custo do erro refeito peca a peca", np.maximum(bruto, 0), e.custo_erro,
+              tol=TOL_FROUXA, contexto=f"{len(e)} itens com hipotese")
+    # q_certo e o maximo de V' (a menos do lote minimo): arrependimento >= 0
+    neg = bruto < -1e-6
+    r.afirma(B, "arrependimento nunca negativo (antes do piso)", not neg.any(),
+             f"{int(neg.sum())} itens abaixo de zero, pior R$ {bruto.min():.2f}",
+             alerta_em_vez=bool(p.respeitar_lote_minimo))
+
+    # 10.3 hipotese que nao mexe na compra nao custa nada
+    ig = e.sentido.eq("igual")
+    r.afirma(B, "mesma compra => custo do erro zero", bool((e.custo_erro[ig].abs() < 1e-6).all()),
+             f"{int(ig.sum())} itens com a mesma compra")
+    r.ok(B, "[info] custo do erro no ciclo",
+         f"R$ {e.custo_erro.sum():,.0f} · a mais R$ {e.custo_erro[e.sentido.eq('a_mais')].sum():,.0f}"
+         f" · a menos R$ {e.custo_erro[e.sentido.eq('a_menos')].sum():,.0f} · corte {corte:.3g}")
+
+
+# ----------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--amostra", type=int, default=1500,
                     help="pecas conferidas peca a peca no bloco 6")
-    ap.add_argument("--so", type=int, default=0, help="rodar so um bloco (1..9)")
+    ap.add_argument("--so", type=int, default=0, help="rodar so um bloco (1..10)")
     args = ap.parse_args()
 
     wh = abrir()
@@ -1537,7 +1624,7 @@ def main() -> None:
           f"lote minimo {'ligado' if p.respeitar_lote_minimo else 'desligado'}")
 
     r = Relatorio()
-    blocos = [bloco1, bloco2, bloco3, bloco4, bloco5, None, bloco7, bloco8, bloco9]
+    blocos = [bloco1, bloco2, bloco3, bloco4, bloco5, None, bloco7, bloco8, bloco9, bloco10]
     for i, fn in enumerate(blocos, 1):
         if args.so and args.so != i:
             continue
