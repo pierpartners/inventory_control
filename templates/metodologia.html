@@ -30,6 +30,89 @@
   #tb-mapa td, #tb-sens td { vertical-align: top; }
   #tb-mapa td:last-child { color: var(--tinta-3); font-size: 12px; line-height: 1.5; max-width: 520px; }
   #tb-mapa a { color: var(--ambar); }
+  /* --- estacao 0: o mapa da nota ------------------------------------- */
+  .mn-botoes { display: flex; gap: 8px; margin-top: 15px; }
+  .mn-botoes .btn.on { border-color: var(--ceu); color: var(--ceu); }
+  #mn-capital { border-color: var(--ceu); }
+  #mn-capital b { color: var(--ceu); }
+
+  /* as duas colunas do mapa; as linhas 1..5 sao os niveis, e por isso o
+     nivel B da esquerda fica na altura do nivel B da direita */
+  .mn-tela { position: relative; display: grid; grid-template-columns: 1fr 1px 1fr;
+    column-gap: 30px; align-items: start; }
+  .mn-fios { position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; overflow: visible; z-index: 0; }
+  .mn-fio { color: var(--linha); transition: color .14s; }
+  .mn-fio path.l { fill: none; stroke: currentColor; stroke-width: 1.5;
+    stroke-linecap: round; stroke-linejoin: round; }
+  .mn-fio path.p { fill: currentColor; stroke: none; }
+  .mn-tela.acesa .mn-fio { color: var(--linha-2); }
+  .mn-tela.acesa .mn-fio.aceso { color: var(--ambar); }
+  .mn-tela.acesa .mn-fio.capital { color: var(--ceu); }
+
+  .mn-cab { grid-row: 1; font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+    font-weight: 700; color: var(--tinta-3); padding-bottom: 13px; }
+  .mn-cab span { text-transform: none; letter-spacing: .02em; font-weight: 500;
+    color: var(--tinta-4); }
+  /* Cada nivel e uma grade cujas colunas batem com as do nivel de baixo: a
+     coluna que alimenta P fica em cima de P, a que alimenta L em cima de L.
+     E o que impede um fio de passar por tras de uma caixa vizinha. */
+  .mn-fila { display: flex; flex-wrap: wrap; gap: 9px; justify-content: center;
+    padding-bottom: 34px; }
+  .mn-fila.ent { display: grid; grid-template-columns: 1fr 1fr 1.7fr; }
+  .mn-fila.sai { display: grid; grid-template-columns: 1fr 2fr; }
+  .mn-gr { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px;
+    align-items: start; justify-items: stretch; }
+  .mn-fila.ent .mn-no, .mn-fila.sai .mn-no { min-width: 0; max-width: none; }
+  /* o nivel de cima e ingrediente, nao resultado: cabe menor */
+  .mn-e2 .mn-no .v, .mn-d2 .mn-no .v { white-space: normal; font-size: 15px; }
+  .mn-e1 { grid-column: 1; } .mn-d1 { grid-column: 3; }
+  .mn-e2 { grid-column: 1; grid-row: 2; } .mn-d2 { grid-column: 3; grid-row: 2; }
+  .mn-e3 { grid-column: 1; grid-row: 3; } .mn-d3 { grid-column: 3; grid-row: 3; }
+  .mn-e4 { grid-column: 1; grid-row: 4; } .mn-d4 { grid-column: 3; grid-row: 4; }
+  .mn-fim { grid-column: 1 / 4; grid-row: 5; padding-bottom: 0; }
+  .mn-divisor { grid-column: 2; grid-row: 1 / 5; background: var(--linha-2); }
+
+  .mn-no { position: relative; z-index: 1; display: block; text-align: center;
+    background: var(--painel-2); border: 1px solid var(--linha); border-radius: 8px;
+    padding: 8px 12px; min-width: 128px; max-width: 210px; color: inherit;
+    transition: opacity .14s, border-color .14s, background .14s; }
+  .mn-no .r { display: block; font-size: 9px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--tinta-4); font-weight: 700; line-height: 1.35; }
+  .mn-no .v { display: block; font-family: var(--mono); font-size: 17px; color: var(--tinta);
+    letter-spacing: -.03em; line-height: 1.2; margin: 4px 0 3px; white-space: nowrap; }
+  .mn-no .v .suf { font-size: 11px; color: var(--tinta-4); margin-left: 2px; }
+  .mn-no .s { display: block; font-family: var(--mono); font-size: 9.5px;
+    color: var(--ambar-2); line-height: 1.4; }
+  .mn-no:hover { border-color: var(--ambar); }
+  .mn-no.ganho .v { color: var(--menta); }
+  .mn-no.perda .v { color: var(--coral); }
+  .mn-no.larga { min-width: 196px; }
+  .mn-no.fim { min-width: 228px; background: rgba(55,214,160,.08);
+    border-color: rgba(55,214,160,.3); }
+  .mn-no.fim .v { font-size: 24px; color: var(--menta); }
+  .mn-no.fim.mau { background: var(--coral-lav); border-color: rgba(255,106,94,.3); }
+  .mn-no.fim.mau .v { color: var(--coral); }
+  .mn-dia { font-style: normal; color: var(--ceu); font-size: 8px;
+    vertical-align: 1px; margin-right: 3px; }
+
+  .mn-tela.acesa .mn-no { opacity: .28; }
+  .mn-tela.acesa .mn-no.aceso { opacity: 1; border-color: var(--ambar);
+    background: var(--ambar-lav); }
+  .mn-tela.acesa .mn-no.capital { opacity: 1; border-color: var(--ceu);
+    background: var(--ceu-lav); }
+  .mn-tela.acesa .mn-no.capital .v { color: var(--ceu); }
+
+  /* uma coluna so: a ordem do HTML ja e a de leitura (lado esquerdo inteiro,
+     lado direito inteiro, nota), entao basta desmontar a grade */
+  @media (max-width: 900px) {
+    .mn-tela { display: block; }
+    .mn-fila.ent, .mn-fila.sai { grid-template-columns: 1fr; gap: 9px; }
+    .mn-gr:empty { display: none; }
+    .mn-divisor { display: none; }
+    .mn-tela > .mn-cab { padding-top: 12px; }
+    .mn-no { min-width: 0; flex: 1 1 140px; max-width: none; }
+  }
 </style>
 {% endblock %}
 
@@ -56,7 +139,8 @@
 </div>
 
 <nav class="trilha">
-  <a href="#e1" class="on"><i>1</i>O que o cliente queria</a>
+  <a href="#e0" class="on"><i>0</i>O mapa da nota</a>
+  <a href="#e1"><i>1</i>O que o cliente queria</a>
   <a href="#e2"><i>2</i>Quanto sai até chegar</a>
   <a href="#e3"><i>3</i>Vale a próxima peça?</a>
   <a href="#e4"><i>4</i>De onde saem M e L</a>
@@ -66,6 +150,127 @@
   <a href="#mapa"><i>⚙</i>Onde cada parâmetro entra</a>
   <a href="#glossario"><i>?</i>Glossário</a>
 </nav>
+
+<!-- ============================================ 0 · o mapa da nota -->
+<section class="estacao" id="e0">
+  <div class="pergunta">0. O mapa da nota</div>
+  <div class="resposta">as sete perguntas seguintes numa página só — e onde cada uma delas entra na conta</div>
+
+  <div class="curto mt18">
+    <p>Toda a decisão de compra cabe em <b>uma nota por peça</b>: quanto aquela peça rende
+    para cada real que ela prende, por dia que ela prende. Tudo o que vem depois nesta
+    página é o detalhe de uma das caixas abaixo — e os números são deste produto, na
+    próxima peça dele.</p>
+    <p><b>Passe o mouse</b> em qualquer caixa para acender o caminho dela até a nota.
+    <b>Clique</b> para ir à pergunta que a explica.</p>
+  </div>
+
+  <div class="mn-botoes">
+    <button class="btn btn-p" id="mn-b-capital">onde entra o custo do capital?</button>
+  </div>
+
+  <div class="nota-lat" id="mn-capital" hidden><span id="mn-capital-txt">–</span></div>
+
+  <div class="painel mt14">
+    <div class="painel-int">
+      <div class="msg msg-am" id="mn-vazio" hidden>Este produto não tem uma próxima peça para
+        medir — ou nunca vendeu no histórico, ou o cadastro não traz o custo dele. Sem custo
+        não há nota: escolha outro produto no seletor acima para ver o mapa com números.</div>
+
+      <div class="mn-tela" id="mn-tela">
+        <svg class="mn-fios" id="mn-svg" aria-hidden="true" focusable="false"></svg>
+
+        <!-- ---------------- lado que rende: cada coluna alimenta a caixa
+             que está logo abaixo dela, então nenhum fio cruza outra caixa -->
+        <div class="mn-cab mn-e1">o que a peça rende <span>· o de cima da divisão</span></div>
+
+        <div class="mn-fila mn-e2 ent">
+          <div class="mn-gr">
+            <a class="mn-no" id="mn-demanda" data-mn="demanda" href="#e2">
+              <span class="r">quanto sai até repor</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+          <div class="mn-gr">
+            <a class="mn-no" id="mn-lucro" data-mn="lucro" href="#e4">
+              <span class="r">o que sobra numa venda</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+          <div class="mn-gr">
+            <a class="mn-no cap" id="mn-aluguel" data-mn="aluguel" href="#e4">
+              <span class="r"><i class="mn-dia">◆</i> aluguel do dinheiro</span><span class="v">–</span><span class="s">–</span></a>
+            <a class="mn-no" id="mn-encalhe" data-mn="encalhe" href="#e4">
+              <span class="r">risco de sair de linha</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+        </div>
+
+        <div class="mn-fila mn-e3 ent">
+          <div class="mn-gr">
+            <a class="mn-no" id="mn-p" data-mn="p" href="#e3">
+              <span class="r">chance de ela vender</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+          <div class="mn-gr">
+            <a class="mn-no ganho" id="mn-m" data-mn="m" href="#e4">
+              <span class="r">o que rende se vender</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+          <div class="mn-gr">
+            <a class="mn-no perda" id="mn-l" data-mn="l" href="#e4">
+              <span class="r">o que custa se encalhar</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+        </div>
+
+        <div class="mn-fila mn-e4">
+          <a class="mn-no larga" id="mn-v" data-mn="v" href="#e3">
+            <span class="r">o que a peça vale</span><span class="v">–</span><span class="s">–</span></a>
+        </div>
+
+        <!-- ---------------- lado que prende -->
+        <div class="mn-cab mn-d1">o que a peça prende <span>· o de baixo da divisão</span></div>
+
+        <!-- o custo da peça não tem ingrediente nenhum: vem do catálogo.
+             Fica no mesmo nível de D porque é lá que ele entra - c × D -, e
+             assim o fio dele não precisa passar por trás da caixa de D. -->
+        <div class="mn-fila mn-d2 sai">
+          <div class="mn-gr"></div>
+          <div class="mn-gr">
+            <a class="mn-no" id="mn-h" data-mn="h" href="#e2">
+              <span class="r">até repor chegar</span><span class="v">–</span><span class="s">–</span></a>
+            <a class="mn-no cap" id="mn-receb" data-mn="receb" href="#e5">
+              <span class="r"><i class="mn-dia">◆</i> mais o recebimento</span><span class="v">–</span><span class="s">–</span></a>
+            <a class="mn-no cap" id="mn-pag" data-mn="pag" href="#e5">
+              <span class="r"><i class="mn-dia">◆</i> menos o fornecedor</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+        </div>
+
+        <div class="mn-fila mn-d3 sai">
+          <div class="mn-gr">
+            <a class="mn-no cap" id="mn-c" data-mn="c" href="#e5">
+              <span class="r"><i class="mn-dia">◆</i> quanto de dinheiro</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+          <div class="mn-gr">
+            <a class="mn-no cap" id="mn-d" data-mn="d" href="#e5">
+              <span class="r"><i class="mn-dia">◆</i> por quanto tempo fica preso</span><span class="v">–</span><span class="s">–</span></a>
+          </div>
+        </div>
+
+        <div class="mn-fila mn-d4">
+          <a class="mn-no larga" id="mn-cd" data-mn="cd" href="#e5">
+            <span class="r">o que a peça prende</span><span class="v">–</span><span class="s">–</span></a>
+        </div>
+
+        <div class="mn-divisor"></div>
+
+        <!-- ---------------- a nota -->
+        <div class="mn-fila mn-fim">
+          <a class="mn-no fim" id="mn-nota" data-mn="nota" href="#e5">
+            <span class="r">a nota — e só ela ordena a fila</span><span class="v">–</span><span class="s">–</span></a>
+        </div>
+      </div>
+
+      <div class="nota-lat mt18" style="margin-bottom:0">Os números são os da <b>próxima peça</b>
+        deste produto — os mesmos que as perguntas 3 e 5 mostram, tirados da mesma conta.
+        Da segunda peça em diante só muda o <b>P</b>: ele cai, e a nota cai com ele. É por
+        isso que o caixa se espalha por muitos produtos em vez de esvaziar no primeiro.</div>
+    </div>
+  </div>
+</section>
 
 <!-- ============================================ 1 -->
 <section class="estacao" id="e1">
@@ -612,6 +817,7 @@
 {% endblock %}
 
 {% block rodape %}
+<script src="{{ est('mapa-nota.js') }}"></script>
 <script>
 (function () {
   var C = N.COR;
@@ -1054,6 +1260,9 @@
         '<td class="qu">' + r[2] + "</td>" +
         '<td class="vl">' + r[3] + "</td></tr>";
     }).join("");
+  
+    /* -------- 0. o mapa, com os mesmos numeros de tudo que veio acima */
+    mapaNota(d);
   }
 
   /* ============================================ blocos globais */
