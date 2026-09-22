@@ -182,7 +182,16 @@ def sinalizar(m: pd.DataFrame, lim: dict | None = None) -> pd.DataFrame:
 #
 # avaliado no mundo corrigido. A mesma conta no mundo atual e o custo de
 # corrigir sem precisar - se a suspeita estiver errada e o ajuste for aplicado.
-# As duas saem por ciclo de compra (o horizonte de protecao do item).
+# As duas saem por ciclo de compra (o horizonte de protecao do item) e,
+# para a fila, por mes: um ciclo de 12 dias e um de 250 nao se comparam, e o
+# item de ciclo curto repete o erro muitas vezes no mesmo mes. O erro se
+# repete a cada compra de quem usa o numero errado: o custo do erro, no ciclo
+# que o plano enxerga HOJE (e nele que ele recompra); o custo de corrigir sem
+# precisar, no ciclo CORRIGIDO. A leitura supoe que o erro persiste enquanto
+# nao for corrigido - exata para a compra a menos (a margem perdida volta a
+# cada compra), generosa para a compra a mais (parte do excedente e custo de
+# uma vez so).
+DIAS_MES = 30.0
 
 def nota_de_corte(fila: pd.DataFrame) -> float:
     """A nota da ultima peca que o plano comprou. Se a fila inteira coube no
@@ -278,7 +287,8 @@ def custo_do_erro(s: pd.DataFrame, lim: dict, p: Parametros, corte: float) -> pd
     desta rodada - e a quantidade certa sai de `candidatas_marginais`, a
     mesma fila do plano. Nenhuma conta do modelo e refeita aqui.
     """
-    cols = ["sku", "hipotese", "q_certo", "custo_erro", "custo_corrigir", "sentido"]
+    cols = ["sku", "hipotese", "q_certo", "custo_erro", "custo_corrigir", "sentido",
+            "custo_erro_mes", "custo_corrigir_mes", "ciclo_certo_dias"]
     hip = hipoteses(s, lim)
     if not hip:
         return pd.DataFrame(columns=cols)
@@ -302,6 +312,10 @@ def custo_do_erro(s: pd.DataFrame, lim: dict, p: Parametros, corte: float) -> pd
 
     erro = _valor(certo, q_certo, p, corte) - _valor(certo, q_atual, p, corte)
     corrigir = _valor(atual, q_atual, p, corte) - _valor(atual, q_certo, p, corte)
+    # cada lado no ciclo de quem decide com o numero: o erro se repete a cada
+    # compra do plano de hoje, a correcao indevida a cada compra do corrigido
+    por_mes_atual = DIAS_MES / atual.periodo_protecao_dias.to_numpy(float)
+    por_mes_certo = DIAS_MES / certo.periodo_protecao_dias.to_numpy(float)
     return pd.DataFrame({
         "sku": atual.sku,
         "hipotese": [{c: v for c, v in hip[str(k)].items() if c in ajustes.CAMPOS}
@@ -310,6 +324,9 @@ def custo_do_erro(s: pd.DataFrame, lim: dict, p: Parametros, corte: float) -> pd
         # arredondamento do lote pode deixar -0,01; o arrependimento e >= 0
         "custo_erro": np.maximum(erro, 0.0),
         "custo_corrigir": np.maximum(corrigir, 0.0),
+        "custo_erro_mes": np.maximum(erro, 0.0) * por_mes_atual,
+        "custo_corrigir_mes": np.maximum(corrigir, 0.0) * por_mes_certo,
+        "ciclo_certo_dias": certo.periodo_protecao_dias.to_numpy(float),
         "sentido": np.where(q_atual > q_certo, "a_mais",
                             np.where(q_atual < q_certo, "a_menos", "igual")),
     })
@@ -327,6 +344,7 @@ COLUNAS_TELA = [
     "valor_da_compra", "cobertura_apos_dias", "risco_de_faltar", "decisao",
     "lucro_potencial_periodo", "impacto",
     "hipotese", "q_certo", "custo_erro", "custo_corrigir", "sentido",
+    "custo_erro_mes", "custo_corrigir_mes", "periodo_protecao_dias", "ciclo_certo_dias",
 ]
 
 
@@ -372,9 +390,9 @@ def painel(wh: Warehouse) -> dict:
     # tirado dos criterios - e assim que se ve o que foi mexido
     alvo = s[(s.n_motivos > 0) | s.sku.astype(str).isin(aj.keys())].copy()
     alvo["ajuste"] = alvo.sku.astype(str).map(aj)
-    # a fila da tela e a do dinheiro em jogo: custo do erro, depois quantos
-    # motivos e a exposicao (item sem hipotese fica no fim do seu grupo)
-    alvo = alvo.sort_values(["custo_erro", "n_motivos", "impacto"],
+    # a fila da tela e a do dinheiro em jogo por mes, depois quantos motivos e
+    # a exposicao (item sem hipotese fica no fim do seu grupo)
+    alvo = alvo.sort_values(["custo_erro_mes", "n_motivos", "impacto"],
                             ascending=[False, False, False], na_position="last")
     cols = [c for c in COLUNAS_TELA if c in alvo.columns] + ["ajuste"]
     contagem = {r[0]: int(s[f"f_{r[0]}"].sum()) for r in REGRAS}
@@ -392,9 +410,9 @@ def painel(wh: Warehouse) -> dict:
         "sinalizados": int((s.n_motivos > 0).sum()),
         "ajustados": int(s.sku.astype(str).isin(aj.keys()).sum()),
         "nota_de_corte": corte,
-        "custo_erro": float(s.custo_erro.fillna(0).sum()),
-        "custo_erro_a_mais": float(s.custo_erro[s.sentido.eq("a_mais")].sum()),
-        "custo_erro_a_menos": float(s.custo_erro[s.sentido.eq("a_menos")].sum()),
+        "custo_erro_mes": float(s.custo_erro_mes.fillna(0).sum()),
+        "custo_erro_mes_a_mais": float(s.custo_erro_mes[s.sentido.eq("a_mais")].sum()),
+        "custo_erro_mes_a_menos": float(s.custo_erro_mes[s.sentido.eq("a_menos")].sum()),
         "campos": {k: dict(rotulo=v[0], unidade=v[1], casas=v[2], ajuda=v[3])
                    for k, v in ajustes.CAMPOS.items()},
         "itens": registros(alvo[cols]),

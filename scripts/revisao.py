@@ -1571,13 +1571,22 @@ def bloco10(r: Relatorio, wh, p, ctx) -> None:
              f"{int(neg.sum())} itens abaixo de zero, pior R$ {bruto.min():.2f}",
              alerta_em_vez=bool(p.respeitar_lote_minimo))
 
+    # a leitura mensal: o erro se repete a cada compra do plano de hoje, a
+    # correcao indevida a cada compra do plano corrigido
+    r.compara(B, "custo do erro por mes = ciclo de hoje levado a 30 dias",
+              np.maximum(bruto, 0) * 30.0 / atual.periodo_protecao_dias.to_numpy(float),
+              e.custo_erro_mes, tol=TOL_FROUXA)
+    r.compara(B, "custo de corrigir por mes = ciclo corrigido levado a 30 dias",
+              e.custo_corrigir * 30.0 / P.to_numpy(float), e.custo_corrigir_mes, tol=TOL)
+
     # 10.3 hipotese que nao mexe na compra nao custa nada
     ig = e.sentido.eq("igual")
     r.afirma(B, "mesma compra => custo do erro zero", bool((e.custo_erro[ig].abs() < 1e-6).all()),
              f"{int(ig.sum())} itens com a mesma compra")
-    r.ok(B, "[info] custo do erro no ciclo",
-         f"R$ {e.custo_erro.sum():,.0f} · a mais R$ {e.custo_erro[e.sentido.eq('a_mais')].sum():,.0f}"
-         f" · a menos R$ {e.custo_erro[e.sentido.eq('a_menos')].sum():,.0f} · corte {corte:.3g}")
+    r.ok(B, "[info] custo do erro por mes",
+         f"R$ {e.custo_erro_mes.sum():,.0f} · a mais R$ {e.custo_erro_mes[e.sentido.eq('a_mais')].sum():,.0f}"
+         f" · a menos R$ {e.custo_erro_mes[e.sentido.eq('a_menos')].sum():,.0f}"
+         f" · no ciclo R$ {e.custo_erro.sum():,.0f} · corte {corte:.3g}")
 
 
 # ----------------------------------------------------------------------

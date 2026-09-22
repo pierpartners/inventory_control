@@ -82,8 +82,8 @@
     <div class="valor md" id="m-sinalizados">–</div>
     <div class="nota">ao menos um motivo — <b id="m-graves">–</b> em vermelho</div>
   </div>
-  <div class="painel metrica am" title="Se a suspeita de cada motivo estiver certa: quanto o plano deste ciclo perde comprando com o número errado, contra o que compraria com o número corrigido. Já desconta o custo de oportunidade do caixa.">
-    <div class="rotulo">Custo do erro no ciclo</div>
+  <div class="painel metrica am" title="Se a suspeita de cada motivo estiver certa: quanto o plano perde por mês comprando com o número errado, contra o que compraria com o número corrigido. O erro se repete a cada compra do plano, e cada item é levado do seu ciclo (prazo + revisão) para 30 dias: exato para a compra a menos, generoso para a compra a mais. Já desconta o custo de oportunidade do caixa.">
+    <div class="rotulo">Custo do erro por mês</div>
     <div class="valor md"><span class="pre">R$</span><span id="m-erro">–</span></div>
     <div class="nota">compra a mais <b id="m-erro-mais">–</b> · a menos <b id="m-erro-menos">–</b> · capital exposto R$ <b id="m-capital">–</b></div>
   </div>
@@ -164,7 +164,7 @@
           <th class="n">Comprar</th>
           <th class="n">Valor compra</th>
           <th class="n">Capital</th>
-          <th class="n" title="Se a suspeita estiver certa, quanto o plano deste ciclo perde por comprar com o número errado">Custo do erro</th>
+          <th class="n" title="Se a suspeita estiver certa, quanto o plano perde por mês por comprar com o número errado (o custo de cada compra, levado do ciclo do item para 30 dias)">Custo do erro/mês</th>
           <th class="nao-ord"></th>
         </tr></thead>
         <tbody id="corpo"></tbody>
@@ -232,9 +232,9 @@
     id("m-sinalizados").textContent = N.num(D.sinalizados);
     id("m-graves").textContent = N.num(graves);
     id("m-capital").textContent = N.curto(cap);
-    id("m-erro").textContent = N.curto(D.custo_erro || 0);
-    id("m-erro-mais").textContent = "R$ " + N.curto(D.custo_erro_a_mais || 0);
-    id("m-erro-menos").textContent = "R$ " + N.curto(D.custo_erro_a_menos || 0);
+    id("m-erro").textContent = N.curto(D.custo_erro_mes || 0);
+    id("m-erro-mais").textContent = "R$ " + N.curto(D.custo_erro_mes_a_mais || 0);
+    id("m-erro-menos").textContent = "R$ " + N.curto(D.custo_erro_mes_a_menos || 0);
     id("m-ajustados").textContent = N.num(D.ajustados);
   }
 
@@ -588,9 +588,10 @@
   function erroCel(r) {
     if (r.custo_erro === null || r.custo_erro === undefined)
       return '<span class="t4" title="o motivo não traz um valor corrigido para comparar">sem hipótese</span>';
-    if (!(r.custo_erro >= 0.5)) return '<span class="t4">R$ 0</span>';
-    return '<span class="' + (r.custo_erro >= 1000 ? "c-cr forte" : "") + '">R$ ' + N.curto(r.custo_erro) + "</span>" +
-      '<div class="pequeno t4">' + SENTIDO[r.sentido] + "</div>";
+    if (!(r.custo_erro_mes >= 0.5)) return '<span class="t4">R$ 0</span>';
+    return '<span class="' + (r.custo_erro_mes >= 1000 ? "c-cr forte" : "") + '">R$ ' + N.curto(r.custo_erro_mes) + "</span>" +
+      '<div class="pequeno t4">' + SENTIDO[r.sentido] + " · R$ " + N.curto(r.custo_erro) + " por compra, a cada " +
+      N.num(r.periodo_protecao_dias, 0) + "d</div>";
   }
   /* o quadro do ajuste: a hipotese de cada motivo e o que ela muda no ciclo */
   function quadroErro(r) {
@@ -600,7 +601,7 @@
         "(histórico curto é fragilidade, não erro com direção). Exposição: R$ " + N.curto(r.impacto || 0) + " entre estoque e compra.</div>";
     }
     var hip = r.hipotese || {}, ks = Object.keys(hip);
-    var h = '<div class="rotulo mb8">Quanto o erro custa neste ciclo</div><div class="nota-lat mb14">';
+    var h = '<div class="rotulo mb8">Quanto o erro custa</div><div class="nota-lat mb14">';
     h += ks.length ? "Hipótese dos motivos: " + ks.map(function (k) {
       var c = CAMPOS[k];
       var fmt = function (v) { return c.unidade === "R$" ? "R$ " + N.num(v, 2) : N.num(v, Math.max(c.casas, 1)) + " " + c.unidade; };
@@ -610,8 +611,12 @@
       N.num(r.q_certo, 0) + " un</b>.<br>";
     if (r.sentido === "igual") h += "A hipótese não muda a compra deste ciclo: o erro, se existir, não custa nada agora.";
     else h += (r.sentido === "a_mais" ? "Se a suspeita estiver certa, as peças a mais custam " : "Se a suspeita estiver certa, deixa-se de ganhar ") +
-      "<b>R$ " + N.num(r.custo_erro, 0) + "</b> (margem esperada menos encalhe, custo de carregar e o custo do caixa). " +
-      "Se estiver errada e o ajuste for aplicado, perde-se <b>R$ " + N.num(r.custo_corrigir, 0) + "</b>.";
+      "<b>R$ " + N.num(r.custo_erro, 0) + "</b> por compra; o plano recompra a cada " + N.num(r.periodo_protecao_dias, 0) + " dias, então são <b>R$ " +
+      N.num(r.custo_erro_mes, 0) + " por mês</b> enquanto o erro não for corrigido" +
+      (r.sentido === "a_mais" ? " (leitura generosa: parte do excedente é custo de uma vez só)" : "") +
+      " — margem esperada menos encalhe, custo de carregar e o custo do caixa. " +
+      "Se estiver errada e o ajuste for aplicado, perde-se <b>R$ " + N.num(r.custo_corrigir, 0) + "</b> por compra (R$ " +
+      N.num(r.custo_corrigir_mes, 0) + " por mês, com recompra a cada " + N.num(r.ciclo_certo_dias, 0) + " dias).";
     h += "</div>";
     if (ks.length) h += '<div class="mb14"><button class="btn btn-p" type="button" id="aj-hipotese">usar a hipótese nos campos</button></div>';
     return h;
@@ -644,7 +649,7 @@
       '<td class="n" data-v="' + (r.quantidade_a_comprar || 0) + '">' + (r.quantidade_a_comprar > 0 ? N.num(r.quantidade_a_comprar, 0) + '<span class="suf">un</span>' : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.valor_da_compra || 0) + '">' + (r.valor_da_compra > 0 ? "R$ " + N.curto(r.valor_da_compra) : '<span class="t4">–</span>') + "</td>" +
       '<td class="n" data-v="' + (r.capital_imobilizado || 0) + '">R$ ' + N.curto(r.capital_imobilizado || 0) + "</td>" +
-      '<td class="n" data-v="' + (r.custo_erro === null || r.custo_erro === undefined ? -1 : r.custo_erro) + '">' + erroCel(r) + "</td>" +
+      '<td class="n" data-v="' + (r.custo_erro_mes === null || r.custo_erro_mes === undefined ? -1 : r.custo_erro_mes) + '">' + erroCel(r) + "</td>" +
       '<td class="n"><button class="btn btn-p" data-ajustar="' + r.sku + '">Ajustar</button></td>' +
       "</tr>";
   }

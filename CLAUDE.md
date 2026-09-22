@@ -121,7 +121,9 @@ A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
   cost…) is pushed through `ajustes.aplicar` → `modelo.derivar_horizonte`/`dias_capital` →
   `modelar` → `candidatas_marginais`, and the regret `V'(q_certo) − V'(q_atual)` (valor esperado
   minus the cash opportunity cost at the plan's cut-off nota) is the R$ lost per cycle if the
-  suspicion is right; `custo_corrigir` is the reverse. `revisao.py` block 10 re-derives it.
+  suspicion is right; `custo_corrigir` is the reverse. The page ranks by `custo_erro_mes`
+  (per purchase × 30 / the cycle of whoever uses the number: today’s for the error, the
+  corrected one for `custo_corrigir`). `revisao.py` block 10 re-derives it.
   Feeds the `/outliers` page.
 - `backend/ajustes.py` — per-SKU manual overrides (`data/ajustes_sku.json`: lead time, its
   deviation, unit cost, daily demand and its deviation). Applied at a single hook in
