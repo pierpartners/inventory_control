@@ -1125,7 +1125,17 @@ def bloco7(r: Relatorio, wh, p, ctx) -> None:
     from backend.modelo import criterios_ativos
     ativos = criterios_ativos(p)
     so_caixa = set(ativos) <= {"caixa"}
-    if so_caixa:
+    # Mesmo so com o caixa ligado, a marginal para quando a fila de pecas com
+    # valor positivo acaba - com fator de perda baixo isso vem antes do teto,
+    # e a reposicao (que nao tem essa parada) segue ate ele.
+    teto = float(p.teto_compra_ciclo)
+    fila_acabou = mar.investimento < 0.95 * teto
+    if so_caixa and fila_acabou:
+        r.alerta(B, "caixa nao limitou a alocacao marginal",
+                 f"a fila acabou em R$ {mar.investimento:,.0f} de R$ {teto:,.0f} · "
+                 f"reposicao R$ {rep.investimento:,.0f} · a diferenca e peca sem valor "
+                 f"deixada de fora, nao o caixa")
+    elif so_caixa:
         r.afirma(B, "as duas estrategias gastam caixa comparavel",
                  abs(mar.investimento - rep.investimento) / max(rep.investimento, 1) < 0.35,
                  f"marginal R$ {mar.investimento:,.0f} vs reposicao "
