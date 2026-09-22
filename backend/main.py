@@ -387,7 +387,7 @@ def plano(request: Request):
         "lote_minimo": bool(p.respeitar_lote_minimo),
     }
 
-    cols = ["dias_utilizaveis", "historico_insuficiente",
+    cols = ["dias_utilizaveis", "historico_insuficiente", "item_novo", "idade_item_dias",
             "sku", "item", "familia", "origem", "classificacao", "curva_abc",
             "posicao_estoque", "quantidade_a_comprar", "ultima_unidade",
             "demanda_media_dia", "entra_na_peca", "chance_primeira",
@@ -399,6 +399,7 @@ def plano(request: Request):
             "risco_apos_compra", "ponto_de_pedido", "lote_minimo_compra"]
     cols = [c for c in cols if c in comprados.columns]
     fora_cols = [c for c in ["sku", "item", "familia", "origem", "classificacao", "curva_abc",
+                             "item_novo",
                              "posicao_estoque", "unidades_com_retorno", "melhor_nota",
                              "custo_total_disponivel", "valor_total_disponivel",
                              "risco_de_faltar", "cobertura_dias"] if c in df.columns]

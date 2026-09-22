@@ -702,6 +702,7 @@
       case "margem_negativa": return "preço praticado R$ " + N.num(r.preco_liquido_peca, 2) + " · custo R$ " + N.num(r.custo_unitario, 2);
       case "compra_desproporcional": return "compra " + N.num(r.quantidade_a_comprar, 0) + " un = " + N.num(r.quantidade_a_comprar / Math.max(r.demanda_media_dia, 1e-9), 0) + " dias de demanda · R$ " + N.curto(r.valor_da_compra);
       case "historico_curto": return N.num(r.dias_utilizaveis, 0) + " dias utilizáveis na janela";
+      case "item_novo": return "lançado há " + N.num(r.idade_item_dias, 0) + " dias · " + N.num(r.dias_utilizaveis, 0) + " com estoque";
       default: return "";
     }
   }

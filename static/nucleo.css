@@ -631,6 +631,7 @@ table.tb tr.corte td { border-bottom: 1.5px dashed var(--ambar-2); }
 .fita i.dsp { background: var(--menta-esc); }
 .fita i.par { background: var(--ambar); }
 .fita i.sem { background: var(--coral); }
+.fita i.pre { background: var(--linha-2); }
 
 .formula {
   background: var(--void); border: 1px solid var(--linha-2); border-left: 2px solid var(--ambar-2);

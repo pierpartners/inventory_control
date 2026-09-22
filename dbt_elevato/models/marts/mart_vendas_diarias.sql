@@ -16,7 +16,8 @@ falta as (
     select
         data,
         sum(case when estado_estoque = 'Sem estoque' then 1 else 0 end) as skus_sem_estoque,
-        count(*)                                                        as skus_total,
+        -- item ainda nao lancado nao faz parte do sortimento daquele dia
+        sum(case when estado_estoque <> 'Pre-lancamento' then 1 else 0 end) as skus_total,
         sum(saldo_final)                                                as pecas_em_estoque
     from {{ ref('int_demanda_diaria') }}
     group by data

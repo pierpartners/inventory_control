@@ -1,4 +1,6 @@
 -- Quantos dias cada item pode ser observado, e quantos foram perdidos.
+-- Os dias de pre-lancamento ficam fora: o item ainda nao existia, e conta-los
+-- como historico faria um lancamento parecer um item quase sempre em falta.
 select
     sku,
     count(*)                                     as dias_historico,
@@ -12,4 +14,5 @@ select
     max(saldo_final)                             as saldo_maximo,
     avg(saldo_final)                             as saldo_medio
 from {{ ref('int_demanda_diaria') }}
+where estado_estoque <> 'Pre-lancamento'
 group by sku

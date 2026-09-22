@@ -560,6 +560,8 @@
         '<span><i style="background:#2C5A4A"></i>' + rd.disponivel + " dias disponível</span>" +
         '<span><i style="background:' + C.ambar + '"></i>' + rd.ruptura_parcial + " acabou no meio do dia</span>" +
         '<span><i style="background:' + C.coral + '"></i>' + rd.sem_estoque + " sem estoque</span>" +
+        (rd.pre_lancamento ? '<span><i style="background:var(--linha-2)"></i>' + rd.pre_lancamento +
+          " antes do lançamento (fora da conta)</span>" : "") +
         "</div>" +
         '<div id="gv-hist" class="gfx mt14" style="height:' + (fut.length ? 330 : 250) + 'px"></div>' +
         (notaProj ? '<div class="nota-lat mt10" style="margin-left:0">' + notaProj + "</div>" : ""),
@@ -691,7 +693,8 @@
 
       /* ---------------------------------------------------- fita */
       document.getElementById("gv-fita").innerHTML = d.dias.map(function (x) {
-        var c = x.estado === "Disponivel" ? "dsp" : (x.estado === "Sem estoque" ? "sem" : "par");
+        var c = x.estado === "Disponivel" ? "dsp" : (x.estado === "Sem estoque" ? "sem"
+          : (x.estado === "Pre-lancamento" ? "pre" : "par"));
         return '<i class="' + c + '" title="' + N.data(x.data) + ": " + x.estado +
           " · vendeu " + N.num(x.vendido) + '"></i>';
       }).join("");
@@ -832,7 +835,7 @@
         { name: "Vendas", type: "bar",
           data: dias.map(function (x) {
             return { value: x.vendido,
-              itemStyle: { color: x.estado === "Sem estoque" ? N.sombra(C.coral, .5)
+              itemStyle: { color: x.estado === "Sem estoque" || x.estado === "Pre-lancamento" ? N.sombra(C.coral, .5)
                 : (x.estado === "Ruptura parcial" ? C.ambar : N.sombra(C.ambar, .45)) } };
           }).concat(nulos(nF)), barWidth: "62%" }
       ];

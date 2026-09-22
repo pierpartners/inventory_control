@@ -96,6 +96,11 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
     OK = (est == "Disponivel").to_numpy()
     CENS = (est == "Ruptura parcial").to_numpy()
     SEM = (est == "Sem estoque").to_numpy()
+    # dias em que o item ja existia (ver int_demanda_diaria): o pre-lancamento
+    # nao e historico, nem como falta nem como zero da media ingenua. Um item
+    # novo passa a ter a idade dele como historico, e nao a janela inteira.
+    VIVO = (est != "Pre-lancamento").to_numpy()
+    janela = V.shape[1]
 
     if not p.corrigir_censura:
         OK = OK | CENS | SEM        # volta ao metodo ingenuo, de proposito
@@ -113,24 +118,43 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
         # duas vezes por ano). Abaixo do piso o item usa a media ingenua e
         # fica marcado, para a tela dizer que o numero e o simples.
         insuficiente = bool(p.corrigir_censura and piso > 0 and usaveis < piso)
+        vivo = VIVO[i]
+        n_vivo = int(vivo.sum())
+
+        def simples(x: np.ndarray) -> tuple[float, float]:
+            y = x[vivo]
+            return (float(y.mean()) if n_vivo else 0.0,
+                    float(y.std(ddof=1)) if n_vivo > 1 else 0.0)
+
+        # Abaixo do piso a media de reserva continua diluida na JANELA inteira,
+        # contando ate o pre-lancamento como zero. E conservador de proposito:
+        # dividida so pela idade, um misturador com 10 dias de vida e 40 pecas
+        # vendidas virava 4/dia e uma compra de R$ 92 mil (medido: 648 itens
+        # e +R$ 231 mil no plano). Item novo e sinalizado, nao extrapolado.
+        def diluida(x: np.ndarray) -> tuple[float, float]:
+            return float(x.mean()), float(x.std(ddof=1)) if janela > 1 else 0.0
+
         if insuficiente:
-            m = float(V[i].mean())
-            s = float(V[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
+            m, s = diluida(V[i])
 
         # os dois canais pelo mesmo caminho do total, com as mesmas mascaras
         m_e, s_e, _, _ = em_censurado(VE[i], OK[i], CENS[i], p.imputar_dias_censurados)
         m_l, s_l, _, _ = em_censurado(VL[i], OK[i], CENS[i], p.imputar_dias_censurados)
         if insuficiente:
-            m_e = float(VE[i].mean())
-            m_l = float(VL[i].mean())
-            s_e = float(VE[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
-            s_l = float(VL[i].std(ddof=1)) if V.shape[1] > 1 else 0.0
+            m_e, s_e = diluida(VE[i])
+            m_l, s_l = diluida(VL[i])
         soma = m_e + m_l
         share = m_e / soma if soma > 0 else 0.0
         # covariancia entre canais so nos dias em que os dois podiam vender;
         # e o que o bloco 8 da revisao usa para decompor a variancia do total
         dias_ok = OK[i]
         cov = float(np.cov(VE[i][dias_ok], VL[i][dias_ok])[0, 1]) if dias_ok.sum() >= 2 else 0.0
+        m_ing, s_ing = simples(V[i])
+        # Idade do item = dias desde o lancamento, quando o lancamento caiu
+        # DENTRO da janela (houve pre-lancamento nela). Sem pre-lancamento na
+        # janela o item e pelo menos tao velho quanto ela - fica NaN, e
+        # `item_novo` nunca liga.
+        idade = float(n_vivo) if n_vivo < janela else np.nan
 
         linhas.append(dict(
             sku=sku,
@@ -142,18 +166,21 @@ def estatistica_demanda(diario: pd.DataFrame, p: Parametros) -> pd.DataFrame:
             dias_sem_estoque=int(SEM[i].sum()) if p.corrigir_censura else 0,
             dias_ruptura_parcial=n_c,
             pecas_imputadas=round(imp, 2),
-            demanda_media_dia_ingenua=float(V[i].mean()),
-            desvio_padrao_dia_ingenuo=float(V[i].std(ddof=1)),
+            demanda_media_dia_ingenua=m_ing,
+            desvio_padrao_dia_ingenuo=s_ing,
             demanda_media_dia_disponivel=float(V[i][OK[i]].mean()) if OK[i].sum() else 0.0,
             demanda_max_dia=float(V[i].max()),
             dias_com_venda=int((V[i] > 0).sum()),
-            dias_historico=V.shape[1],
+            dias_historico=n_vivo,
+            dias_janela=janela,
+            idade_item_dias=idade,
+            item_novo=bool(idade < float(getattr(p, "dias_item_novo", 0) or 0)),
             demanda_media_dia_ecommerce=m_e,
             desvio_padrao_dia_ecommerce=s_e,
             demanda_media_dia_lojas=m_l,
             desvio_padrao_dia_lojas=s_l,
-            demanda_media_dia_ingenua_ecommerce=float(VE[i].mean()),
-            demanda_media_dia_ingenua_lojas=float(VL[i].mean()),
+            demanda_media_dia_ingenua_ecommerce=simples(VE[i])[0],
+            demanda_media_dia_ingenua_lojas=simples(VL[i])[0],
             share_ecommerce=share,
             covariancia_canais=cov,
         ))
@@ -1478,6 +1505,10 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
 
     est = estatistica_demanda(diario, p)
     b = fin.merge(est, on="sku", how="left").fillna({"demanda_media_dia": 0.0})
+    # item do catalogo sem nenhuma linha na grade diaria: nao e novo, e o
+    # potencial dele e medido na mesma janela dos outros
+    b["item_novo"] = b.item_novo.fillna(False).astype(bool)
+    b["dias_janela"] = b.dias_janela.fillna(b.dias_janela.max())
     # correcoes manuais por item (tela de outliers): prazo, custo, demanda.
     # Entram AQUI, antes de qualquer derivacao, para que periodo de protecao,
     # variancia, margem, nota e politica saiam todos do valor corrigido.
@@ -1491,13 +1522,17 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
     b["cv_diario"] = np.where(b.demanda_media_dia > 0,
                               b.desvio_padrao_dia / b.demanda_media_dia, 0)
     b["cv_periodo"] = np.where(b.mu_periodo > 0, b.sd_periodo / b.mu_periodo, 0)
-    b["pct_indisponivel"] = b.dias_sem_estoque / b.dias_historico
+    b["pct_indisponivel"] = np.where(b.dias_historico > 0,
+                                     b.dias_sem_estoque / b.dias_historico.replace(0, 1), 0.0)
     b["subestimacao_ingenua_pct"] = np.where(
         b.demanda_media_dia_ingenua > 0,
         b.demanda_media_dia / b.demanda_media_dia_ingenua - 1, 0)
     b["venda_perdida_pecas"] = (b.demanda_media_dia * b.dias_sem_estoque).round(0)
     b["lucro_perdido_ruptura"] = b.venda_perdida_pecas * b.lucro_por_peca
-    b["lucro_potencial_periodo"] = b.demanda_media_dia * b.dias_historico * b.lucro_por_peca
+    # potencial na JANELA, nao na idade: um lancamento que vende 20/dia vale
+    # tanto no ano quanto um item antigo que vende 20/dia, e a curva ABC nao
+    # pode rebaixa-lo so por ter chegado ha tres meses
+    b["lucro_potencial_periodo"] = b.demanda_media_dia * b.dias_janela * b.lucro_por_peca
 
     dist = [ajustar_distribuicao(m, s) for m, s in zip(b.mu_periodo, b.sd_periodo)]
     b["distribuicao"] = [d[0] for d in dist]
@@ -1616,7 +1651,7 @@ def executar(wh: Warehouse, p: Parametros, ate: str | None = None,
         executado_em=pd.Timestamp.now(),
         premio_escassez=lam,
         skus=len(modelo),
-        dias_historico=int(b.dias_historico.max()),
+        dias_historico=int(b.dias_janela.max()),
         itens_regime_discreto=int((modelo.regime == "Unidade marginal").sum()),
         capital_total=float(modelo.capital_imobilizado.sum()),
         lucro_perdido_ruptura=float(b.lucro_perdido_ruptura.sum()),

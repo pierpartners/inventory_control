@@ -320,6 +320,7 @@
             <span><i style="background:#2C5A4A"></i>Teve estoque</span>
             <span><i style="background:var(--ambar)"></i>Acabou no meio</span>
             <span><i style="background:var(--coral)"></i>Faltou o dia todo</span>
+            <span><i style="background:var(--linha-2)"></i>Antes do lançamento</span>
           </div>
         </div>
       </div>
@@ -846,7 +847,8 @@
     /* -------- 1. o dado que entra */
     txt("x1-dias", N.num(rd.total));
     id("fita").innerHTML = d.dias.map(function (x) {
-      var c = x.estado === "Disponivel" ? "dsp" : (x.estado === "Sem estoque" ? "sem" : "par");
+      var c = x.estado === "Disponivel" ? "dsp" : (x.estado === "Sem estoque" ? "sem"
+          : (x.estado === "Pre-lancamento" ? "pre" : "par"));
       return '<i class="' + c + '" title="' + N.data(x.data) + " · " + x.estado +
         " · vendeu " + N.num(x.vendido) + '"></i>';
     }).join("");

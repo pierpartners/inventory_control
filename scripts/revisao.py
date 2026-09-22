@@ -125,15 +125,28 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     B = "1. Dados de entrada e integridade"
     dia, m, plano = ctx["dia"], ctx["modelo"], ctx["plano"]
 
-    # a regra dos tres estados e a base de toda a correcao de censura
-    esperado = np.where(dia.saldo_inicial <= 0, "Sem estoque",
-                        np.where(dia.saldo_final <= 0, "Ruptura parcial", "Disponivel"))
-    r.afirma(B, "regra dos tres estados do dia",
-             bool((esperado == dia.estado_estoque.to_numpy()).all()),
-             f"{len(dia)} dias · "
-             f"{int((dia.estado_estoque=='Disponivel').sum())} disponiveis / "
-             f"{int((dia.estado_estoque=='Ruptura parcial').sum())} parciais / "
-             f"{int((dia.estado_estoque=='Sem estoque').sum())} sem estoque")
+    # a regra dos estados e a base de toda a correcao de censura. O marco do
+    # lancamento sai da grade INTEIRA (o dbt olha a serie toda), nao da janela:
+    # um item vivo antes da janela e zerado no inicio dela esta em falta, nao
+    # em pre-lancamento.
+    tudo = ctx["dia_completo"]
+    vivo_dia = (tudo.saldo_inicial > 0) | (tudo.saldo_final > 0) | (tudo.pecas_vendidas > 0)
+    marco = tudo.data.where(vivo_dia).groupby(tudo.sku).transform("min")
+    antes = (tudo.data < marco).to_numpy()
+    esperado = np.where(antes, "Pre-lancamento",
+                        np.where(tudo.saldo_inicial <= 0, "Sem estoque",
+                                 np.where(tudo.saldo_final <= 0, "Ruptura parcial", "Disponivel")))
+    r.afirma(B, "regra dos quatro estados do dia",
+             bool((esperado == tudo.estado_estoque.to_numpy()).all()),
+             f"{len(tudo)} dias · "
+             f"{int((tudo.estado_estoque=='Disponivel').sum())} disponiveis / "
+             f"{int((tudo.estado_estoque=='Ruptura parcial').sum())} parciais / "
+             f"{int((tudo.estado_estoque=='Sem estoque').sum())} sem estoque / "
+             f"{int(antes.sum())} antes do lancamento")
+    # o que esta regra protege: item que ainda nao existia nao perde venda
+    r.afirma(B, "nenhum dia antes do primeiro saldo/venda conta como falta",
+             bool(not (antes & tudo.estado_estoque.isin(["Sem estoque", "Ruptura parcial"]).to_numpy()).any()),
+             f"{int(tudo.sku[antes].nunique())} itens lancados dentro da grade")
 
     # No extrato real o retrato de estoque e de um local (124) e a venda e do
     # e-commerce (empresa 33): sao entidades diferentes, e a venda pode ser
@@ -200,12 +213,19 @@ def bloco1(r: Relatorio, wh, p, ctx) -> None:
     def sem_titulo(df):
         return {"prazo_recebimento_ecommerce_dias": df.get("titulos_ecommerce", pd.Series(0, index=df.index)).fillna(0) == 0,
                 "prazo_recebimento_lojas_dias": df.get("titulos_lojas", pd.Series(0, index=df.index)).fillna(0) == 0}
+    # a idade do item so existe quando o lancamento caiu dentro da janela;
+    # item mais velho que ela fica NaN, e nao "365", para a flag nao mentir
+    def sem_lancamento(df):
+        if "idade_item_dias" not in df.columns:
+            return {}
+        return {"idade_item_dias": ~(df.dias_historico < df.dias_janela)}
     esperado_nulo = {
-        "res_sku_modelo": sem_titulo(m),
+        "res_sku_modelo": {**sem_titulo(m), **sem_lancamento(m)},
         "res_plano_compra": {
             "ultima_unidade": plano.quantidade_a_comprar == 0,
             "p_vender_ultima": plano.quantidade_a_comprar == 0,
             **sem_titulo(plano),
+            **sem_lancamento(plano),
         },
         "res_fila_marginal": {
             "nb_r": ctx["fila"].distribuicao == "Poisson",
@@ -417,9 +437,13 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
     piso = int(getattr(p, "dias_utilizaveis_minimo", 0) or 0)
     if piso > 0:
         abaixo = m[m.dias_utilizaveis < piso]
-        r.afirma(B, f"abaixo do piso de {piso} dias utilizaveis, demanda = media ingenua",
+        # a media de reserva e diluida na janela inteira (pre-lancamento conta
+        # como zero), nao a ingenua desde o lancamento - ver estatistica_demanda
+        diluida = (dia.groupby("sku").pecas_vendidas.sum()
+                   / dia.groupby("sku").size().max()).reindex(abaixo.sku).fillna(0.0)
+        r.afirma(B, f"abaixo do piso de {piso} dias utilizaveis, demanda = media diluida na janela",
                  bool((abaixo.historico_insuficiente.astype(bool)).all()
-                      and np.allclose(abaixo.demanda_media_dia, abaixo.demanda_media_dia_ingenua)),
+                      and np.allclose(abaixo.demanda_media_dia, diluida.to_numpy())),
                  f"{len(abaixo)} itens abaixo do piso usam a media simples · "
                  f"a corrigida (EM) fica guardada em demanda_media_dia_em")
         r.afirma(B, "acima do piso, ninguem esta marcado como historico insuficiente",
@@ -455,8 +479,9 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
     r.compara(B, "media dos dias disponiveis refeita", disp.to_numpy(), alvo.to_numpy(),
               tol=TOL_FROUXA)
 
-    # media ingenua = media de todos os dias
-    ing = dia.groupby("sku").pecas_vendidas.mean()
+    # media ingenua = media de todos os dias desde o lancamento
+    vivo = dia[dia.estado_estoque != "Pre-lancamento"]
+    ing = vivo.groupby("sku").pecas_vendidas.mean()
     alvo = m.set_index("sku").demanda_media_dia_ingenua.reindex(ing.index)
     r.compara(B, "media ingenua refeita", ing.to_numpy(), alvo.to_numpy(), tol=TOL_FROUXA)
 
@@ -471,6 +496,22 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
               novo.desvio_padrao_dia.reindex(velho.index).to_numpy(),
               velho.desvio_padrao_dia.to_numpy(), tol=TOL_FROUXA)
 
+    # item novo: idade = dias desde o lancamento, so quando ele caiu dentro da
+    # janela; a flag liga abaixo de `dias_item_novo`. Refeito da grade.
+    if "item_novo" in m.columns:
+        janela = int(dia.groupby("sku").size().max())
+        idade = (dia.estado_estoque != "Pre-lancamento").groupby(dia.sku).sum()
+        idade = idade.where(idade < janela)
+        limite = float(getattr(p, "dias_item_novo", 0) or 0)
+        esperado_novo = (idade < limite).reindex(m.sku).fillna(False).to_numpy()
+        r.afirma(B, "item novo = lancado ha menos de dias_item_novo, refeito da grade",
+                 bool((esperado_novo == m.item_novo.astype(bool).to_numpy()).all()),
+                 f"{int(esperado_novo.sum())} itens novos (< {limite:.0f} dias)")
+        r.compara(B, "dias de historico = dias desde o lancamento na janela",
+                  (dia.estado_estoque != "Pre-lancamento").groupby(dia.sku).sum()
+                  .reindex(m.sku).to_numpy(float),
+                  m.dias_historico.to_numpy(float), tol=TOL_FROUXA)
+
     quanto = float(m[m.demanda_media_dia_ingenua > 0].subestimacao_ingenua_pct.mean())
     r.alerta(B, "tamanho da correcao",
              f"sem corrigir, a demanda media do catalogo sairia {quanto:.1%} menor")
@@ -479,8 +520,9 @@ def bloco2(r: Relatorio, wh, p, ctx) -> None:
     cols = {"demanda_media_dia_ecommerce", "demanda_media_dia_lojas", "share_ecommerce",
             "demanda_media_dia_ingenua_ecommerce", "demanda_media_dia_ingenua_lojas"}
     if cols <= set(m.columns) and "pecas_ecommerce" in dia.columns:
-        g_e = dia.groupby("sku").pecas_ecommerce.mean()
-        g_l = dia.groupby("sku").pecas_lojas.mean()
+        vivo = dia[dia.estado_estoque != "Pre-lancamento"]
+        g_e = vivo.groupby("sku").pecas_ecommerce.mean()
+        g_l = vivo.groupby("sku").pecas_lojas.mean()
         mi = m.set_index("sku")
         idx = g_e.index.intersection(mi.index)
         r.compara(B, "media ingenua do e-commerce = media da coluna na grade",

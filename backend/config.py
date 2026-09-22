@@ -90,6 +90,11 @@ class Parametros:
     # 25 m2/dia e uma compra de R$ 68 mil. Medido: 30 e 60 dias dao quase o
     # mesmo plano; abaixo de 30 o dano volta. 0 desliga.
     dias_utilizaveis_minimo: int = 30
+    # Item novo: lancado (primeiro dia com saldo ou venda) ha menos dias do que
+    # isto. A demanda dele sai de poucos meses - sem ver sazonalidade, e
+    # possivelmente com obra represada esperando o produto chegar. So SINALIZA
+    # no plano e no /outliers; nao muda a compra. 0 desliga.
+    dias_item_novo: int = 180
     # --- critério de parada da compra (ver CRITERIOS abaixo) ---
     # lista separada por virgula: varios criterios valem ao mesmo tempo e
     # a compra e cortada pelo primeiro que chegar
@@ -198,6 +203,14 @@ CAMPOS = [
      "correção de ruptura não tem amostra e o item usa a média simples, contando os dias "
      "sem estoque como zero. Evita que uma venda isolada num item quase sempre zerado "
      "vire uma demanda enorme. O item fica marcado “histórico insuficiente”. 0 desliga.",
+     "Demanda"),
+
+    ("dias_item_novo", "Idade para marcar item novo", "dias", "int", 0, 365,
+     "Item lançado (primeiro dia com estoque ou venda) há menos dias do que isto é "
+     "marcado “item novo” no plano de compra. A demanda dele vem de poucos meses, sem "
+     "ter passado por um ano inteiro, e pode estar puxada por obras que esperavam o "
+     "produto chegar. Os dias antes do lançamento não contam como falta. Só sinaliza: "
+     "não muda a quantidade comprada. 0 desliga.",
      "Demanda"),
 
     ("fator_desvio_horizonte", "Ajuste do desvio no horizonte", "×", "float", 0.4, 1.5,

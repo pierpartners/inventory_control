@@ -977,6 +977,7 @@ def dossie(wh: Warehouse, p: Parametros, sku: str) -> dict:
             "disponivel": int(disponivel.sum()),
             "ruptura_parcial": int(censurado.sum()),
             "sem_estoque": int(sem.sum()),
+            "pre_lancamento": int((dia.estado_estoque == "Pre-lancamento").sum()),
             "total": int(len(dia)),
         },
         "distribuicao": dist,

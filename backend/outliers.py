@@ -54,6 +54,10 @@ REGRAS = [
     ("historico_curto", "Histórico insuficiente", "am", "demanda_media_dia",
      "Poucos dias utilizáveis na janela: o modelo caiu para a média ingênua e o número "
      "é frágil."),
+    ("item_novo", "Item novo", "am", "demanda_media_dia",
+     "Lançado há poucos meses: a demanda vem de um trecho curto, sem ter passado por um ano "
+     "inteiro, e pode estar puxada por obras que esperavam o produto chegar. Os dias antes "
+     "do lançamento não contam como falta."),
 ]
 CHAVES = {r[0]: r for r in REGRAS}
 
@@ -151,6 +155,9 @@ def sinalizar(m: pd.DataFrame, lim: dict | None = None) -> pd.DataFrame:
     m["f_historico_curto"] = (m.quantidade_a_comprar > 0) & (
         m.historico_insuficiente.fillna(False).astype(bool)
         if "historico_insuficiente" in m.columns else False)
+    # item novo, idem: so vale o aviso quando o plano esta comprando
+    m["f_item_novo"] = (m.quantidade_a_comprar > 0) & (
+        m.item_novo.fillna(False).astype(bool) if "item_novo" in m.columns else False)
     m["impacto"] = m.capital_imobilizado.fillna(0) + m.valor_da_compra.fillna(0)
 
     cols = [f"f_{r[0]}" for r in REGRAS]
@@ -336,6 +343,7 @@ COLUNAS_TELA = [
     "sku", "item", "familia", "curva_abc", "classificacao", "regime", "motivos", "n_motivos",
     "gravidade", "ajustes", "demanda_media_dia", "demanda_media_dia_ingenua", "desvio_padrao_dia",
     "cv_diario", "demanda_max_dia", "dias_com_venda", "dias_historico", "dias_utilizaveis",
+    "idade_item_dias", "item_novo",
     "dias_sem_estoque", "subestimacao_ingenua_pct", "lead_time_dias", "lead_time_desvio_dias",
     "lead_time_pedidos", "custo_unitario", "custo_mediano", "custo_ultimo_lancado",
     "lucro_por_peca", "preco_liquido_peca", "margem_pct", "margem_item", "margem_tipica",

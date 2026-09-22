@@ -227,6 +227,13 @@
         <button class="on" data-v="">XYZ</button>
         <button data-v="X">X</button><button data-v="Y">Y</button><button data-v="Z">Z</button>
       </div>
+      {% set novos = linhas|selectattr("item_novo")|list %}
+      {% if novos %}
+      <div class="seg" id="f-novo" data-ajuda="Itens lançados há pouco tempo (primeiro dia com estoque ou venda dentro do limite de “item novo” em Parâmetros). A demanda deles vem de poucos meses, sem ter passado por um ano inteiro: confira com o comprador antes de fechar o pedido.">
+        <button class="on" data-v="">Todos</button>
+        <button data-v="1">Itens novos · {{ novos|length }} · R$ {{ (novos|sum(attribute="valor_da_compra"))|n }}</button>
+      </div>
+      {% endif %}
       <span class="rotulo" style="flex:0 0 auto" data-ajuda="Reparte a compra de cada item pela participação de cada empresa na demanda daquele item na janela de estimação. A compra continua uma só; a ótica só mostra quanto dela cabe a cada empresa.">Ótica</span>
       <select id="sel-otica" style="max-width:260px"><option value="">Grupo inteiro</option></select>
       <span class="pequeno t3"><b class="mono" id="conta">{{ linhas|length }}</b> produtos</span>
@@ -271,9 +278,10 @@
           </tr></thead>
           <tbody>
           {% for r in linhas %}
-            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}">
+            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}" data-novo="{{ 1 if r.item_novo else '' }}">
               <td class="idx">{{ loop.index }}</td>
-              <td class="nome forte">{{ r.item }}{% if r.historico_insuficiente %}
+              <td class="nome forte">{{ r.item }}{% if r.item_novo %}
+                <span class="selo selo-am" title="Lançado há {{ r.idade_item_dias|n(0) }} dias, {{ r.dias_utilizaveis }} deles com estoque. A demanda vem só desse trecho, sem sazonalidade, e pode estar puxada por obras que esperavam o produto chegar.">item novo · {{ r.idade_item_dias|n(0) }}d</span>{% endif %}{% if r.historico_insuficiente %}
                 <span class="selo selo-am" title="Só {{ r.dias_utilizaveis }} dias com estoque na janela: a demanda usada é a média simples, não a corrigida.">histórico insuficiente</span>{% endif %}
                 <div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
               <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
@@ -326,8 +334,8 @@
           </tr></thead>
           <tbody>
           {% for r in fora %}
-            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}">
-              <td class="nome forte">{{ r.item }}<div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
+            <tr class="clicavel" data-sku="{{ r.sku }}" data-marca="{{ r.origem }}" data-abc="{{ r.curva_abc }}" data-xyz="{{ r.classificacao[1:] }}" data-novo="{{ 1 if r.item_novo else '' }}">
+              <td class="nome forte">{{ r.item }}{% if r.item_novo %} <span class="selo selo-am">item novo</span>{% endif %}<div class="pequeno t4">{{ r.sku }} · {{ r.familia }}{% if r.origem and r.origem != 'Nao informado' %} · {{ r.origem }}{% endif %}</div></td>
               <td><span class="classe classe-{{ r.curva_abc }}">{{ r.classificacao }}</span></td>
               <td class="n">{{ r.unidades_com_retorno|n }}</td>
               <td class="n fraco"><span class="pre">R$</span>{{ r.custo_total_disponivel|n }}</td>
@@ -384,9 +392,10 @@
 
   /* filtro de marca: vale para o pedido, para a fila de espera e para o CSV
      (o export so leva as linhas visiveis) */
-  var marca = "", fc = { abc: "", xyz: "" };
+  var marca = "", fc = { abc: "", xyz: "", novo: "" };
   function passa(tr) {
     if (marca && tr.dataset.marca !== marca) return false;
+    if (fc.novo && tr.dataset.novo !== fc.novo) return false;
     if (fc.abc && tr.dataset.abc !== fc.abc) return false;
     if (fc.xyz && tr.dataset.xyz !== fc.xyz) return false;
     return true;
@@ -402,8 +411,9 @@
     marca = this.value; refiltrar();
   });
   /* filtro de classe ABC / XYZ, o mesmo da tela de itens */
-  [["f-abc", "abc"], ["f-xyz", "xyz"]].forEach(function (par) {
+  [["f-abc", "abc"], ["f-xyz", "xyz"], ["f-novo", "novo"]].forEach(function (par) {
     var el = document.getElementById(par[0]);
+    if (!el) return;
     el.addEventListener("click", function (e) {
       var b = e.target.closest("button");
       if (!b) return;

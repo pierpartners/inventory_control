@@ -3,12 +3,14 @@
 --   disponivel -> divide so pelos dias em que dava para vender
 -- A terceira (imputacao dos dias censurados) e feita em Python, porque precisa
 -- de iteracao, e entra como um fator multiplicativo sobre a segunda.
+-- "Todos os dias" comeca no lancamento: antes dele o item nao existia.
 with base as (
     select
         sku,
         pecas_vendidas,
         dia_utilizavel
     from {{ ref('int_demanda_diaria') }}
+    where estado_estoque <> 'Pre-lancamento'
 ),
 ingenua as (
     select
