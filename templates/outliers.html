@@ -194,6 +194,19 @@
     if (eixo.modo !== "acumulada") eixo.modo = "faixas";
   } catch (e) {}
 
+  /* o filtro da pagina sobre o registro do item: a tabela e a nuvem usam o
+     mesmo, para o clique num motivo mudar os dois */
+  function filtrando() { return !!(f.regra || f.familia || f.grav); }
+  function passa(r) {
+    if (!r) return false;
+    if (f.familia && (r.familia || "") !== f.familia) return false;
+    if (f.regra && r.motivos.indexOf(f.regra) < 0) return false;
+    if (f.grav === "cr" && r.gravidade !== "cr") return false;
+    if (f.grav === "aj" && !r.ajuste) return false;
+    if (f.grav === "compra" && !(r.quantidade_a_comprar > 0)) return false;
+    return true;
+  }
+
   function carregar() {
     return N.buscar("/api/outliers", true).then(function (d) {
       D = d;
@@ -252,13 +265,13 @@
   id("regras").addEventListener("click", function (e) {
     var el = e.target.closest(".regra"); if (!el) return;
     f.regra = f.regra === el.dataset.k ? "" : el.dataset.k;
-    regras(); motor.aplicar();
+    regras(); motor.aplicar(); nuvem();
   });
   id("bt-limpar").addEventListener("click", function () {
     f = { regra: "", familia: "", grav: "" };
     id("f-familia").value = ""; id("q").value = "";
     id("f-grav").querySelectorAll("button").forEach(function (b, i) { b.classList.toggle("on", i === 0); });
-    regras(); motor.estado.txt = ""; motor.aplicar();
+    regras(); motor.estado.txt = ""; motor.aplicar(); nuvem();
   });
 
   /* ------------------------------------------------------------- nuvem */
@@ -381,7 +394,7 @@
   function nuvem() {
     var kx = eixo.x, ky = eixo.y, dx = DIM[kx], dy = DIM[ky];
     var acumulada = eixo.modo === "acumulada";
-    var pts = [], fora = 0, total = 0;
+    var pts = [], fora = 0, total = 0, filtro = filtrando();
     /* em escala log o zero nao existe: o ponto sai e e contado */
     var okx = eixo.ex === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
     var oky = eixo.ey === "log" ? function (v) { return v > 0; } : function (v) { return isFinite(v); };
@@ -389,7 +402,10 @@
       total++;
       var vx = r[kx], vy = r[ky];
       if (vx === null || vy === null || vx === undefined || vy === undefined || !okx(vx) || !oky(vy)) { fora++; return; }
-      pts.push({ value: [vx, vy], sku: r.sku, item: r.item, g: r.gravidade === "cr" ? "cr" : r.gravidade === "am" ? "am" : "fundo" });
+      var g = r.gravidade === "cr" ? "cr" : r.gravidade === "am" ? "am" : "fundo";
+      /* com filtro ativo, o que fica fora dele vira fundo */
+      if (filtro && !passa(POR_SKU[r.sku])) g = "fundo";
+      pts.push({ value: [vx, vy], sku: r.sku, item: r.item, g: g });
     });
     /* o quadro: em log, o dado inteiro com folga; em linear, os percentis
        0,5 e 99,5 - um item com margem de -2.000% nao pode achatar os outros
@@ -417,7 +433,8 @@
     var notas = [];
     if (fora) notas.push(N.num(fora) + " de " + N.num(total) + " sem valor válido nesta escala");
     if (foraQuadro) notas.push(N.num(foraQuadro) + " fora do quadro (além dos percentis 0,5 e 99,5)");
-    id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados — clique para ajustar; " +
+    id("nuvem-dica").textContent = "cada ponto é um item em que o modelo age; em cor, os sinalizados" +
+      (filtro ? " que passam no filtro" : "") + " — clique para ajustar; " +
       (acumulada ? "as curvas são a fração acumulada de cada grupo até aquele valor"
                  : "as barras contam os itens por faixa de cada eixo") +
       (notas.length ? " · " + notas.join(" · ") : "");
@@ -649,23 +666,16 @@
     sel.value = atual;
     motor = N.tabela("#tb-out", {
       busca: "#q",
-      filtro: function (tr) {
-        if (f.familia && tr.dataset.familia !== f.familia) return false;
-        if (f.regra && tr.dataset.motivos.split(",").indexOf(f.regra) < 0) return false;
-        if (f.grav === "cr" && tr.dataset.grav !== "cr") return false;
-        if (f.grav === "aj" && tr.dataset.aj !== "1") return false;
-        if (f.grav === "compra" && tr.dataset.compra !== "1") return false;
-        return true;
-      },
+      filtro: function (tr) { return !filtrando() || passa(POR_SKU[tr.dataset.sku]); },
       aoFiltrar: function (vis) { id("m-selecao").textContent = N.num(vis.length); }
     });
     motor.aplicar();
   }
-  id("f-familia").addEventListener("change", function () { f.familia = this.value; motor.aplicar(); });
+  id("f-familia").addEventListener("change", function () { f.familia = this.value; motor.aplicar(); nuvem(); });
   id("f-grav").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (!b) return;
     id("f-grav").querySelectorAll("button").forEach(function (o) { o.classList.remove("on"); });
-    b.classList.add("on"); f.grav = b.dataset.v; motor.aplicar();
+    b.classList.add("on"); f.grav = b.dataset.v; motor.aplicar(); nuvem();
   });
   id("corpo").addEventListener("click", function (e) {
     var bt = e.target.closest("[data-ajustar]");
