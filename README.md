@@ -226,7 +226,7 @@ fila inteira.
    | Critério | Entrada | Saída |
    |---|---|---|
    | Pelo caixa do ciclo | quanto tenho | com que risco eu fico |
-   | Por retorno mínimo | piso de retorno por real por dia | onde a fila deixa de pagar |
+   | Por retorno mínimo | piso de retorno por real por dia, **além** do custo de manter (a nota já o desconta) | onde a fila deixa de pagar o que o caixa renderia em outro uso |
    | Por chance mínima da peça | piso de chance de vender | quanta prateleira parada eu aceito |
    | **Por risco assumido** | quanto risco eu aceito | **quanto caixa preciso** |
 
@@ -234,6 +234,11 @@ fila inteira.
    aplicado, a margem capturada e a margem que ainda sobra em risco. Ela usa uma identidade
    exata — `E[max(0, D − posição)] = Σ P(D ≥ k)` — então comprar a peça *k* reduz a falta
    esperada em exatamente `P(D ≥ k)`, e a curva de risco é uma soma acumulada, sem aproximação.
+
+   O retorno **médio** da compra não diz onde parar: a fila é ordenada por nota decrescente,
+   então a média é máxima na primeira peça e só cai. O que diz é o dinheiro da ponta — cada
+   corte mostra quanto de margem os **últimos R$ 100 mil** comprados trazem
+   (`ultimos_do_corte`, `FATIA_MARGINAL`), que é a leitura do joelho da fronteira.
 
 **Medir o retorno do dinheiro**
 

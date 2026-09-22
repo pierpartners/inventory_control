@@ -44,7 +44,7 @@
   .crit .ent .un { font-family: var(--mono); font-size: 10.5px; color: var(--tinta-4); }
   .crit .ent .btn { margin-left: auto; }
   .crit .previa {
-    display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px;
+    display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px;
     margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--linha-2);
   }
   .crit .previa div { min-width: 0; }
@@ -81,7 +81,8 @@
   <div class="painel metrica mt">
     <div class="rotulo">Margem esperada de volta</div>
     <div class="valor md"><span class="pre">R$</span><span id="v-margem">–</span></div>
-    <div class="nota">margem de <b id="v-mult">–</b> por real aplicado, já líquida de encalhe</div>
+    <div class="nota">margem de <b id="v-mult">–</b> por real aplicado, já líquida de encalhe ·
+      os últimos <b id="v-fatia">–</b> trazem <b id="v-ultimos">–</b></div>
   </div>
   <div class="painel metrica am">
     <div class="rotulo">Risco que sobra na mesa</div>
@@ -196,6 +197,7 @@
           <th class="n nao-ord">Produtos</th>
           <th class="n nao-ord">Margem de volta</th>
           <th class="n nao-ord">Por real aplicado</th>
+          <th class="n nao-ord" id="th-ultimos">Últimos R$ 100 mil trazem</th>
           <th class="n nao-ord">Risco que sobra</th>
         </tr></thead>
         <tbody></tbody>
@@ -234,9 +236,30 @@
      ------------------------------------------------------------------ */
   var CACHE = {};
 
+  /* o dinheiro da ponta: quanto de margem os ultimos R$ FATIA compram */
+  var FATIA = BASE.fatia_marginal;
+  function ultimos(pt) {
+    if (!pt || !pt.caixa_ultimos) return "–";
+    return "R$ " + N.curto(pt.margem_ultimos) +
+      (pt.caixa_ultimos < FATIA - 1 ? " (de R$ " + N.curto(pt.caixa_ultimos) + ")" : "");
+  }
+  /* a mesma leitura sobre a fronteira amostrada, para a dica do grafico */
+  function margemEm(x) {
+    if (x <= 0) return 0;
+    for (var i = 1; i < FR.length; i++) {
+      if (FR[i].caixa >= x) {
+        var a = FR[i - 1], b = FR[i], t = (x - a.caixa) / ((b.caixa - a.caixa) || 1);
+        return a.margem + t * (b.margem - a.margem);
+      }
+    }
+    return FR[FR.length - 1].margem;
+  }
+
   function sugestao(crit) {
     if (crit === "caixa") return BASE.teto_ciclo;
-    if (crit === "retorno") return BASE.custo_capital_dia;
+    /* a nota ja desconta o custo de manter: piso zero nao cobra o capital
+       de novo. Sobe-lo e decisao de negocio (uso alternativo do caixa). */
+    if (crit === "retorno") return 0;
     if (crit === "chance") return 0.5;
     return BASE.risco_inicial * 0.5;           /* metade do risco de hoje */
   }
@@ -290,7 +313,8 @@
       ["sozinha compraria", "R$ " + N.curto(pt.caixa)],
       ["peças", N.num(pt.pecas)],
       ["produtos", N.num(pt.itens)],
-      ["risco que sobra", "R$ " + N.curto(pt.margem_em_risco)]
+      ["risco que sobra", "R$ " + N.curto(pt.margem_em_risco)],
+      ["últimos R$ " + N.curto(FATIA) + " trazem", ultimos(pt)]
     ].map(function (x) {
       return '<div><div class="r">' + x[0] + '</div><div class="v">' + x[1] + "</div></div>";
     }).join("");
@@ -299,15 +323,19 @@
     if (pt.estoura_caixa) {
       aviso = "Sozinha pediria R$ " + N.curto(pt.caixa) + ", acima do caixa do ciclo (R$ " +
         N.curto(BASE.teto_ciclo) + "). Ligue também o critério de caixa para segurar.";
-    } else if (crit === "retorno" && v > 0 && v < BASE.custo_capital_dia) {
-      aviso = "Abaixo do custo de capital (" + N.num(BASE.custo_capital_dia, 6) +
-        "): peças nessa faixa destroem valor.";
+    } else if (crit === "retorno" && v > 0) {
+      /* nao e alerta de erro: e a traducao do piso para a escala anual,
+         para que ninguem digite o custo de manter e o cobre duas vezes */
+      aviso = "Equivale a exigir ≈ " + N.pct(v * 365, 1) + " a.a. além dos " +
+        N.pct(BASE.taxa_manutencao_ano, 0) + " a.a. de custo de manter que a nota já desconta" +
+        (Math.abs(v - BASE.custo_capital_dia) < 1e-6
+          ? " — este valor é o próprio custo de manter: está sendo cobrado duas vezes." : ".");
     }
     id("alerta-" + crit).textContent = aviso;
 
     id("sug-" + crit).innerHTML = "sugestão: <b class='mono'>" +
       fmtValor(crit, sugestao(crit)) + "</b>" +
-      (crit === "retorno" ? " — o custo de capital da empresa" :
+      (crit === "retorno" ? " — a peça já paga o custo de manter; suba só se o caixa tem uso melhor" :
        crit === "chance" ? " — metade encalha, metade vende" :
        crit === "risco" ? " — metade do risco de hoje" : " — o caixa configurado");
   }
@@ -321,6 +349,8 @@
     id("v-margem").textContent = N.moeda(COMB.margem);
     id("v-mult").textContent = COMB.caixa > 0
       ? "R$ " + N.num(COMB.margem / COMB.caixa, 2) : "–";
+    id("v-fatia").textContent = "R$ " + N.curto(FATIA);
+    id("v-ultimos").textContent = ultimos(COMB);
     id("v-risco").textContent = N.moeda(COMB.margem_em_risco);
     id("v-queda").textContent = N.pct(1 - COMB.margem_em_risco / BASE.risco_inicial, 0);
 
@@ -352,6 +382,7 @@
       '<td class="n mono">' + N.num(pt.itens) + "</td>" +
       '<td class="n mono mt">R$ ' + N.moeda(pt.margem) + "</td>" +
       '<td class="n mono">R$ ' + N.num(mult, 2) + "</td>" +
+      '<td class="n mono">' + ultimos(pt) + "</td>" +
       '<td class="n mono am">R$ ' + N.moeda(pt.margem_em_risco) + "</td>";
   }
   function pintarTabela() {
@@ -407,6 +438,8 @@
         var i = ps[0].dataIndex, r = FR[i];
         return N.dicaTit("Cortando a fila em R$ " + N.moeda(r.caixa)) +
           N.dicaLin(C.menta, "margem esperada capturada", "R$ " + N.moeda(r.margem)) +
+          (r.caixa > 0 ? N.dicaLin(C.menta, "os últimos R$ " + N.curto(Math.min(FATIA, r.caixa)) +
+            " trouxeram", "R$ " + N.moeda(r.margem - margemEm(r.caixa - FATIA))) : "") +
           N.dicaLin(C.coral, "margem ainda em risco", "R$ " + N.moeda(r.margem_em_risco)) +
           N.dicaLin(C.ceu, "peças / produtos", N.num(r.pecas) + " / " + N.num(r.itens)) +
           N.dicaLin(C.violeta, "chance da última peça", N.pct(r.p_vender, 0)) +
@@ -477,6 +510,7 @@
     });
   });
 
+  id("th-ultimos").textContent = "Últimos R$ " + N.curto(FATIA) + " trazem";
   N.buscar("/api/criterios").then(function (d) {
     FR = d.fronteira;
     recarregar(0);

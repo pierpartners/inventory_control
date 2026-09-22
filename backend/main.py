@@ -883,7 +883,9 @@ def criterios(request: Request, msg: str = "", erro: str = ""):
         base={"risco_inicial": float(ctx.risco_inicial),
               "falta_inicial": float(ctx.falta_inicial),
               "teto_ciclo": float(ctx.teto_ciclo),
-              "custo_capital_dia": float(ctx.custo_capital_dia)},
+              "custo_capital_dia": float(ctx.custo_capital_dia),
+              "taxa_manutencao_ano": float(p.taxa_manutencao_ano),
+              "fatia_marginal": motor.FATIA_MARGINAL},
         msg=msg, erro=erro))
 
 

@@ -306,7 +306,7 @@ def simular_criterios(wh: Warehouse, p: Parametros, ativos: str,
     Com mais de um criterio ligado a peca precisa passar por todos: o corte
     cai onde o primeiro deles fecha a porta.
     """
-    from .modelo import caminhar, criterios_ativos, regra_de_parada
+    from .modelo import caminhar, criterios_ativos, regra_de_parada, ultimos_do_corte
 
     fila, risco0, falta0 = _fila_para_previa(wh)
     campos = {c[0]: c[2] for c in CRITERIOS}
@@ -339,6 +339,7 @@ def simular_criterios(wh: Warehouse, p: Parametros, ativos: str,
         "risco_inicial": risco0,
         "teto_ciclo": float(p.teto_compra_ciclo),
         "estoura_caixa": bool(caixa > p.teto_compra_ciclo + 1e-6),
+        **ultimos_do_corte(fila, ok),
     }
 
 

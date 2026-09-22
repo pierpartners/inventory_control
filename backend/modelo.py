@@ -786,6 +786,33 @@ def pecas_com_baixa_chance(df: pd.DataFrame, quantidades, corte: float = 0.5) ->
 
 ORDEM_CRITERIOS = ["caixa", "retorno", "chance", "risco"]
 
+# A fatia de caixa do "ultimo dinheiro": quanto de margem os ultimos R$ X
+# comprados trazem. E a leitura do joelho da fronteira - o retorno medio da
+# compra inteira so cai ao longo da fila e nao diz onde parar; o que diz e o
+# que o dinheiro da ponta ainda compra.
+FATIA_MARGINAL = 100_000.0
+
+
+def ultimos_do_corte(fila: pd.DataFrame, comprado, fatia: float = FATIA_MARGINAL) -> dict:
+    """Margem trazida pelos ultimos `fatia` reais comprados, na ordem da fila.
+
+    Anda de tras para frente sobre as pecas compradas ate juntar `fatia` de
+    custo; a peca que atravessa a fronteira entra proporcional ao pedaco que
+    cabe. Com um piso de chance ligado as compradas nao sao um prefixo da
+    fila - por isso a conta segue `comprado`, nao a posicao do corte.
+    """
+    ok = np.asarray(comprado, dtype=bool)
+    custo = fila.custo.to_numpy(float)[ok][::-1]
+    valor = fila.valor_esperado.to_numpy(float)[ok][::-1]
+    nota = fila.nota.to_numpy(float)[ok]
+    if not len(custo):
+        return dict(caixa_ultimos=0.0, margem_ultimos=0.0, nota_corte=0.0)
+    antes = np.concatenate([[0.0], np.cumsum(custo)[:-1]])
+    peso = np.clip((fatia - antes) / np.where(custo > 0, custo, 1.0), 0.0, 1.0)
+    return dict(caixa_ultimos=float((custo * peso).sum()),
+                margem_ultimos=float((valor * peso).sum()),
+                nota_corte=float(nota[-1]))
+
 
 def criterios_ativos(p: Parametros, criterio=None) -> list[str]:
     """Le a lista de criterios ligados, na ordem canonica.
@@ -1020,6 +1047,7 @@ def resumo_criterios(fila: pd.DataFrame, p: Parametros,
             margem_em_risco=float(r["margem_em_risco_restante"][-1]),
             falta=float(r["falta_restante"][-1]),
             estoura_caixa=bool(caixa > p.teto_compra_ciclo + 1e-6),
+            **ultimos_do_corte(fila, ok),
         )
 
     linhas = []

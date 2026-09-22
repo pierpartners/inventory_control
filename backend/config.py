@@ -281,8 +281,10 @@ CRITERIOS = [
 
     ("retorno", "Por retorno mínimo", "retorno_minimo_dia", "por R$/dia", "float",
      "Corta a fila onde a peça deixa de render este piso por real por dia. "
-     "Abaixo do custo de capital da empresa, a peça destrói valor.",
-     "Quanto cada real tem de render por dia para valer a compra?",
+     "O retorno da peça já vem líquido do custo de manter estoque: qualquer "
+     "peça da fila já o paga. O piso é o que você exige além disso — o "
+     "melhor uso alternativo do caixa, ou folga para o erro da previsão.",
+     "Quanto cada real tem de render por dia, além do custo de manter, para valer a compra?",
      "Comprar apenas peças que rendam acima de:"),
 
     ("chance", "Por chance mínima da peça", "chance_minima_peca", "%", "pct",
