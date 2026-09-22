@@ -66,6 +66,7 @@
   --serie-7:       #F472B6;
   --serie-8:       #94A5B6;
   --trilho-glifo:  #140F06;
+  --crista-fundo:  rgba(12,16,21,.88);   /* faixa do topo, translucida sobre o blur */
 
   --raio:     8px;
   --raio-p:   5px;
@@ -125,6 +126,7 @@
   --serie-7:       #B03A78;
   --serie-8:       #7B8794;
   --trilho-glifo:  #FFF8EC;
+  --crista-fundo:  rgba(246,247,249,.88);
 }
 
 /* -------------------------------------------------------- modo daltonismo
@@ -306,7 +308,7 @@ html[data-menu="oculto"] .trilho { display: none; }
 .crista {
   min-height: 60px;
   border-bottom: 1px solid var(--linha-2);
-  background: rgba(12,16,21,.88);
+  background: var(--crista-fundo);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   display: flex; align-items: center; gap: 18px;
   padding: 10px 26px; position: sticky; top: 0; z-index: 30;
