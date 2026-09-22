@@ -1439,7 +1439,44 @@ def bloco9(r: Relatorio, wh, p, ctx) -> None:
     r.registrar("OK" if abs(soma_f - g["capital_modelo"]) < 1e-6 else "FALHA", B,
                 "faixas fecham com o total", f"R$ {soma_f:,.2f}")
 
-    # 9.5 diagnostico: quanto ha em cada faixa (informativo)
+    # 9.5 a matriz fecha por linha, por coluna e no total
+    m = diagnostico.matriz(df, "origem", "comprador")
+    celulas = [c for l in m["linhas"] for c in l["celulas"]]
+    soma_cel = sum(c["capital_modelo"] for c in celulas)
+    n_cel = sum(c["itens"] for c in celulas)
+    ok = abs(soma_cel - g["capital_modelo"]) < 1e-6 and n_cel == len(df)
+    r.registrar("OK" if ok else "FALHA", B, "matriz marca x comprador fecha com o total",
+                f"R$ {soma_cel:,.2f} vs R$ {g['capital_modelo']:,.2f} · {n_cel} itens")
+    pior_l = max((abs(sum(c["capital_modelo"] for c in l["celulas"]) - l["total"]["capital_modelo"])
+                  for l in m["linhas"]), default=0.0)
+    r.registrar("OK" if pior_l < 1e-6 else "FALHA", B, "cada linha da matriz soma o proprio total",
+                f"pior diferenca R$ {pior_l:.6f} em {len(m['linhas'])} marcas")
+    pior_c = 0.0
+    for i, chave in enumerate(m["colunas"]):
+        somac = sum(l["celulas"][i]["capital_modelo"] for l in m["linhas"])
+        pior_c = max(pior_c, abs(somac - m["total_coluna"][i]["capital_modelo"]))
+    r.registrar("OK" if pior_c < 1e-6 else "FALHA", B, "cada coluna da matriz soma o proprio total",
+                f"pior diferenca R$ {pior_c:.6f} em {len(m['colunas'])} compradores")
+    # parado e risco da matriz sao os mesmos pares de faixas do resumo
+    por_faixa = {f["faixa"]: f["capital_modelo"] for f in g["faixas"]}
+    esperado_parado = por_faixa["Sem giro"] + por_faixa["Excesso"]
+    esperado_risco = por_faixa["Zerado com demanda"] + por_faixa["Risco"]
+    ok = (abs(m["total"]["parado"] - esperado_parado) < 1e-6
+          and abs(m["total"]["risco"] - esperado_risco) < 1e-6)
+    r.registrar("OK" if ok else "FALHA", B, "parado e risco da matriz batem com as faixas",
+                f"parado R$ {m['total']['parado']:,.2f} vs R$ {esperado_parado:,.2f} · "
+                f"risco R$ {m['total']['risco']:,.2f} vs R$ {esperado_risco:,.2f}")
+    # o recorte de uma celula e o mesmo que a lista de itens entrega
+    alvo = max(m["linhas"], key=lambda l: l["total"]["capital_modelo"])
+    i_col = max(range(len(m["colunas"])), key=lambda i: alvo["celulas"][i]["capital_modelo"])
+    lista = diagnostico.itens(df, por="origem", chave=alvo["chave"],
+                              por2="comprador", chave2=m["colunas"][i_col], limite=1_000_000)
+    r.registrar("OK" if len(lista) == alvo["celulas"][i_col]["itens"] else "FALHA", B,
+                "celula da matriz = recorte da lista de itens",
+                f"{alvo['chave']} x {m['colunas'][i_col]}: {len(lista)} itens na lista, "
+                f"{alvo['celulas'][i_col]['itens']} na celula")
+
+    # 9.6 diagnostico: quanto ha em cada faixa (informativo)
     for f in g["faixas"]:
         r.ok(B, f"[info] {f['faixa']}", f"{f['itens']} itens · R$ {f['capital_modelo']:,.0f}")
     r.ok(B, "[info] real - otimo", f"R$ {g['diferenca_real_otimo']:,.0f} · cobertura real "

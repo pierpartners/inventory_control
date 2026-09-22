@@ -129,8 +129,10 @@ A demanda é estimada por canal (`canal_demanda` = `ecommerce`|`lojas`, colunas
   `res_plano_compra` com `mart_estoque_posicao` e classifica cada SKU em uma faixa
   (zerado com demanda / risco / sem giro / excesso / saudável, nesta ordem de prioridade),
   valoriza ao custo do modelo e ao custo médio contábil do ERP, mede a idade FIFO do saldo
-  e agrega por fornecedor, comprador e família. Não recalcula política: só lê. Funções puras
-  sobre DataFrame para `revisao.py` (bloco 9) recompor. Feeds the `/diagnostico` page.
+  e agrega por fornecedor, comprador, família e marca (`origem`) — `matriz()` cruza duas dessas
+  dimensões numa tabela comprador × marca/família, com as cinco métricas por célula numa só
+  resposta (a página troca a leitura sem voltar ao servidor). Não recalcula política: só lê.
+  Funções puras sobre DataFrame para `revisao.py` (bloco 9) recompor. Feeds the `/diagnostico` page.
 - `backend/main.py` — FastAPI app; one route pair per page (`GET /pagina` renders the template,
   `GET /api/pagina/recurso` returns JSON for that page's charts/tables). Route handlers follow a
   fixed shape: get a `Warehouse` via `wh()`, bail out to `sem_dados()` if `pronto(w)` is false,

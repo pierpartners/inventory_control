@@ -106,7 +106,7 @@ def classificar_faixas(df: pd.DataFrame, dias_sem_giro: int = DIAS_SEM_GIRO_PADR
 # leitura
 # ----------------------------------------------------------------------
 COLUNAS_PLANO = [
-    "sku", "item", "familia", "curva_abc", "classe_xyz", "regime", "custo_unitario",
+    "sku", "item", "familia", "origem", "curva_abc", "classe_xyz", "regime", "custo_unitario",
     "demanda_media_dia", "mu_periodo", "ponto_de_pedido", "estoque_maximo", "estoque_medio",
     "estoque_fisico", "em_transito", "posicao_estoque", "quantidade_a_comprar",
     "cobertura_dias", "risco_de_faltar", "lucro_perdido_ruptura", "lucro_por_peca",
@@ -118,7 +118,7 @@ COLUNAS_POSICAO = [
     "idade_fifo_dias", "entrada_mais_antiga_em_estoque", "entradas_cobrem_saldo",
 ]
 COLUNAS_ITEM = [
-    "sku", "item", "familia", "fornecedor", "comprador", "curva_abc", "classe_xyz", "faixa",
+    "sku", "item", "familia", "origem", "fornecedor", "comprador", "curva_abc", "classe_xyz", "faixa",
     "acao", "estoque_fisico", "em_transito", "saldo_lojas", "lojas_com_saldo",
     "ponto_de_pedido", "estoque_maximo", "cobertura_dias", "risco_de_faltar",
     "demanda_media_dia", "dias_sem_venda", "ultima_venda", "idade_fifo_dias", "faixa_idade",
@@ -235,7 +235,11 @@ def por_idade(df: pd.DataFrame) -> list[dict]:
     return out
 
 
-DIMENSOES = ("fornecedor", "comprador", "familia")
+# `origem` e a marca do item (DECA, SUVINIL...): no cadastro do DW ela vem de
+# db2.marca e cai em stg_catalogo como `origem`, com o fabricante de reserva.
+DIMENSOES = ("fornecedor", "comprador", "familia", "origem")
+ROTULO_DIMENSAO = {"fornecedor": "Fornecedor", "comprador": "Comprador",
+                   "familia": "Família", "origem": "Marca"}
 
 
 def agregar(df: pd.DataFrame, por: str) -> list[dict]:
@@ -257,6 +261,55 @@ def agregar(df: pd.DataFrame, por: str) -> list[dict]:
         })
     out.sort(key=lambda x: -x["capital_modelo"])
     return out
+
+
+# o que cada celula da matriz carrega. Vem tudo junto numa resposta so: a
+# pagina troca a metrica em exibicao sem voltar ao servidor, e as cinco leituras
+# ficam garantidamente sobre o mesmo recorte.
+METRICAS_MATRIZ = ("capital_modelo", "parado", "risco", "lucro_perdido_ruptura", "itens")
+_CELULA_VAZIA = {m: (0 if m == "itens" else 0.0) for m in METRICAS_MATRIZ}
+
+
+def _celula(s: pd.DataFrame) -> dict:
+    """`parado` e `risco` sao os mesmos pares de faixas dos KPIs da pagina:
+    parado = sem giro + excesso, risco = zerado + abaixo do ponto de pedido."""
+    return {
+        "capital_modelo": _f(s.capital_modelo.sum()),
+        "parado": _f(s.loc[s.faixa.isin(FAIXAS[2:4]), "capital_modelo"].sum()),
+        "risco": _f(s.loc[s.faixa.isin(FAIXAS[:2]), "capital_modelo"].sum()),
+        "lucro_perdido_ruptura": _f(s.lucro_perdido_ruptura.sum()),
+        "itens": int(len(s)),
+    }
+
+
+def matriz(df: pd.DataFrame, linha: str = "origem", coluna: str = "comprador") -> dict:
+    """Cruzamento de duas dimensoes: uma linha por marca (ou familia), uma
+    coluna por comprador, cada celula com as cinco metricas. As duas pontas
+    saem ordenadas por capital, maior primeiro, e a soma das celulas de uma
+    linha e sempre o total dela - nenhum item fica de fora porque `Nao
+    informado` e uma chave como outra qualquer."""
+    for nome, v in (("linha", linha), ("coluna", coluna)):
+        if v not in DIMENSOES:
+            raise ValueError(f"matriz: `{nome}` deve ser um de {DIMENSOES}, veio {v!r}")
+    if linha == coluna:
+        raise ValueError("matriz: linha e coluna nao podem ser a mesma dimensao")
+    d = df.assign(_l=df[linha].fillna("Nao informado").astype(str),
+                  _c=df[coluna].fillna("Nao informado").astype(str))
+    cols = list(d.groupby("_c").capital_modelo.sum().sort_values(ascending=False).index)
+    linhas = []
+    for chave, s in d.groupby("_l", sort=False):
+        celulas = {c: _celula(g) for c, g in s.groupby("_c", sort=False)}
+        linhas.append({"chave": str(chave), "total": _celula(s),
+                       "celulas": [celulas.get(c, dict(_CELULA_VAZIA)) for c in cols]})
+    linhas.sort(key=lambda x: -x["total"]["capital_modelo"])
+    return {
+        "linha": linha, "coluna": coluna,
+        "rotulo_linha": ROTULO_DIMENSAO[linha], "rotulo_coluna": ROTULO_DIMENSAO[coluna],
+        "colunas": [str(c) for c in cols],
+        "linhas": linhas,
+        "total_coluna": [_celula(d[d._c == c]) for c in cols],
+        "total": _celula(d),
+    }
 
 
 def _registros(df: pd.DataFrame, cols: list[str]) -> list[dict]:
@@ -281,14 +334,18 @@ def rede(df: pd.DataFrame, limite: int = 60) -> dict:
 
 
 def itens(df: pd.DataFrame, faixa: str = "", por: str = "", chave: str = "",
-          busca: str = "", limite: int = 5000) -> list[dict]:
+          busca: str = "", limite: int = 5000, por2: str = "", chave2: str = "") -> list[dict]:
+    """Dois pares (dimensao, valor) porque uma celula da matriz e um recorte de
+    duas: marca DECA E comprador ALCINDO. Pares vazios sao ignorados."""
     s = df
     if faixa:
         s = s[s.faixa == faixa]
-    if por and chave:
-        if por not in DIMENSOES:
-            raise ValueError(f"itens: `por` deve ser um de {DIMENSOES}")
-        s = s[s[por].fillna("Nao informado").astype(str) == chave]
+    for p, k in ((por, chave), (por2, chave2)):
+        if not (p and k):
+            continue
+        if p not in DIMENSOES:
+            raise ValueError(f"itens: `por` deve ser um de {DIMENSOES}, veio {p!r}")
+        s = s[s[p].fillna("Nao informado").astype(str) == k]
     if busca:
         q = busca.lower()
         s = s[s.sku.astype(str).str.lower().str.contains(q, regex=False)

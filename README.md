@@ -300,4 +300,8 @@ pedido positivo), **sem giro** (há peça e não vende há mais de N dias, padr�
 que o modelo usa e ao custo médio contábil do ERP. A **idade FIFO** aproxima há quanto tempo o
 saldo está no CD percorrendo as entradas da mais recente para trás até cobrir o saldo. A foto
 das lojas (uma linha por SKU e local, sem histórico) aponta transferência em vez de compra.
-`scripts/revisao.py` (bloco 9) recompõe faixas, idade e somas por fora.
+Os cortes são quatro — fornecedor, comprador, família e **marca** (a coluna `origem` do cadastro,
+com o fabricante de reserva) — e a página ainda cruza dois deles numa **matriz comprador × marca
+(ou família)**, com capital, capital parado, capital em risco, lucro perdido e nº de itens em cada
+célula; clicar numa célula filtra a lista de itens pelos dois recortes ao mesmo tempo.
+`scripts/revisao.py` (bloco 9) recompõe faixas, idade, somas e a matriz por fora.

@@ -31,6 +31,26 @@
   .conf.ok .pt { background: var(--menta); } .conf.aviso .pt { background: var(--ambar); } .conf.erro .pt { background: var(--coral); }
   .kpi-par { display:flex; gap:10px; align-items:baseline; }
   .kpi-par .vs { font-size:10.5px; color: var(--tinta-4); }
+  #tb-legenda td { vertical-align: middle; }
+  #tb-legenda .ord { color: var(--tinta-4); font-variant-numeric: tabular-nums; width: 26px; }
+  #tb-legenda .regra { color: var(--tinta-3); font-size: 11.5px; }
+  .legenda-acao { padding: 9px 12px; border-top: 1px solid var(--linha); color: var(--tinta-3); font-size: 11.5px; line-height: 1.7; }
+  .legenda-acao b { color: var(--tinta-2); font-weight: 600; }
+  #mtz { overflow:auto; max-height: 520px; }
+  #mtz table { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  #mtz th, #mtz td { white-space: nowrap; padding: 6px 10px; }
+  #mtz thead th { position: sticky; top: 0; z-index: 6; }
+  #mtz .lin { position: sticky; left: 0; z-index: 4; background: var(--painel-2); text-align: left;
+              max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  #mtz thead th.lin { z-index: 8; }
+  #mtz td.cel { text-align: right; font-variant-numeric: tabular-nums; cursor: pointer;
+                font-family: "JetBrains Mono", monospace; font-size: 11px; }
+  #mtz td.cel.zero { color: var(--tinta-4); }
+  #mtz td.cel:hover { outline: 1px solid var(--tinta-3); outline-offset: -1px; }
+  #mtz td.cel.sel { outline: 2px solid var(--ambar); outline-offset: -2px; }
+  #mtz .tot { font-weight: 600; background: var(--painel-3); }
+  #mtz thead th.cab-col { cursor: pointer; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  #mtz thead th.cab-col.sel, #mtz .lin.sel { color: var(--ambar); }
   tr.clicavel { cursor:pointer; }
   tr.clicavel:hover td { background: var(--painel-3); }
   tr.sel td { background: var(--ambar-lav); }
@@ -73,6 +93,29 @@
   </div>
 </div>
 
+<!-- ============================================ legenda das faixas -->
+<div class="secao">
+  <div class="painel">
+    <div class="painel-cab"><h2>Como cada item é classificado</h2>
+      <span class="dica">as regras são avaliadas nesta ordem e cada item cai numa faixa só · clique para filtrar a tabela de itens</span></div>
+    <div class="painel-int rente">
+      <table class="tb" id="tb-legenda">
+        <thead><tr><th></th><th>Faixa</th><th>Regra</th><th class="n">Itens</th><th class="n">Capital</th></tr></thead>
+        <tbody id="legenda"></tbody>
+      </table>
+      <div class="legenda-acao">
+        Ação sugerida, também na ordem:
+        <b>comprar</b> — zerado ou em risco e o plano já pôs o item na fila ·
+        <b>transferir</b> — zerado ou em risco e o saldo das lojas cobre a demanda do período de proteção ·
+        <b>revisar</b> — zerado ou em risco e nem o plano nem a rede resolvem ·
+        <b>liquidar</b> — sem giro e o saldo em casa tem mais de 12 meses de idade FIFO (a idade da peça, não o tempo sem vender) ·
+        <b>segurar</b> — sem giro ou excesso com saldo mais novo que isso ·
+        <b>manter</b> — saudável.
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="gr gr-2 secao">
   <div class="painel">
     <div class="painel-cab"><h2>Reais por faixa</h2><span class="conf" data-bloco="geral"><i class="pt"></i><span></span></span></div>
@@ -96,6 +139,28 @@
     </div>
   </div>
   <div class="painel"><div class="painel-int rente"><div class="rolo rolo-medio" id="agregado"></div></div></div>
+</div>
+
+<!-- ============================================ matriz -->
+<div class="secao" id="secao-mtz">
+  <div class="secao-cab">
+    <h2>Comprador × marca</h2>
+    <span class="dica" id="mtz-dica">clique numa célula para ver os itens daquele cruzamento · no nome da linha ou da coluna para filtrar só por ela</span>
+    <div class="dir" style="display:flex;gap:8px;align-items:center">
+      <div class="abas" id="abas-mtz">
+        <button class="btn btn-p on" data-linha="origem">Marca</button>
+        <button class="btn btn-p" data-linha="familia">Família</button>
+      </div>
+      <select id="sel-metrica">
+        <option value="capital_modelo">Capital em estoque</option>
+        <option value="parado">Parado (sem giro + excesso)</option>
+        <option value="risco">Em risco ou zerado</option>
+        <option value="lucro_perdido_ruptura">Lucro perdido por ruptura</option>
+        <option value="itens">Nº de itens</option>
+      </select>
+    </div>
+  </div>
+  <div class="painel"><div class="painel-int rente"><div id="mtz"></div></div></div>
 </div>
 
 <!-- ============================================ rede -->

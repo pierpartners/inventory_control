@@ -12,9 +12,30 @@
     "Zerado com demanda": "fx-zerado", "Risco": "fx-risco", "Sem giro": "fx-semgiro",
     "Excesso": "fx-excesso", "Saudável": "fx-saudavel"
   };
+  /* a regra de cada faixa, na ordem em que classificar_faixas() as avalia.
+     Texto e codigo tem de andar juntos: se a cascata de backend/diagnostico.py
+     mudar, esta tabela muda no mesmo commit. */
+  var REGRA = {
+    "Zerado com demanda": "sem peça no CD e demanda corrigida acima de zero — a ruptura está acontecendo agora",
+    "Risco": "posição (físico + trânsito) igual ou abaixo do ponto de pedido, com ponto de pedido positivo — item sem política fica de fora",
+    "Sem giro": "há peça no CD e nenhuma venda há mais de {d} dias",
+    "Excesso": "físico acima do estoque máximo do modelo",
+    "Saudável": "não caiu em nenhuma das anteriores"
+  };
   var estado = { dias: parseInt(document.getElementById("dias-sem-giro").value, 10) || 180,
                  ate: document.getElementById("ate").value || "",
-                 por: "fornecedor", chave: "", faixa: "", q: "" };
+                 por: "fornecedor", chave: "", faixa: "", q: "",
+                 mLinha: "origem", mChaveL: "", mChaveC: "", metrica: "capital_modelo" };
+
+  /* Agregado e matriz disputam os dois pares de filtro da lista de itens, e
+     uma celula ja consome os dois. Em vez de somar recortes que o usuario nao
+     consegue ver, quem foi clicado por ultimo manda e o outro se apaga. */
+  function filtros() {
+    if (estado.mChaveL || estado.mChaveC) {
+      return { por: estado.mLinha, chave: estado.mChaveL, por2: "comprador", chave2: estado.mChaveC };
+    }
+    return { por: estado.chave ? estado.por : "", chave: estado.chave, por2: "", chave2: "" };
+  }
 
   function qs(extra) {
     var p = ["dias_sem_giro=" + estado.dias];
@@ -48,6 +69,7 @@
       t("k-excesso", rs(byF["Excesso"].excesso_valor));
       document.getElementById("aviso-ate").style.display = g.congelado ? "" : "none";
       document.getElementById("aviso-ate-data").textContent = N.dataLonga(g.data_posicao);
+      legenda(g.faixas);
 
       N.grafico("g-faixas", {
         grid: N.grade({ left: 8, right: 70, top: 8, bottom: 8 }),
@@ -69,6 +91,33 @@
             formatter: function (p) { return N.num(g.faixas[p.dataIndex].itens) + " itens"; } } }]
       });
     });
+  }
+
+  /* ---------------------------------------------------------- legenda */
+  function marcarLegenda() {
+    document.querySelectorAll("#legenda tr").forEach(function (tr) {
+      tr.classList.toggle("sel", !!estado.faixa && tr.dataset.faixa === estado.faixa);
+    });
+  }
+  function legenda(faixas) {
+    var el = document.getElementById("legenda");
+    el.innerHTML = faixas.map(function (f, i) {
+      var regra = (REGRA[f.faixa] || "").replace("{d}", N.num(estado.dias));
+      return '<tr class="clicavel" data-faixa="' + N.esc(f.faixa) + '">' +
+        '<td class="ord">' + (i + 1) + "</td>" +
+        "<td>" + selo(f.faixa) + "</td>" +
+        '<td class="regra">' + regra + "</td>" +
+        '<td class="n">' + N.num(f.itens) + "</td>" +
+        '<td class="n">' + rs(f.capital_modelo) + "</td></tr>";
+    }).join("");
+    el.querySelectorAll("tr").forEach(function (tr) {
+      tr.addEventListener("click", function () {
+        estado.faixa = (estado.faixa === tr.dataset.faixa) ? "" : tr.dataset.faixa;
+        document.getElementById("sel-faixa").value = estado.faixa;
+        itens();
+      });
+    });
+    marcarLegenda();
   }
 
   /* ------------------------------------------------------------ idade */
@@ -99,9 +148,8 @@
   }
 
   /* --------------------------------------------------------- agregado */
-  function rotuloPor(por) {
-    return por === "familia" ? "Família" : por.charAt(0).toUpperCase() + por.slice(1);
-  }
+  var ROTULO = { fornecedor: "Fornecedor", comprador: "Comprador", familia: "Família", origem: "Marca" };
+  function rotuloPor(por) { return ROTULO[por] || por; }
   function agregado() {
     var el = document.getElementById("agregado"); N.espera(el);
     N.buscar("/api/diagnostico/agregado" + qs({ por: estado.por }), true).then(function (d) {
@@ -131,12 +179,126 @@
       el.querySelectorAll("tr.clicavel").forEach(function (tr) {
         tr.addEventListener("click", function () {
           estado.chave = (estado.chave === tr.dataset.chave) ? "" : tr.dataset.chave;
+          estado.mChaveL = estado.mChaveC = "";
           el.querySelectorAll("tr.sel").forEach(function (x) { x.classList.remove("sel"); });
           if (estado.chave) tr.classList.add("sel");
-          itens();
+          marcarMatriz(); itens();
         });
       });
     });
+  }
+
+  /* ------------------------------------------------------------ matriz */
+  var METRICA = {
+    capital_modelo: { rot: "capital em estoque", cor: "ceu", dinheiro: true },
+    parado: { rot: "capital parado", cor: "violeta", dinheiro: true },
+    risco: { rot: "capital em risco ou zerado", cor: "coral", dinheiro: true },
+    lucro_perdido_ruptura: { rot: "lucro perdido por ruptura", cor: "ambar", dinheiro: true },
+    itens: { rot: "itens", cor: "menta", dinheiro: false }
+  };
+  var mDados = null;
+
+  function valor(m, c) { return METRICA[estado.metrica].dinheiro ? rs(c[estado.metrica]) : N.num(c[estado.metrica]); }
+
+  function marcarMatriz() {
+    var el = document.getElementById("mtz");
+    el.querySelectorAll(".sel").forEach(function (x) { x.classList.remove("sel"); });
+    if (!estado.mChaveL && !estado.mChaveC) return;
+    el.querySelectorAll("td.cel").forEach(function (td) {
+      var l = td.dataset.linha, c = td.dataset.col;
+      var casa = (!estado.mChaveL || estado.mChaveL === l) && (!estado.mChaveC || estado.mChaveC === c);
+      if (casa) td.classList.add("sel");
+    });
+    el.querySelectorAll("th.cab-col").forEach(function (th) {
+      if (th.dataset.col === estado.mChaveC) th.classList.add("sel");
+    });
+    el.querySelectorAll("td.lin").forEach(function (td) {
+      if (td.dataset.linha === estado.mChaveL) td.classList.add("sel");
+    });
+  }
+
+  function pintarMatriz() {
+    if (!mDados) return;
+    var m = estado.metrica, cor = C[METRICA[m].cor];
+    /* a escala e a maior celula, nao o maior total: senao uma marca inteira
+       apaga o contraste entre os cruzamentos, que e o que se veio ver */
+    var max = 0;
+    mDados.linhas.forEach(function (l) { l.celulas.forEach(function (c) { max = Math.max(max, c[m]); }); });
+    document.getElementById("mtz").querySelectorAll("td.cel").forEach(function (td) {
+      var v = parseFloat(td.dataset.v) || 0;
+      td.textContent = v ? (METRICA[m].dinheiro ? rs(v) : N.num(v)) : "–";
+      td.classList.toggle("zero", !v);
+      td.style.background = v > 0 && max > 0 ? N.sombra(cor, 0.06 + 0.5 * Math.sqrt(v / max)) : "";
+    });
+    /* [data-v] deixa de fora a celula-rotulo "Total" do canto */
+    document.getElementById("mtz").querySelectorAll("td.tot[data-v],th.tot-col[data-v]").forEach(function (td) {
+      var v = parseFloat(td.dataset.v) || 0;
+      td.textContent = METRICA[m].dinheiro ? rs(v) : N.num(v);
+    });
+    document.getElementById("mtz-legenda").textContent =
+      mDados.linhas.length + " " + (estado.mLinha === "origem" ? "marcas" : "famílias") +
+      " × " + mDados.colunas.length + " compradores · célula = " + METRICA[m].rot +
+      " · cor pela intensidade dentro da matriz";
+  }
+
+  function matriz() {
+    var el = document.getElementById("mtz"); N.espera(el);
+    N.buscar("/api/diagnostico/matriz" + qs({ por: estado.mLinha }), true).then(function (d) {
+      mDados = d; desenharMatriz();
+    });
+  }
+
+  function desenharMatriz() {
+    var el = document.getElementById("mtz"), d = mDados;
+      var h = '<table><thead><tr><th class="lin">' + N.esc(d.rotulo_linha) + "</th>";
+      d.colunas.forEach(function (c) {
+        h += '<th class="n cab-col" data-col="' + N.esc(c) + '" title="' + N.esc(c) + '">' + N.esc(c) + "</th>";
+      });
+      h += '<th class="n tot">Total</th></tr></thead><tbody>';
+      d.linhas.forEach(function (l) {
+        h += '<tr><td class="lin clicavel" data-linha="' + N.esc(l.chave) + '" title="' + N.esc(l.chave) + '">' +
+          N.esc(l.chave) + "</td>";
+        l.celulas.forEach(function (c, i) {
+          h += '<td class="cel" data-linha="' + N.esc(l.chave) + '" data-col="' + N.esc(d.colunas[i]) +
+            '" data-v="' + c[estado.metrica] + '"></td>';
+        });
+        h += '<td class="n tot" data-v="' + l.total[estado.metrica] + '"></td></tr>';
+      });
+      h += '<tr><td class="lin tot">Total</td>';
+      d.total_coluna.forEach(function (c) { h += '<th class="n tot tot-col" data-v="' + c[estado.metrica] + '"></th>'; });
+      h += '<td class="n tot" data-v="' + d.total[estado.metrica] + '"></td></tr>';
+      el.innerHTML = h + "</tbody></table>" +
+        '<div class="t4 pequeno" id="mtz-legenda" style="padding:8px 12px"></div>';
+
+      el.querySelectorAll("td.cel").forEach(function (td) {
+        td.addEventListener("click", function () {
+          var mesmo = estado.mChaveL === td.dataset.linha && estado.mChaveC === td.dataset.col;
+          estado.mChaveL = mesmo ? "" : td.dataset.linha;
+          estado.mChaveC = mesmo ? "" : td.dataset.col;
+          estado.chave = "";
+          document.querySelectorAll("#agregado tr.sel").forEach(function (x) { x.classList.remove("sel"); });
+          marcarMatriz(); itens();
+        });
+      });
+      el.querySelectorAll("td.lin.clicavel").forEach(function (td) {
+        td.addEventListener("click", function () {
+          var mesmo = estado.mChaveL === td.dataset.linha && !estado.mChaveC;
+          estado.mChaveL = mesmo ? "" : td.dataset.linha;
+          estado.mChaveC = ""; estado.chave = "";
+          document.querySelectorAll("#agregado tr.sel").forEach(function (x) { x.classList.remove("sel"); });
+          marcarMatriz(); itens();
+        });
+      });
+      el.querySelectorAll("th.cab-col").forEach(function (th) {
+        th.addEventListener("click", function () {
+          var mesmo = estado.mChaveC === th.dataset.col && !estado.mChaveL;
+          estado.mChaveC = mesmo ? "" : th.dataset.col;
+          estado.mChaveL = ""; estado.chave = "";
+          document.querySelectorAll("#agregado tr.sel").forEach(function (x) { x.classList.remove("sel"); });
+          marcarMatriz(); itens();
+        });
+      });
+      pintarMatriz(); marcarMatriz();
   }
 
   /* -------------------------------------------------------------- rede */
@@ -170,12 +332,15 @@
   /* ------------------------------------------------------------- itens */
   function itens() {
     var el = document.getElementById("itens"); N.espera(el);
-    var filtros = { faixa: estado.faixa, por: estado.chave ? estado.por : "", chave: estado.chave, q: estado.q };
-    document.getElementById("itens-filtro").textContent =
-      (estado.faixa || "todas as faixas") + (estado.chave ? " · " + estado.por + " = " + estado.chave : "") +
-      (estado.q ? ' · "' + estado.q + '"' : "");
-    document.getElementById("bt-csv").href = "/diagnostico.csv" + qs(filtros);
-    N.buscar("/api/diagnostico/itens" + qs(filtros), true).then(function (d) {
+    var f = filtros();
+    var busca = { faixa: estado.faixa, por: f.por, chave: f.chave, por2: f.por2, chave2: f.chave2, q: estado.q };
+    var rotulo = (estado.faixa || "todas as faixas");
+    if (f.chave) rotulo += " · " + rotuloPor(f.por).toLowerCase() + " = " + f.chave;
+    if (f.chave2) rotulo += " · " + rotuloPor(f.por2).toLowerCase() + " = " + f.chave2;
+    document.getElementById("itens-filtro").textContent = rotulo + (estado.q ? ' · "' + estado.q + '"' : "");
+    document.getElementById("bt-csv").href = "/diagnostico.csv" + qs(busca);
+    marcarLegenda();
+    N.buscar("/api/diagnostico/itens" + qs(busca), true).then(function (d) {
       var h = '<table class="tb" id="tb-itens"><thead><tr>' +
         "<th>Item</th><th>Fornecedor</th><th>Comprador</th><th>Classe</th><th>Faixa</th><th>Ação</th>" +
         '<th class="n">Físico</th><th class="n">Trânsito</th><th class="n">Rede</th>' +
@@ -186,7 +351,8 @@
         "</tr></thead><tbody>";
       d.itens.forEach(function (r) {
         h += '<tr class="clicavel" data-sku="' + N.esc(r.sku) + '">' +
-          "<td>" + N.esc(r.item) + '<div class="t4 pequeno">' + N.esc(r.sku) + " · " + N.esc(r.familia) + "</div></td>" +
+          "<td>" + N.esc(r.item) + '<div class="t4 pequeno">' + N.esc(r.sku) + " · " + N.esc(r.familia) +
+            (r.origem && r.origem !== "Nao informado" ? " · " + N.esc(r.origem) : "") + "</div></td>" +
           "<td>" + N.esc(r.fornecedor) + "</td><td>" + N.esc(r.comprador) + "</td>" +
           "<td>" + N.seloClasse((r.curva_abc || "") + (r.classe_xyz || "")) + "</td>" +
           "<td>" + selo(r.faixa) + "</td><td>" + N.esc(r.acao) + "</td>" +
@@ -237,6 +403,18 @@
     b.classList.add("on"); estado.por = b.dataset.por; estado.chave = "";
     agregado(); itens();
   });
+  document.getElementById("abas-mtz").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-linha]"); if (!b) return;
+    document.querySelectorAll("#abas-mtz button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on"); estado.mLinha = b.dataset.linha; estado.mChaveL = "";
+    document.querySelector("#secao-mtz h2").textContent = "Comprador × " + rotuloPor(estado.mLinha).toLowerCase();
+    matriz(); itens();
+  });
+  document.getElementById("sel-metrica").addEventListener("change", function (e) {
+    /* trocar a leitura nao volta ao servidor: a celula ja veio com as cinco */
+    estado.metrica = e.target.value;
+    if (mDados) desenharMatriz();
+  });
   document.getElementById("sel-faixa").addEventListener("change", function (e) { estado.faixa = e.target.value; itens(); });
   var tmr;
   document.getElementById("busca-itens").addEventListener("input", function (e) {
@@ -244,6 +422,7 @@
   });
   document.getElementById("bt-limpar").addEventListener("click", function () {
     estado.faixa = ""; estado.chave = ""; estado.q = "";
+    estado.mChaveL = ""; estado.mChaveC = ""; marcarMatriz();
     document.getElementById("sel-faixa").value = ""; document.getElementById("busca-itens").value = "";
     agregado(); itens();
   });
@@ -255,6 +434,6 @@
     estado.ate = e.target.value || ""; tudo();
   });
 
-  function tudo() { geral(); idade(); agregado(); rede(); itens(); confianca(); }
+  function tudo() { geral(); idade(); agregado(); matriz(); rede(); itens(); confianca(); }
   tudo();
 })();

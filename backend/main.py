@@ -1120,6 +1120,17 @@ def api_diag_agregado(por: str = "fornecedor", ate: str = "",
     return JSONResponse({"por": por, "grupos": diagnostico.agregar(_diag(dias_sem_giro, ate), por)})
 
 
+@app.get("/api/diagnostico/matriz")
+def api_diag_matriz(por: str = "origem", coluna: str = "comprador", ate: str = "",
+                    dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
+    """Cruzamento marca (ou familia) x comprador, com as cinco metricas em cada
+    celula - a pagina troca a leitura sem voltar aqui."""
+    try:
+        return JSONResponse(diagnostico.matriz(_diag(dias_sem_giro, ate), por, coluna))
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+
+
 @app.get("/api/diagnostico/rede")
 def api_diag_rede(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
     return JSONResponse(diagnostico.rede(_diag(dias_sem_giro, ate)))
@@ -1127,9 +1138,14 @@ def api_diag_rede(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_
 
 @app.get("/api/diagnostico/itens")
 def api_diag_itens(faixa: str = "", por: str = "", chave: str = "", q: str = "", ate: str = "",
+                   por2: str = "", chave2: str = "",
                    dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
     df = _diag(dias_sem_giro, ate)
-    lista = diagnostico.itens(df, faixa=faixa, por=por, chave=chave, busca=q)
+    try:
+        lista = diagnostico.itens(df, faixa=faixa, por=por, chave=chave, busca=q,
+                                  por2=por2, chave2=chave2)
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
     return JSONResponse({"itens": lista, "total": len(lista)})
 
 
@@ -1144,11 +1160,13 @@ def api_diag_confianca(ate: str = "", dias_sem_giro: int = diagnostico.DIAS_SEM_
 
 @app.get("/diagnostico.csv")
 def diagnostico_csv(faixa: str = "", por: str = "", chave: str = "", q: str = "", ate: str = "",
+                    por2: str = "", chave2: str = "",
                     dias_sem_giro: int = diagnostico.DIAS_SEM_GIRO_PADRAO):
     from fastapi.responses import StreamingResponse
 
     df = pd.DataFrame(diagnostico.itens(_diag(dias_sem_giro, ate), faixa=faixa, por=por,
-                                        chave=chave, busca=q, limite=1_000_000))
+                                        chave=chave, busca=q, limite=1_000_000,
+                                        por2=por2, chave2=chave2))
 
     def gerar():
         yield "﻿"                     # BOM: o Excel abre acentos certo
